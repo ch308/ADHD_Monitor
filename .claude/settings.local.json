@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__ide__getDiagnostics",
+      "Bash(flutter pub *)",
+      "Bash(adb devices *)",
+      "WebSearch",
+      "WebFetch(domain:codeberg.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(flutter devices *)",
+      "Bash(ssh *)",
+      "Bash(C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe *)",
+      "Bash(cmd *)",
+      "WebFetch(domain:124.223.53.33)"
+    ]
+  }
+}

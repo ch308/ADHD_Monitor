@@ -1,0 +1,470 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+import 'weekly_report_page.dart';
+
+/// 今日记录次数、AI 建议列表、建议前后心率粗对比（价值呈现页）
+class FootprintPage extends StatefulWidget {
+  const FootprintPage({
+    super.key,
+    required this.serverIp,
+    required this.headers,
+  });
+
+  final String serverIp;
+  final Map<String, String> headers;
+
+  @override
+  State<FootprintPage> createState() => _FootprintPageState();
+}
+
+class _FootprintPageState extends State<FootprintPage> {
+  bool _loading = true;
+  String? _error;
+  Map<String, dynamic>? _payload;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    if (!mounted) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.serverIp}:11760/footprint/today'),
+        headers: widget.headers,
+      );
+      if (!mounted) return;
+      if (response.statusCode != 200) {
+        setState(() {
+          _error = '加载失败（${response.statusCode}）';
+          _loading = false;
+        });
+        return;
+      }
+      final decoded = json.decode(response.body);
+      if (decoded is! Map) {
+        setState(() {
+          _error = '数据格式异常';
+          _loading = false;
+        });
+        return;
+      }
+      setState(() {
+        _payload = Map<String, dynamic>.from(decoded);
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  Color _trendColor(String code) {
+    switch (code) {
+      case 'improving':
+        return Colors.green.shade700;
+      case 'worsen':
+        return Colors.deepOrange.shade700;
+      case 'steady':
+        return Colors.blueGrey.shade600;
+      default:
+        return Colors.grey.shade600;
+    }
+  }
+
+  String _trendChipLabel(String code) {
+    switch (code) {
+      case 'improving':
+        return '建议后缓和';
+      case 'worsen':
+        return '仍偏高';
+      case 'steady':
+        return '相对平稳';
+      default:
+        return '待观察';
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('历史足迹',
+            style: TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF3949AB), Color(0xFF5C6BC0)],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 8,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+        ),
+        foregroundColor: Colors.white,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.auto_stories_outlined),
+            tooltip: 'AI 周报',
+            onPressed: () {
+              Navigator.of(context).push<void>(
+                MaterialPageRoute<void>(
+                  builder: (_) => WeeklyReportPage(
+                    serverIp: widget.serverIp,
+                    headers: widget.headers,
+                  ),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loading ? null : _load,
+            tooltip: '刷新',
+          ),
+        ],
+      ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!, textAlign: TextAlign.center),
+                        const SizedBox(height: 16),
+                        FilledButton(
+                          onPressed: _load,
+                          child: const Text('重试'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: _buildBody(),
+                ),
+    );
+  }
+
+  Widget _buildBody() {
+    final p = _payload!;
+    final date = p['date']?.toString() ?? '';
+    final count = (p['log_count'] is int)
+        ? p['log_count'] as int
+        : int.tryParse('${p['log_count']}') ?? 0;
+    final summary = p['trend_summary'];
+    final logs = p['logs'];
+
+    if (count == 0 || logs is! List || logs.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(24),
+        children: [
+          Card(
+            elevation: 2,
+            shadowColor: Colors.black12,
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(Icons.today_rounded,
+                          color: Colors.indigo.shade300, size: 22),
+                      const SizedBox(width: 8),
+                      Text(
+                        date.isEmpty ? '今日' : date,
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    '今天还没有行为记录。\n在首页心率报警时，使用「多动症 / 自闭症」入口记录一次，即可在这里看到 AI 建议与建议后的心率变化提示。',
+                    style: TextStyle(
+                        color: Colors.grey.shade600, height: 1.5),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    int s(String k) {
+      if (summary is! Map) return 0;
+      final v = summary[k];
+      if (v is int) return v;
+      return int.tryParse('$v') ?? 0;
+    }
+
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+      children: [
+        Card(
+          elevation: 2,
+          shadowColor: Colors.black12,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          color: Colors.indigo.shade50,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.date_range_rounded,
+                        color: Colors.indigo.shade400, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      '$date · 今日记录',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.indigo.shade800,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  '共 $count 次行为观察',
+                  style: TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.indigo.shade900),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _SummaryChip(
+                      label: '建议后缓和',
+                      value: s('improving'),
+                      color: Colors.green,
+                    ),
+                    _SummaryChip(
+                      label: '相对平稳',
+                      value: s('steady'),
+                      color: Colors.blueGrey,
+                    ),
+                    _SummaryChip(
+                      label: '仍偏高',
+                      value: s('worsen'),
+                      color: Colors.deepOrange,
+                    ),
+                    _SummaryChip(
+                      label: '采样不足',
+                      value: s('unknown'),
+                      color: Colors.grey,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '说明：对比每条记录「提交前 15 分钟」与「提交后 20 分钟」内心率均值（需设备持续上报心率）。',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600, height: 1.35),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          '记录与 AI 建议',
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+        ),
+        const SizedBox(height: 8),
+        ...logs.map<Widget>((raw) {
+          final item = raw is Map ? Map<String, dynamic>.from(raw) : {};
+          final time = item['time']?.toString() ?? '';
+          final label = item['condition_label']?.toString() ?? '';
+          final obs = item['observation']?.toString() ?? '';
+          final advice = item['ai_advice']?.toString() ?? '';
+          final trend = item['trend_after']?.toString() ?? 'unknown';
+          final trendText = item['trend_label']?.toString() ?? '';
+          final bpm = item['bpm'];
+          final avgB = item['avg_bpm_before'];
+          final avgA = item['avg_bpm_after'];
+
+          return Card(
+            margin: const EdgeInsets.only(bottom: 12),
+            elevation: 1.5,
+            shadowColor: Colors.black12,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14)),
+            clipBehavior: Clip.antiAlias,
+            child: IntrinsicHeight(
+              child: Row(
+                children: [
+                  Container(
+                    width: 4,
+                    color: label.contains('自闭')
+                        ? Colors.teal.shade400
+                        : Colors.orange.shade400,
+                  ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                time,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: label.contains('自闭')
+                                      ? Colors.teal.shade50
+                                      : Colors.orange.shade50,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  label,
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                      color: label.contains('自闭')
+                                          ? Colors.teal.shade700
+                                          : Colors.orange.shade700),
+                                ),
+                              ),
+                              const Spacer(),
+                              Chip(
+                                label: Text(_trendChipLabel(trend)),
+                                backgroundColor:
+                                    _trendColor(trend).withValues(alpha: 0.1),
+                                side: BorderSide(
+                                    color: _trendColor(trend)
+                                        .withValues(alpha: 0.4)),
+                                labelStyle: TextStyle(
+                                  color: _trendColor(trend),
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11,
+                                ),
+                                padding: EdgeInsets.zero,
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ],
+                          ),
+                          if (bpm != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                '记录时心率：$bpm BPM'
+                                '${avgB != null && avgA != null ? '  （前均 $avgB → 后均 $avgA）' : ''}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                            ),
+                          const SizedBox(height: 8),
+                          Text('观察：$obs',
+                              style: const TextStyle(fontSize: 14)),
+                          const SizedBox(height: 6),
+                          Text(
+                            'AI 建议：$advice',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.indigo.shade800,
+                            ),
+                          ),
+                          if (trendText.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              trendText,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey.shade700,
+                                height: 1.35,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+}
+
+class _SummaryChip extends StatelessWidget {
+  const _SummaryChip({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final String label;
+  final int value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(
+      avatar: CircleAvatar(
+        backgroundColor: color,
+        child: Text(
+          '$value',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      label: Text(label),
+    );
+  }
+}

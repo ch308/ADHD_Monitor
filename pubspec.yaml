@@ -1,0 +1,27 @@
+name: adhd_project
+description: ADHD / 自闭症谱系家庭心率与感官辅助工具
+publish_to: "none"
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_blue_plus: ^1.32.12
+  permission_handler: ^11.3.1
+  encrypt: ^5.0.3 
+  http: ^1.2.2
+  vibration: ^2.0.0
+  flutter_tts: ^4.2.0
+  fl_chart: ^0.69.0
+  just_audio: ^0.9.40
+  shared_preferences: ^2.3.3
+  flutter_foreground_task: ^7.5.2
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/audio/432Hz/
+    - assets/audio/528Hz/
