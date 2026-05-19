@@ -7,8 +7,9 @@ import time
 import hashlib
 import hmac
 import secrets
+from collections import deque
 from datetime import datetime, timedelta
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from openai import OpenAI
 
@@ -176,6 +177,22 @@ def init_db():
             child_id INTEGER NOT NULL,
             bound_by_user_id INTEGER NOT NULL,
             created_at TEXT NOT NULL,
+            FOREIGN KEY (child_id) REFERENCES children(id),
+            FOREIGN KEY (bound_by_user_id) REFERENCES users(id)
+        )
+        """
+    )
+    # ESP32-S3 灯环设备：device_id 由 efuse MAC 派生（Wireless_GetDeviceId）
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS esp32_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL UNIQUE,
+            kind TEXT,
+            child_id INTEGER,
+            bound_by_user_id INTEGER,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
             FOREIGN KEY (child_id) REFERENCES children(id),
             FOREIGN KEY (bound_by_user_id) REFERENCES users(id)
         )
@@ -1401,7 +1418,304 @@ def device_unbind():
     }), 200
 
 
+# ── ESP32-S3 设备：announce + 绑定 + 长轮询命令通道 ──
+#
+# 设计原则：
+#   1. ESP32 上电先调 POST /device/esp32/announce 报上 device_id（无需登录），
+#      服务器在 esp32_devices 表登记，便于 App 端选择并绑定到孩子。
+#   2. 已登录 App 调 POST /device/esp32/bind 把 device_id 绑到 child_id 上。
+#      之后只有"对该 child_id 有权限"的用户能通过 POST /device/<id>/cmd
+#      推命令到这块 ESP32。
+#   3. ESP32 长轮询 GET /device/<id>/cmd?wait=N：服务器在 _esp32_cmd_lock 上
+#      等待，最多 N 秒；一旦有命令进 _esp32_cmd_queue[device_id] 立刻返回。
+#      没有命令则返回 204 No Content，ESP32 立刻发下一轮。
+
+_esp32_cmd_lock = threading.Condition()
+# device_id -> deque[dict]
+_esp32_cmd_queue: "dict[str, deque]" = {}
+_ESP32_DEVICE_ID_RE = re.compile(r"^[A-F0-9]{4,32}$")
+
+
+def _now_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _normalize_device_id(raw: str) -> str:
+    return (raw or "").strip().upper()
+
+
+def _touch_esp32_device(device_id: str, kind: str | None) -> None:
+    """登记/更新 esp32_devices 行，不做权限校验（announce 阶段允许匿名）。"""
+    now = _now_str()
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id FROM esp32_devices WHERE device_id = ?",
+        (device_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute(
+            """
+            INSERT INTO esp32_devices (device_id, kind, first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (device_id, (kind or "").strip() or None, now, now),
+        )
+    else:
+        cursor.execute(
+            "UPDATE esp32_devices SET last_seen_at = ?, kind = COALESCE(NULLIF(?, ''), kind) WHERE id = ?",
+            (now, (kind or "").strip(), row[0]),
+        )
+    conn.commit()
+    conn.close()
+
+
+def _get_esp32_device(device_id: str):
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT device_id, kind, child_id, bound_by_user_id, first_seen_at, last_seen_at
+        FROM esp32_devices WHERE device_id = ?
+        """,
+        (device_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return {
+        "device_id": row[0],
+        "kind": row[1],
+        "child_id": row[2],
+        "bound_by_user_id": row[3],
+        "first_seen_at": row[4],
+        "last_seen_at": row[5],
+    }
+
+
+@app.route("/device/esp32/announce", methods=["POST"])
+def esp32_announce():
+    """ESP32 上电时调用。无需登录。"""
+    data = request.json or {}
+    device_id = _normalize_device_id(data.get("device_id") or "")
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+    _touch_esp32_device(device_id, data.get("kind"))
+    return jsonify({"status": "ok", "device_id": device_id}), 200
+
+
+@app.route("/device/esp32/list", methods=["GET"])
+def esp32_list():
+    """App 端用：列出当前用户名下任一孩子绑定的 ESP32；同时返回未绑定的（用户可以认领）。"""
+    user = _get_request_user()
+    if user is None:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT e.device_id, e.kind, e.child_id, c.nickname, e.first_seen_at, e.last_seen_at
+        FROM esp32_devices e
+        LEFT JOIN children c ON c.id = e.child_id
+        WHERE e.child_id IS NULL
+           OR e.child_id IN (SELECT child_id FROM child_members WHERE user_id = ?)
+        ORDER BY e.last_seen_at DESC
+        """,
+        (user["id"],),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    out = [
+        {
+            "device_id": r[0],
+            "kind": r[1],
+            "child_id": r[2],
+            "child_nickname": r[3],
+            "first_seen_at": r[4],
+            "last_seen_at": r[5],
+        }
+        for r in rows
+    ]
+    return jsonify({"devices": out}), 200
+
+
+@app.route("/device/esp32/bind", methods=["POST"])
+def esp32_bind():
+    """把 device_id 绑到指定 child_id；登录 + 该 child 的成员才能调。"""
+    user = _get_request_user()
+    if user is None:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    device_id = _normalize_device_id(data.get("device_id") or "")
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+    try:
+        child_id = max(1, int(data.get("child_id") or 0))
+    except (TypeError, ValueError):
+        return jsonify({"status": "error", "message": "invalid child_id"}), 400
+    if child_id <= 0:
+        return jsonify({"status": "error", "message": "child_id required"}), 400
+
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden for this child"}), 403
+
+    now = _now_str()
+    cursor.execute("SELECT id FROM esp32_devices WHERE device_id = ?", (device_id,))
+    row = cursor.fetchone()
+    if row is None:
+        cursor.execute(
+            """
+            INSERT INTO esp32_devices
+                (device_id, kind, child_id, bound_by_user_id, first_seen_at, last_seen_at)
+            VALUES (?, NULL, ?, ?, ?, ?)
+            """,
+            (device_id, child_id, user["id"], now, now),
+        )
+    else:
+        cursor.execute(
+            "UPDATE esp32_devices SET child_id = ?, bound_by_user_id = ?, last_seen_at = ? WHERE id = ?",
+            (child_id, user["id"], now, row[0]),
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "device_id": device_id, "child_id": child_id}), 200
+
+
+@app.route("/device/esp32/unbind", methods=["POST"])
+def esp32_unbind():
+    user = _get_request_user()
+    if user is None:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    device_id = _normalize_device_id(data.get("device_id") or "")
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+    info = _get_esp32_device(device_id)
+    if info is None or info["child_id"] is None:
+        return jsonify({"status": "ok", "device_id": device_id}), 200
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], info["child_id"]):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden for this child"}), 403
+    cursor.execute(
+        "UPDATE esp32_devices SET child_id = NULL, bound_by_user_id = NULL WHERE device_id = ?",
+        (device_id,),
+    )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "device_id": device_id}), 200
+
+
+# 允许 ESP32 端推送的命令白名单（其它会被拒，避免恶意/误用）
+# reset_provisioning：让板子清掉 NVS 中的 WiFi 凭据并重启进入 BLE 配网模式，
+# 用于"换 WiFi / 把灯环送给别人 / 想重新走配网流程"等场景。
+_ESP32_ALLOWED_ACTIONS = {
+    "breathing_start", "breathing_stop",
+    "countdown_start", "countdown_stop",
+    "all_off",
+    "reset_provisioning",
+}
+
+
+def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
+    if action not in _ESP32_ALLOWED_ACTIONS:
+        return False, f"action '{action}' not allowed"
+    if action == "breathing_start":
+        cm = payload.get("cycle_ms", 8000)
+        try:
+            cm = int(cm)
+        except (TypeError, ValueError):
+            return False, "cycle_ms must be int"
+        if not 1200 <= cm <= 30000:
+            return False, "cycle_ms out of range (1200..30000)"
+        payload["cycle_ms"] = cm
+    if action == "countdown_start":
+        tm = payload.get("total_ms", 10000)
+        try:
+            tm = int(tm)
+        except (TypeError, ValueError):
+            return False, "total_ms must be int"
+        if not 1000 <= tm <= 600000:
+            return False, "total_ms out of range (1000..600000)"
+        payload["total_ms"] = tm
+    return True, ""
+
+
+@app.route("/device/<device_id>/cmd", methods=["GET", "POST"])
+def esp32_cmd(device_id: str):
+    device_id = _normalize_device_id(device_id)
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+
+    # 推命令（来自 Flutter App）
+    if request.method == "POST":
+        user = _get_request_user()
+        if user is None:
+            return jsonify({"status": "error", "message": "unauthorized"}), 401
+        info = _get_esp32_device(device_id)
+        if info is None:
+            return jsonify({"status": "error", "message": "device unknown"}), 404
+        if info["child_id"] is None:
+            return jsonify({"status": "error", "message": "device not bound"}), 409
+        conn = sqlite3.connect("adhd_data.db")
+        cursor = conn.cursor()
+        if not _user_can_access_child(cursor, user["id"], info["child_id"]):
+            conn.close()
+            return jsonify({"status": "error", "message": "forbidden"}), 403
+        conn.close()
+
+        data = request.json or {}
+        action = (data.get("action") or "").strip()
+        payload = {k: v for k, v in data.items() if k != "action"}
+        ok, err = _validate_cmd_payload(action, payload)
+        if not ok:
+            return jsonify({"status": "error", "message": err}), 400
+
+        cmd_obj = {"action": action}
+        cmd_obj.update(payload)
+        with _esp32_cmd_lock:
+            q = _esp32_cmd_queue.setdefault(device_id, deque())
+            q.append(cmd_obj)
+            _esp32_cmd_lock.notify_all()
+        return jsonify({"status": "ok", "queued": cmd_obj}), 200
+
+    # 拉命令（来自 ESP32 长轮询）—— 不需要登录，凭 device_id 路由
+    _touch_esp32_device(device_id, None)
+    try:
+        wait_s = float(request.args.get("wait") or 25)
+    except ValueError:
+        wait_s = 25.0
+    wait_s = max(0.0, min(wait_s, 60.0))
+    deadline = time.monotonic() + wait_s
+
+    with _esp32_cmd_lock:
+        while True:
+            q = _esp32_cmd_queue.get(device_id)
+            if q:
+                # 拿出所有积压命令一起发，ESP32 端按顺序执行
+                batch = list(q)
+                q.clear()
+                if not batch:
+                    payload = {"cmds": []}
+                elif len(batch) == 1:
+                    payload = batch[0]
+                else:
+                    payload = {"cmds": batch}
+                return jsonify(payload), 200
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                # 204 No Content：ESP32 立刻发下一轮
+                return Response(status=204)
+            _esp32_cmd_lock.wait(timeout=remaining)
+
+
 if __name__ == '__main__':
     _start_weekly_scheduler_thread()
     # 绑定 0.0.0.0 确保外网可访问，端口使用你已开放的 11760
-    app.run(host='0.0.0.0', port=11760, debug=False)
+    app.run(host='0.0.0.0', port=11760, debug=False, threaded=True)

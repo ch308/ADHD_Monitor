@@ -10,6 +10,9 @@ class SessionStore {
 
   /// 当前孩子绑定的手环 MAC 地址前缀
   static const _kBoundMacPrefix = 'bound_mac_';
+
+  /// 当前孩子绑定的 ESP32 device_id 前缀（device_id 由 ESP32 efuse MAC 派生）
+  static const _kBoundEsp32Prefix = 'bound_esp32_';
   static const String defaultServerHost = '124.223.53.33';
 
   static Future<String?> getToken() async {
@@ -52,6 +55,24 @@ class SessionStore {
   static Future<void> removeBoundMac(int childId) async {
     final p = await SharedPreferences.getInstance();
     await p.remove('$_kBoundMacPrefix$childId');
+  }
+
+  /// 获取指定孩子绑定的 ESP32 device_id（null 表示未绑定）
+  static Future<String?> getBoundEsp32(int childId) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString('$_kBoundEsp32Prefix$childId');
+  }
+
+  /// 保存孩子与 ESP32 的绑定关系
+  static Future<void> saveBoundEsp32(int childId, String deviceId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('$_kBoundEsp32Prefix$childId', deviceId.toUpperCase());
+  }
+
+  /// 删除孩子的 ESP32 绑定
+  static Future<void> removeBoundEsp32(int childId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove('$_kBoundEsp32Prefix$childId');
   }
 
   static Future<void> clear() async {
