@@ -18,6 +18,7 @@ import '../services/miband_service.dart';
 import '../services/session_store.dart';
 import '../services/stress_calculator.dart';
 import 'breathing_ball_page.dart';
+import 'esp_provision_page.dart';
 import 'footprint_page.dart';
 import 'weekly_report_page.dart';
 
@@ -123,6 +124,15 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   bool _bindingCheckInProgress = false;
   bool _bindingActionInProgress = false;
 
+  /// 当前孩子已绑定的 ESP32-S3 灯环 device_id（null=未绑定/未配网）
+  String? _boundEsp32DeviceId;
+
+  /// 手环 stress 触发"还在焦虑中"的阈值（小米手环 stress 0-100）
+  static const int _stressAlertThreshold = 60;
+
+  /// 防止 stress 值在阈值附近抖动反复触发：当前是否已经因 stress 触发过
+  bool _stressAlertTriggered = false;
+
   Map<String, String> _apiHeaders({bool jsonBody = true}) {
     final h = <String, String>{'X-Child-Id': '${widget.activeChildId}'};
     if (jsonBody) {
@@ -185,6 +195,16 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     _bindMiBandRealtimeStreams();
     // Android 前台服务初始化（息屏后保持手环 BLE）
     unawaited(_initForegroundService());
+    // 从本地缓存恢复"当前孩子绑定的 ESP32"
+    unawaited(_restoreBoundEsp32());
+  }
+
+  Future<void> _restoreBoundEsp32() async {
+    final id = await SessionStore.getBoundEsp32(widget.activeChildId);
+    if (!mounted) return;
+    if (id != null && id.isNotEmpty) {
+      setState(() => _boundEsp32DeviceId = id);
+    }
   }
 
   void _bindMiBandRealtimeStreams() {
@@ -198,7 +218,43 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         stressValue = sample.value;
         stressUpdatedAt = sample.timestamp;
       });
+      _maybeTriggerStressAlert(sample.value);
     });
+  }
+
+  /// 手环 stress 高于阈值时触发"还在焦虑中"流程（与 bpm 报警共用同一套 UI 与定时器）。
+  /// 一次冒泡只触发一次，回落到阈值以下 5 点才允许下次触发，避免抖动。
+  void _maybeTriggerStressAlert(int stress) {
+    if (stress < _stressAlertThreshold - 5 && _stressAlertTriggered) {
+      _stressAlertTriggered = false;
+      return;
+    }
+    if (stress < _stressAlertThreshold) return;
+    if (_stressAlertTriggered) return;
+    if (isAlerting || _flowInProgress) return;
+    if (_rearmSuppressedUntil != null &&
+        DateTime.now().isBefore(_rearmSuppressedUntil!) &&
+        !_sawNoAlertSinceDismiss) {
+      return;
+    }
+    _stressAlertTriggered = true;
+    setState(() {
+      isAlerting = true;
+      alertStartTime = DateTime.now();
+      isDismissed = false;
+      _flowInProgress = false;
+      _selectedConditionType = null;
+      _selectedConditionLabel = null;
+      _recordSubmitting = false;
+      _kimiAdvice = null;
+      _kimiAdviceLabel = null;
+      _rearmSuppressedUntil = null;
+      _sawNoAlertSinceDismiss = true;
+      vibrationTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+        _alarmPulseTick();
+      });
+    });
+    debugPrint('Stress=$stress >= $_stressAlertThreshold → alert');
   }
 
   /// 手环 BLE notify 一到就直接刷新 UI 和趋势图。
@@ -597,6 +653,16 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     if (mounted && isAlerting) {
       setState(() => message = _resolveStatusMessage());
     }
+
+    // 进入正念呼吸：通知 ESP32 灯环开始呼吸灯效（与 UI 呼吸球同步周期）
+    final esp = _boundEsp32DeviceId;
+    if (esp != null && esp.isNotEmpty) {
+      unawaited(_cloudService.triggerEsp32BreathingStart(
+        esp,
+        cyclePeriod: const Duration(milliseconds: 8000),
+      ));
+    }
+
     try {
       await Navigator.of(context).push<void>(
         PageRouteBuilder<void>(
@@ -614,6 +680,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
     } finally {
       _breathingPageVisible = false;
+      // 用户从呼吸页返回/取消：通知 ESP32 灯环停止
+      if (esp != null && esp.isNotEmpty) {
+        unawaited(_cloudService.triggerEsp32BreathingStop(esp));
+      }
       if (mounted) {
         setState(() => message = _resolveStatusMessage());
       }
@@ -624,6 +694,86 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         _alarmPulseTick();
       });
     }
+  }
+
+  /// 入口：跳转到 ESP32 BLE 配网页面；返回带 device_id 时立刻更新本地绑定。
+  Future<void> _openEspProvisionPage() async {
+    final id = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (ctx) => EspProvisionPage(
+          cloudService: _cloudService,
+          activeChildId: widget.activeChildId,
+          currentBoundDeviceId: _boundEsp32DeviceId,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (id != null && id.isNotEmpty) {
+      setState(() => _boundEsp32DeviceId = id);
+    }
+  }
+
+  /// 让当前绑定的 ESP32 灯环清空 WiFi 凭据并重启进入 BLE 配网模式。
+  ///
+  /// 适用场景：换路由器 / 换 WiFi 密码 / 想把灯环搬到别的网络。
+  /// 注意：device_id 来自 efuse MAC 不会变，服务器端绑定关系会保留，
+  /// 所以重新配网完成后无需再走"绑定到孩子"流程。
+  Future<void> _resetEsp32Provisioning() async {
+    final deviceId = _boundEsp32DeviceId;
+    if (deviceId == null || deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前孩子还没有绑定 ESP32 灯环，无法发起远程重新配网。'
+              '请先用"配网 ESP32 灯环"完成首次配网。'),
+        ),
+      );
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('让灯环重新配网？'),
+        content: Text(
+          '将向灯环 $deviceId 下发重启指令：\n'
+          '• 板子会清掉当前 WiFi 凭据并重启；\n'
+          '• 重启后会广播 ADHD_$deviceId，等待手机 BLE 配网；\n'
+          '• 服务器端绑定不变，配网完成后会自动重新上线。\n\n'
+          '确认继续吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('确认重启灯环'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final pushed = await _cloudService.triggerEsp32ResetProvisioning(deviceId);
+    if (!mounted) return;
+    if (!pushed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('远程重启命令下发失败：灯环当前可能离线。'
+              '可以长按板子 BOOT 键 5 秒进入物理重置流程。'),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已下发重启命令，灯环将在数秒内广播 ADHD_$deviceId，'
+            '请点击右上角"配网 ESP32 灯环"完成 BLE 配网。'),
+        duration: const Duration(seconds: 6),
+      ),
+    );
   }
 
   Future<void> fetchHistory() async {
@@ -1218,10 +1368,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'logout') widget.onLogout?.call();
               if (v == 'invite') await _showInviteMemberDialog();
               if (v == 'switch') await _showSwitchChildDialog();
+              if (v == 'esp_prov') await _openEspProvisionPage();
+              if (v == 'esp_reset') await _resetEsp32Provisioning();
             },
             itemBuilder: (ctx) => const [
               PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
               PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
+              PopupMenuItem(value: 'esp_prov', child: Text('配网 ESP32 灯环')),
+              PopupMenuItem(value: 'esp_reset', child: Text('让灯环重新配网')),
               PopupMenuDivider(),
               PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],

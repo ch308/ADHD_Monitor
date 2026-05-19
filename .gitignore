@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ESP-IDF (ESP32-S3-LCD-1.47B) 本地构建产物 / 编辑器配置，不入库
+ESP32-S3-LCD-1.47B/build/
+ESP32-S3-LCD-1.47B/.vscode/
+ESP32-S3-LCD-1.47B/managed_components/
+ESP32-S3-LCD-1.47B/sdkconfig.old
+ESP32-S3-LCD-1.47B/dependencies.lock

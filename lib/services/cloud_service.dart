@@ -140,6 +140,132 @@ class CloudService {
     }
   }
 
+  // ── ESP32-S3 LCD 灯环：远程开关呼吸灯 / 倒计时灯 ──
+
+  /// 列出当前用户能看到的 ESP32 设备（已绑定到我名下的孩子 + 尚未绑定的）。
+  /// 每项是 `{device_id, kind, child_id, child_nickname, first_seen_at, last_seen_at}`。
+  Future<List<Map<String, dynamic>>> fetchEsp32List() async {
+    try {
+      final r = await http
+          .get(
+            Uri.parse('${_base()}/device/esp32/list'),
+            headers: _authHeaders(jsonBody: false),
+          )
+          .timeout(timeout);
+      if (r.statusCode == 200) {
+        final data = json.decode(r.body) as Map<String, dynamic>;
+        final list = (data['devices'] as List?) ?? const [];
+        return list.cast<Map<String, dynamic>>();
+      }
+      debugPrint('CloudService: esp32 list failed ${r.statusCode}: ${r.body}');
+      return const [];
+    } catch (e) {
+      debugPrint('CloudService: esp32 list error $e');
+      return const [];
+    }
+  }
+
+  /// 把 ESP32 device_id 绑到指定孩子。需要登录 + 是该孩子的成员。
+  Future<bool> bindEsp32(String deviceId, int childIdToBind) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/device/esp32/bind'),
+            headers: _authHeaders(),
+            body: json.encode({
+              'device_id': deviceId.toUpperCase(),
+              'child_id': childIdToBind,
+            }),
+          )
+          .timeout(timeout);
+      if (r.statusCode >= 200 && r.statusCode < 300) {
+        debugPrint('CloudService: bound esp32 $deviceId → child $childIdToBind');
+        return true;
+      }
+      debugPrint('CloudService: bind esp32 failed ${r.statusCode}: ${r.body}');
+      return false;
+    } catch (e) {
+      debugPrint('CloudService: bind esp32 error $e');
+      return false;
+    }
+  }
+
+  /// 解绑 ESP32。
+  Future<bool> unbindEsp32(String deviceId) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/device/esp32/unbind'),
+            headers: _authHeaders(),
+            body: json.encode({'device_id': deviceId.toUpperCase()}),
+          )
+          .timeout(timeout);
+      return r.statusCode >= 200 && r.statusCode < 300;
+    } catch (e) {
+      debugPrint('CloudService: unbind esp32 error $e');
+      return false;
+    }
+  }
+
+  /// 推一条命令给 ESP32。服务器收下后塞进它的长轮询队列，板子<100ms 内收到。
+  /// [extra] 透传给 ESP32（cycle_ms / total_ms 等）。
+  Future<bool> sendEsp32Command(
+    String deviceId,
+    String action, {
+    Map<String, dynamic>? extra,
+  }) async {
+    try {
+      final body = <String, dynamic>{'action': action};
+      if (extra != null) body.addAll(extra);
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/device/${deviceId.toUpperCase()}/cmd'),
+            headers: _authHeaders(),
+            body: json.encode(body),
+          )
+          .timeout(timeout);
+      if (r.statusCode >= 200 && r.statusCode < 300) {
+        return true;
+      }
+      debugPrint('CloudService: esp32 cmd failed ${r.statusCode}: ${r.body}');
+      return false;
+    } catch (e) {
+      debugPrint('CloudService: esp32 cmd error $e');
+      return false;
+    }
+  }
+
+  /// 触发 ESP32 进入"正念呼吸"灯效。[cyclePeriod] 与 UI 上呼吸球同步。
+  Future<bool> triggerEsp32BreathingStart(
+    String deviceId, {
+    Duration cyclePeriod = const Duration(milliseconds: 8000),
+  }) {
+    return sendEsp32Command(
+      deviceId,
+      'breathing_start',
+      extra: {'cycle_ms': cyclePeriod.inMilliseconds},
+    );
+  }
+
+  /// 停止 ESP32 呼吸灯（用户从呼吸页返回时调）。
+  Future<bool> triggerEsp32BreathingStop(String deviceId) {
+    return sendEsp32Command(deviceId, 'breathing_stop');
+  }
+
+  /// 让 ESP32 清掉 NVS 中的 WiFi 凭据并重启进入 BLE 配网模式。
+  ///
+  /// 板子收到命令后会：
+  /// 1) 立刻关掉屏 / 灯环；
+  /// 2) `wifi_prov_mgr_reset_provisioning()` 清空 NVS 中的 SSID/PASSWORD；
+  /// 3) `esp_restart()` 重启；
+  /// 4) 重启后没有凭据 → 自动重新打开 BLE 并广播 `ADHD_<DEVID>`。
+  ///
+  /// device_id 来自 efuse MAC，不会变；服务器端的绑定关系会保留，
+  /// 重新配网完成后无需再次扫描绑定。
+  Future<bool> triggerEsp32ResetProvisioning(String deviceId) {
+    return sendEsp32Command(deviceId, 'reset_provisioning');
+  }
+
   /// 解除手环 MAC 的绑定。
   /// [childIdToUnbind] 用于校验只有绑定者才能解绑。
   Future<bool> unbindDevice(String mac, int childIdToUnbind) async {
