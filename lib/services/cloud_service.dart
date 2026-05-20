@@ -239,11 +239,15 @@ class CloudService {
   Future<bool> triggerEsp32BreathingStart(
     String deviceId, {
     Duration cyclePeriod = const Duration(milliseconds: 8000),
+    Duration countdown = const Duration(seconds: 10),
   }) {
     return sendEsp32Command(
       deviceId,
       'breathing_start',
-      extra: {'cycle_ms': cyclePeriod.inMilliseconds},
+      extra: {
+        'cycle_ms': cyclePeriod.inMilliseconds,
+        'countdown_ms': countdown.inMilliseconds,
+      },
     );
   }
 

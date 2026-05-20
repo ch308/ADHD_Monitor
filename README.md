@@ -191,10 +191,10 @@ sequenceDiagram
     App->>App: 显示报警 + 震动 + TTS<br/>(_alarmPulseTick 每 5s)
     User-->>App: 点确认 → 选"引导孩子正念呼吸"
 
-    App->>Cloud: POST /device/<id>/cmd<br/>{action:breathing_start, cycle_ms:8000}
+    App->>Cloud: POST /device/<id>/cmd<br/>{action:breathing_start, cycle_ms:8000, countdown_ms:10000}
     Cloud->>Cloud: notify_all 唤醒长轮询
     Cloud-->>Board: 200 OK<br/>{action:breathing_start,…}
-    Board->>Board: Set_Backlight(60)<br/>RGB_Start_Breathing(8000)
+    Board->>Board: LVGL 全屏呼吸 + Backlight_Example()<br/>RGB_Start_Breathing(8000) + RGB_Start_Countdown(10000)
     App->>App: 进入 BreathingBallPage<br/>(8s in / 8s out 同周期)
 
     Note over App,Board: 用户呼吸中…
@@ -470,16 +470,16 @@ timeout = (wait + 5)s = 30s
 
 | action | 字段 | 行为 |
 | --- | --- | --- |
-| `breathing_start` | `cycle_ms`（1200–30000）<br/>`ttl_ms`（可选，默认 600000） | `Set_Backlight(60)` + `RGB_Start_Breathing(cycle_ms)` + arm watchdog |
-| `breathing_stop` | — | `RGB_Stop_Breathing` + `RGB_Stop_Countdown` + `Set_Backlight(0)` + cancel watchdog |
-| `countdown_start` | `total_ms`（1000–600000） | `Set_Backlight(60)` + `RGB_Start_Countdown(total_ms)` |
+| `breathing_start` | `cycle_ms`（1200–30000）<br/>`countdown_ms`（可选，默认 10000）<br/>`ttl_ms`（可选，默认 600000） | 启动 LVGL 全屏呼吸场景 + `Backlight_Example()` + `RGB_Start_Breathing(cycle_ms)` + `RGB_Start_Countdown(countdown_ms)` + arm watchdog |
+| `breathing_stop` | — | `RGB_Stop_Breathing` + `RGB_Stop_Countdown` + 关闭 LVGL 场景 + `Set_Backlight(0)` + cancel watchdog |
+| `countdown_start` | `total_ms`（1000–600000） | 启动 LVGL 全屏呼吸场景 + `Backlight_Example()` + `RGB_Start_Countdown(total_ms)` |
 | `countdown_stop` | — | `RGB_Stop_Countdown` |
-| `all_off` | — | `RGB_All_Off` + `Set_Backlight(0)` + cancel watchdog |
+| `all_off` | — | `RGB_All_Off` + 关闭 LVGL 场景 + `Set_Backlight(0)` + cancel watchdog |
 | `reset_provisioning` | — | 关屏关灯 + cancel watchdog 后 `Wireless_ResetProvisioning()` → 清 NVS + `esp_restart` |
 
 **呼吸 watchdog**：`breathing_start` 会用 `esp_timer_start_once` 启动一个一次性兜底定时器（默认 10 分钟，
 可通过 `ttl_ms` 字段覆盖）。如果 App 进程被杀 / 手机离线导致 `breathing_stop` 命令永远到不了，
-板子也不会一直亮着——定时器到期会自动 `RGB_All_Off + Set_Backlight(0)`。`breathing_stop` /
+板子也不会一直亮着——定时器到期会自动 `RGB_All_Off + 关闭 LVGL 场景 + Set_Backlight(0)`。`breathing_stop` /
 `all_off` / `reset_provisioning` 都会取消这个定时器。
 
 云端也支持 `{"cmds":[…]}` 数组形式批量下发，板子按顺序执行。
@@ -496,8 +496,8 @@ WS2812 单点（GPIO38），整灯 G 通道整体衰减 70%（实物绿芯偏亮
 - **ST7789T 172×320 SPI**，DMA 双缓冲（每 buf = `H_RES * 20`）。
 - **背光**：LEDC 13-bit @ 4 kHz；两条互斥路径：
   - `Backlight_Example()` → `backlight_breath` 任务，硬件 fade 上下呼吸 ~7 s 一周期；
-  - `Set_Backlight(0–100)` → 关掉呼吸效果，直接设 duty。**云端的 breathing\_start 走的是后者**，因此屏幕只是被简单点亮而不参与呼吸节奏（呼吸节奏由 WS2812 承担）。
-- **黑屏待命**：`app_main` 里调 `Set_Backlight(0)`，所有 LVGL UI 仍在跑（Onboard tab + 琥珀 overlay 动画），只是物理上不可见，省功耗。
+  - `Set_Backlight(0–100)` → 关掉呼吸效果，直接设 duty。
+- **黑屏待命**：`app_main` 里调 `Set_Backlight(0)`，LVGL 渲染循环保持运行但不创建可见场景；云端收到 `breathing_start` 后才创建全屏琥珀呼吸 overlay。
 - **琥珀色全屏 overlay**：动画进行中把 disp refr timer 调到 50 ms（20 fps）省 CPU，结束恢复 30 ms。
 
 ### 4.7 板载传感器
@@ -866,7 +866,7 @@ flutter run    # 真机推荐，模拟器没有 BLE
 2. App 登录 / 注册 / 创建孩子 → 顶栏菜单"配网毛绒球呼吸灯"。
 3. ESP32 板子开机后 BLE 广播 `ADHD_XXXX`，扫到 → 输入家用 WiFi → 看到 "✅ 设备已绑定到当前孩子"。
 4. ESP32 LCD 黑屏待命；服务器日志能看到 `POST /device/esp32/announce` 与持续的 `GET /device/.../cmd` long-poll。
-5. App 点"引导孩子正念呼吸"→ ESP32 屏幕轻亮 + WS2812 进入蓝色呼吸。
+5. App 点"引导孩子正念呼吸"→ ESP32 LCD 进入全屏呼吸 + 背光呼吸，WS2812 同时进入蓝色呼吸与 10 秒倒计时。
 6. 关闭呼吸页 → ESP32 灯灭、屏黑。
 
 ### 8.5 已知限制 & 待办

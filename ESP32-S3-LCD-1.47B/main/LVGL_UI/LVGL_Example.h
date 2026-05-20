@@ -20,4 +20,6 @@ extern size_t Simulated_panel1_Size;
 void Backlight_adjustment_event_cb(lv_event_t * e);
 
 void Lvgl_Example1(void);
+void Lvgl_Mindfulness_Start(void);
+void Lvgl_Mindfulness_Stop(void);
 void LVGL_Backlight_adjustment(uint8_t Backlight);

@@ -2,6 +2,7 @@
 #include "Wireless.h"
 #include "RGB.h"
 #include "ST7789.h"
+#include "LVGL_Example.h"
 
 #include "esp_log.h"
 #include "esp_http_client.h"
@@ -45,6 +46,7 @@ static void breathing_watchdog_cb(void *arg)
     (void)arg;
     ESP_LOGW(TAG, "breathing watchdog fired (stop cmd never arrived) → all_off");
     RGB_All_Off();
+    Lvgl_Mindfulness_Stop();
     Set_Backlight(0);
 }
 
@@ -132,15 +134,23 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         if (cJSON_IsNumber(ttl) && ttl->valueint > 0) {
             ttl_ms = (uint32_t)ttl->valueint;
         }
-        Set_Backlight(60);  /* 命令到了，把屏轻轻点亮一些 */
+        uint32_t countdown_ms = RGB_COUNTDOWN_TOTAL_MS;
+        const cJSON *countdown = cJSON_GetObjectItemCaseSensitive(params, "countdown_ms");
+        if (cJSON_IsNumber(countdown) && countdown->valueint > 0) {
+            countdown_ms = (uint32_t)countdown->valueint;
+        }
+        Lvgl_Mindfulness_Start();
+        Backlight_Example();  /* 恢复 LCD 背光呼吸，而不是只把白屏点亮 */
         RGB_Start_Breathing((uint32_t)cycle_ms);
+        RGB_Start_Countdown(countdown_ms);
         breathing_watchdog_arm(ttl_ms);
-        ESP_LOGI(TAG, "→ breathing_start cycle_ms=%d", cycle_ms);
+        ESP_LOGI(TAG, "→ breathing_start cycle_ms=%d countdown_ms=%u", cycle_ms, (unsigned)countdown_ms);
         return;
     }
     if (strcmp(action, "breathing_stop") == 0) {
         RGB_Stop_Breathing();
         RGB_Stop_Countdown();
+        Lvgl_Mindfulness_Stop();
         Set_Backlight(0);
         breathing_watchdog_cancel();
         ESP_LOGI(TAG, "→ breathing_stop");
@@ -152,7 +162,8 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         if (cJSON_IsNumber(t)) {
             total_ms = t->valueint;
         }
-        Set_Backlight(60);
+        Lvgl_Mindfulness_Start();
+        Backlight_Example();
         RGB_Start_Countdown((uint32_t)total_ms);
         ESP_LOGI(TAG, "→ countdown_start total_ms=%d", total_ms);
         return;
@@ -164,6 +175,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
     }
     if (strcmp(action, "all_off") == 0) {
         RGB_All_Off();
+        Lvgl_Mindfulness_Stop();
         Set_Backlight(0);
         breathing_watchdog_cancel();
         ESP_LOGI(TAG, "→ all_off");
@@ -173,6 +185,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         /* 关掉所有灯/屏，给一点时间把日志冲出 UART，再走 NVS 清空 + 重启路径。
          * Wireless_ResetProvisioning() 内部 esp_restart()，不会返回。 */
         RGB_All_Off();
+        Lvgl_Mindfulness_Stop();
         Set_Backlight(0);
         breathing_watchdog_cancel();
         ESP_LOGW(TAG, "→ reset_provisioning (clear creds & reboot to BLE prov)");
