@@ -50,7 +50,7 @@ flowchart LR
     end
 
     subgraph Device["ESP32-S3 LCD 1.47B"]
-        Wireless[Wireless<br/>wifi_provisioning + STA]
+        Wireless[Wireless<br/>network_provisioning + STA]
         Cloudc[Cloud 长轮询客户端]
         RGB[RGB 呼吸 / 倒计时灯]
         LCDmod[LCD + LVGL + 背光]
@@ -100,7 +100,7 @@ ADHD_Monitor/
 │   │   ├── SD_Card/, I2C_Driver/     # SDMMC + 共享 I²C
 │   │   └── Button_Driver/, Simulated_Gesture/  # BOOT 键 + 仿真触摸
 │   ├── partitions.csv / sdkconfig    # 16 MB Flash, Octal PSRAM
-│   └── idf_component.yml             # 含 wifi_provisioning / led_strip / lvgl 等
+│   └── idf_component.yml             # 含 network_provisioning / led_strip / lvgl 等
 │
 └── server/
     ├── app.py                        # Flask 主程序（路由 + Kimi + 周报调度 + ESP32 长轮询）
@@ -112,7 +112,7 @@ ADHD_Monitor/
 
 - App ↔ 云端：`http://<server>:11760`（默认 `124.223.53.33:11760`，存于 `SessionStore`）。
 - ESP32 ↔ 云端：同 host:port，HTTP 长轮询 `/device/<device_id>/cmd?wait=25`。
-- App ↔ ESP32：仅在**首次配网**时通过 BLE 直连（`wifi_provisioning` 协议）；配网完成后两端走云端中转，**不再依赖局域网可达**。
+- App ↔ ESP32：仅在**首次配网**时通过 BLE 直连（`network_provisioning` 协议，IDF 6.x 重命名自 `wifi_provisioning`）；配网完成后两端走云端中转，**不再依赖局域网可达**。
 - 手机 ↔ 小米手环：BLE GATT（FEE1 + 标准 180D HR 服务）。
 
 ---
@@ -315,7 +315,7 @@ flowchart TB
 #### EspProvisionService — BLE 配网客户端
 
 - 用 `flutter_blue_plus` 扫名以 `ADHD_` 开头的设备，按 RSSI 排序。
-- 手写最小 protobuf 编码，按 `wifi_provisioning` 字段号实现：
+- 手写最小 protobuf 编码，按 `network_provisioning`（IDF 6.x 改名前叫 `wifi_provisioning`，proto 文件兼容）字段号实现：
   - SessionData(sec0) 握手；
   - WiFiConfigPayload(`CmdSetConfig{ssid, passphrase}`)；
   - WiFiConfigPayload(`CmdApplyConfig{}`）；
@@ -388,8 +388,11 @@ flowchart TB
 ### 4.3 Wireless：配网 + STA
 
 - **device\_id** = efuse Wi-Fi MAC 后 4 字节的 8 位 Hex（如 `A1B2C3D4`），作为 BLE 广播名 `ADHD_A1B2C3D4` 和云端 device 主键。
-- **第一次开机**：`wifi_prov_mgr_is_provisioned() == false` → 起 BLE provisioning（security 0，无 PoP，自定义 service UUID）；
-  收到 `WIFI_PROV_CRED_RECV` → Manager 自动写 NVS、连 WiFi、emit `WIFI_PROV_END` → `wifi_prov_mgr_deinit` 自动释放 BTDM。
+- **第一次开机**：`network_prov_mgr_is_wifi_provisioned() == false` → 起 BLE provisioning（**security 0**，无 PoP，自定义 service UUID）；
+  收到 `NETWORK_PROV_WIFI_CRED_RECV` → Manager 自动写 NVS、连 WiFi、emit `NETWORK_PROV_END` → `network_prov_mgr_deinit` 自动释放 BTDM。
+  - **IDF 6.x 注意**：`CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0` 默认关闭（IDF 推荐 sec2）。
+    本项目 Flutter 客户端只手写实现了 sec0，所以 sdkconfig 里**显式 enable** 了 sec0；
+    sec2 留着作为编译产物兼容，但不使用。日后如果想升级到 sec2，需要在 Flutter 端实现 SRP6a + PoP 握手。
   释放后整个 BLE 控制器都关掉了，**板子不再广播、手机也再扫不到 `ADHD_xxxxxxxx`**；
   之后 App 与板子全部走云端中转，手机端无需保留任何到板子的 BLE 连接。
 - **二次开机**：Manager 检测到 NVS 已存凭据 → `wifi_prov_mgr_deinit` → 直接 `esp_wifi_start`，**完全不开 BLE**。
@@ -509,11 +512,12 @@ dependencies:
   idf: ">=4.4"
   lvgl/lvgl: "~8.3.0"
   espressif/led_strip: "^2.4.1"
-  espressif/wifi_provisioning: "*"   # IDF 6.x 已经拆成 managed component
+  espressif/network_provisioning: "^1.2.1"   # IDF 6.x 改名（原 wifi_provisioning），managed component
 ```
 
 `main/CMakeLists.txt::REQUIRES` 至少要包含：
-`esp_http_client esp_netif esp_wifi esp_event nvs_flash bt protocomm json esp_timer`。
+`esp_http_client esp_netif esp_wifi esp_event nvs_flash bt cjson esp_timer esp_lcd esp_driver_ledc fatfs spi_flash esp_adc sdmmc driver`。
+（IDF 6.x 把 `json` 改名为 `cjson`，`network_provisioning` 内部依赖 `protocomm` 不需要再显式声明。）
 
 `sdkconfig.defaults` 关键项：
 
@@ -676,7 +680,8 @@ RespGetStatus     { status=1, sta_state=2, fail_reason=10, connected=11 }
 
 Dart 端只实现 varint + length-delimited 两种 wire-type 的最小编/解码器，
 **完全兼容 Espressif 官方 ESP BLE Provisioning App**——固件那侧用的是官方
-`wifi_provisioning_manager`，只是我们绕过了上层移动 SDK，省掉 protobuf-dart 这种重依赖。
+`network_provisioning_manager`（IDF 6.x 重命名前为 `wifi_provisioning_manager`，proto 协议不变），
+只是我们绕过了上层移动 SDK，省掉 protobuf-dart 这种重依赖。
 
 ### 6.4 长轮询命令通道（< 100 ms 唤醒）
 
@@ -840,7 +845,9 @@ flutter run    # 真机推荐，模拟器没有 BLE
 ### 8.5 已知限制 & 待办
 
 - 安卓系统不允许程序读取手机当前 WiFi 密码，配网页面**必须手动输入**密码。
-- BLE 配网现走 security 0，**未加密**；在不可信环境部署前可升级到 security 1（曲线 25519 + AES-256-CTR）。
+- BLE 配网现走 security 0（**未加密**）。IDF 6.x 默认禁用 sec0、推荐 sec2(SRP6a)；本项目 sdkconfig 显式
+  `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y` 把 sec0 编进固件。在不可信环境部署前需要升级到 sec1
+  （曲线 25519 + AES-256-CTR）或 sec2（SRP6a），相应需要在 Flutter 端实现对应密码学握手。
 - 周报守护线程目前硬编码 `child_id=1`；多孩子家庭需要手动 `POST /weekly_report/generate`。
 - `lib/User.txt` 是历史 logcat 残留，可删。
 - `ecosystem.config.js` 中的 API Key 必须撤销并改用环境变量。

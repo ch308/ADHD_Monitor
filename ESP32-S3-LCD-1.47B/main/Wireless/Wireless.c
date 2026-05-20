@@ -302,8 +302,12 @@ void WIFI_Init(void *arg)
     if (!provisioned) {
         ESP_LOGI(PROV_TAG, "device not provisioned, start BLE provisioning");
         network_prov_scheme_ble_set_service_uuid(s_prov_service_uuid);
+        /* 必须用 SECURITY_0：Flutter 端 esp_provision_service.dart 只手写实现了
+         * sec0 SessionData 协议，sec2 需要 SRP6a/PoP 密码学握手没有对端实现。
+         * SECURITY_0 在 IDF 6.x 默认被关掉，sdkconfig 里强制 enable
+         * CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y。 */
         ESP_ERROR_CHECK(network_prov_mgr_start_provisioning(
-            NETWORK_PROV_SECURITY_2, NULL, s_prov_name, NULL));
+            NETWORK_PROV_SECURITY_0, NULL, s_prov_name, NULL));
         /* 等 provision 完成、manager 自动 deinit 并触发 STA 连接 */
         network_prov_mgr_wait();
     } else {
