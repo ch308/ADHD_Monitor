@@ -104,8 +104,10 @@ ADHD_Monitor/
 │
 └── server/
     ├── app.py                        # Flask 主程序（路由 + Kimi + 周报调度 + ESP32 长轮询）
-    ├── ecosystem.config.js           # PM2 进程描述
-    └── adhd_data.db                  # SQLite 落盘文件
+    ├── ecosystem.config.js           # PM2 进程描述（从仓库外 env 文件注入密钥，见 §8.1）
+    ├── .env.example                  # 环境变量模板（不含真实密钥，可复制到 ~/.config/…）
+    ├── .venv/                        # 建议的 Python venv（本地创建，已 .gitignore）
+    └── adhd_data.db                  # SQLite 落盘（运行期生成，已 .gitignore，不入库）
 ```
 
 ### 1.3 默认网络拓扑
@@ -137,9 +139,9 @@ sequenceDiagram
     App->>Board: WiFiConfigPayload(CmdSetConfig)<br/>ssid + passphrase
     App->>Board: WiFiConfigPayload(CmdApplyConfig)
     Board->>Board: NVS 持久化凭据 → 关 BLE<br/>切 STA → DHCP
-    loop 最多 20s
+    loop 最多约 45s（与 Flutter 端 poll deadline 一致）
         App->>Board: WiFiConfigPayload(CmdGetStatus)
-        Board-->>App: sta_state
+        Board-->>App: sta_state + fail_reason
     end
     Board->>Cloud: POST /device/esp32/announce<br/>{device_id, kind}
     App->>Cloud: POST /device/esp32/bind<br/>{device_id, child_id}
@@ -782,25 +784,48 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
 
 ### 8.1 服务器
 
-1. Python 3.10+，建议 venv。无 `requirements.txt`，按需安装：
+1. **Python 3.10+**，在 `server/` 下建 venv（仓库已忽略 `server/.venv/`，勿提交）：
    ```bash
+   cd server
+   python3 -m venv .venv
+   source .venv/bin/activate   # Windows: .venv\Scripts\activate
    pip install flask flask-cors openai
    ```
-2. 环境变量：
+   无顶层 `requirements.txt`，以上依赖与 `app.py` import 一致即可。
+
+2. **密钥与配置（不要写进仓库）**  
+   - 复制模板：`cp server/.env.example ~/.config/adhd-monitor.env`  
+   - 编辑 `~/.config/adhd-monitor.env`，填入真实 `MOONSHOT_API_KEY` 等；`chmod 600 ~/.config/adhd-monitor.env`。  
+   - `server/ecosystem.config.js` 会读取该文件并注入到 PM2 子进程；也可用环境变量 `ADHD_ENV_FILE` 指向其它路径。  
+   - **请勿**在 `server/.env.example` 中填写真实 key（该文件会随仓库公开）。
+
+   可选环境变量（与 `app.py` 一致）：
    - `MOONSHOT_API_KEY`（必填，Kimi）
    - `MOONSHOT_BASE_URL`（默认 `https://api.moonshot.cn/v1`）
    - `WEEKLY_REPORT_MODEL`（默认 `moonshot-v1-8k`）
    - `WEEKLY_REPORT_SECRET`（可选；设置后 `/weekly_report/generate` 要带 `X-Weekly-Report-Secret`）
    - `DISABLE_WEEKLY_SCHEDULER=1` 可关周报守护线程
    - `CHILD_DISPLAY_NAME`（影响周报里的称呼）
-3. 启动：
-   ```bash
-   python server/app.py
-   # 或 pm2 start server/ecosystem.config.js
-   ```
-4. 默认监听 `0.0.0.0:11760`，请确保腾讯云安全组放行。
 
-> ⚠ `server/ecosystem.config.js` 里硬编码了 Moonshot API Key，**发布前请移除并改读环境变量**。
+3. **开发启动**（改代码后需重启进程，`debug=False` 不会热重载）：
+   ```bash
+   cd server && source .venv/bin/activate
+   set -a && source ~/.config/adhd-monitor.env && set +a   # 载入 KEY=value 行；或手动 export
+   python app.py
+   ```
+
+4. **生产：PM2**（与当前线上一致）：
+   ```bash
+   cd server
+   pm2 startOrRestart ecosystem.config.js
+   pm2 save
+   ```
+   开机自启（一次性）：`sudo env PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin pm2 startup systemd -u $USER --hp $HOME`，按提示执行输出的 `sudo systemctl enable …`，再 `pm2 save`。  
+   日志：`server/app.log`、`server/app.error.log`（由 `ecosystem.config.js` 指定）。
+
+5. 默认监听 `0.0.0.0:11760`，请确保云安全组放行。
+
+6. **Git 推送若遇 HTTP 408 / TLS 断连**（部分 Ubuntu 上 `git-remote-http` 链 GnuTLS）：可尝试 `git config --local http.version HTTP/1.1` 与较大 `http.postBuffer` 后重试。
 
 ### 8.2 ESP32 固件
 
@@ -850,4 +875,4 @@ flutter run    # 真机推荐，模拟器没有 BLE
   （曲线 25519 + AES-256-CTR）或 sec2（SRP6a），相应需要在 Flutter 端实现对应密码学握手。
 - 周报守护线程目前硬编码 `child_id=1`；多孩子家庭需要手动 `POST /weekly_report/generate`。
 - `lib/User.txt` 是历史 logcat 残留，可删。
-- `ecosystem.config.js` 中的 API Key 必须撤销并改用环境变量。
+- Moonshot API Key 仅放在仓库外 `~/.config/adhd-monitor.env`（或 `ADHD_ENV_FILE`）；若 key 曾进入 git 历史或聊天，应在控制台**轮换**并吊销旧 key。
