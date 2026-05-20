@@ -38,6 +38,12 @@ static int s_wifi_retry_num = 0;
 static int s_wifi_backoff_idx = 0;
 /** 退避用的一次性软定时器；周期触发 esp_wifi_connect，给 WiFi 长断恢复留生路。 */
 static esp_timer_handle_t s_reconnect_timer = NULL;
+/** 配网期间 = true。此时 network_prov_mgr 自己驱动 WiFi 状态机和重试计数，
+ * 我们的 wifi_event_handler 不能再调用 esp_wifi_connect()/退避逻辑——
+ * 否则会和 manager 抢 STA 资源，让 manager 永远拿不到稳定的"失败"状态，
+ * Flutter 端就会看到 GetStatus 一直停在 sta_state=Connecting 直到超时。
+ * NETWORK_PROV_END 之后切回 false，handler 重新接管常规重连/退避。 */
+static volatile bool s_prov_active = false;
 
 static void wireless_reconnect_timer_cb(void *arg);
 
@@ -166,6 +172,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             case NETWORK_PROV_START:
                 ESP_LOGI(PROV_TAG, "BLE provisioning started, name=%s", s_prov_name);
                 Wireless_State = WIRELESS_STATE_PROVISIONING;
+                s_prov_active = true;
                 break;
             case NETWORK_PROV_WIFI_CRED_RECV: {
                 wifi_sta_config_t *cfg = (wifi_sta_config_t *)event_data;
@@ -188,6 +195,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             case NETWORK_PROV_END:
                 ESP_LOGI(PROV_TAG, "provisioning ended, releasing manager");
                 network_prov_mgr_deinit();
+                s_prov_active = false;
                 break;
             default:
                 break;
@@ -197,13 +205,27 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         Wireless_State = WIRELESS_STATE_CONNECTING;
-        esp_wifi_connect();
+        /* 配网期 manager 自己会在凭据落地后调 esp_wifi_connect()。 */
+        if (!s_prov_active) {
+            esp_wifi_connect();
+        }
         return;
     }
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         WIFI_Sta_GotIp = false;
         Wireless_State = WIRELESS_STATE_CONNECTING;
+
+        /* 配网期间，network_prov_mgr 拥有 WiFi 状态机：它在内部记数+按 IDF 的
+         * CONFIG_NETWORK_PROV_MGR_MAX_RETRY_CNT 决定何时把状态切到 ConnectionFailed
+         * 并发 NETWORK_PROV_WIFI_CRED_FAIL。这里若再调用 esp_wifi_connect()/启动退避，
+         * 会重置 manager 的内部计数，让 GetStatus 永远报 sta_state=Connecting，
+         * Flutter 端 _pollUntilConnected 只能等到自己 timeout。 */
+        if (s_prov_active) {
+            ESP_LOGD(WIFI_TAG, "STA disconnected during provisioning, deferring to network_prov_mgr");
+            return;
+        }
+
         if (s_wifi_retry_num < WIFI_MAX_RETRY) {
             esp_wifi_connect();
             s_wifi_retry_num++;
