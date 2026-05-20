@@ -31,7 +31,11 @@ static void Lvgl_Loop(void *parameter)
     const uint32_t WAIT_MAX_MS = 100;
     const uint32_t WAIT_MIN_MS = 5;
     while (1) {
-        uint32_t wait_ms = lv_timer_handler();
+        uint32_t wait_ms = WAIT_MAX_MS;
+        if (lvgl_port_lock(WAIT_MAX_MS)) {
+            wait_ms = lv_timer_handler();
+            lvgl_port_unlock();
+        }
         if (wait_ms > WAIT_MAX_MS) {
             wait_ms = WAIT_MAX_MS;
         }

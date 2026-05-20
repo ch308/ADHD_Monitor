@@ -1646,6 +1646,14 @@ def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
         if not 1200 <= cm <= 30000:
             return False, "cycle_ms out of range (1200..30000)"
         payload["cycle_ms"] = cm
+        countdown_ms = payload.get("countdown_ms", 10000)
+        try:
+            countdown_ms = int(countdown_ms)
+        except (TypeError, ValueError):
+            return False, "countdown_ms must be int"
+        if not 1000 <= countdown_ms <= 600000:
+            return False, "countdown_ms out of range (1000..600000)"
+        payload["countdown_ms"] = countdown_ms
     if action == "countdown_start":
         tm = payload.get("total_ms", 10000)
         try:
