@@ -265,8 +265,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     debugPrint('Stress=$stress >= $_stressAlertThreshold → alert');
   }
 
-  void _setStressThreshold(double value) {
-    final next = value.round();
+  void _applyStressThreshold(int next, {bool evaluateCurrent = true}) {
     setState(() {
       _stressAlertThreshold = next;
       if ((stressValue ?? 0) < next - 5) {
@@ -274,6 +273,76 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     });
     unawaited(SessionStore.saveStressThreshold(widget.activeChildId, next));
+
+    if (evaluateCurrent) {
+      final current = stressValue;
+      if (current != null) {
+        _maybeTriggerStressAlert(current);
+      }
+    }
+  }
+
+  Future<void> _showStressThresholdDialog() async {
+    var draft = _stressAlertThreshold.toDouble();
+    final chosen = await showDialog<int>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              title: const Text('设置压力报警阈值'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '当前阈值：${draft.round()}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Slider(
+                    value: draft,
+                    min: 30,
+                    max: 90,
+                    divisions: 12,
+                    label: '${draft.round()}',
+                    onChanged: (v) => setDialogState(() => draft = v),
+                  ),
+                  const Row(
+                    children: [
+                      Text('30', style: TextStyle(fontSize: 11)),
+                      Spacer(),
+                      Text('90', style: TextStyle(fontSize: 11)),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    '压力算法：优先使用小米手环私有 stress 值；拿不到时，基于近 30 个心率样本计算。'
+                    '综合三项：心率相对动态基线的抬升(50%)、近期变异度(25%)、上升趋势(25%)，'
+                    '输出 0-100 分。低于阈值 5 分后才允许下一次触发，避免来回抖动。',
+                    style: TextStyle(fontSize: 12, height: 1.5),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(draft.round()),
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    if (chosen == null || !mounted) return;
+    _applyStressThreshold(chosen);
   }
 
   /// 手环 BLE notify 一到就直接刷新 UI 和趋势图。
@@ -315,6 +384,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         stressUpdatedAt = sample.timestamp;
       }
     });
+    if (calculatedStress != null) {
+      _maybeTriggerStressAlert(calculatedStress);
+    }
   }
 
   String _formatTime(DateTime t) {
@@ -1401,6 +1473,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'switch') await _showSwitchChildDialog();
               if (v == 'band_bind') await _bindCurrentDevice();
               if (v == 'band_unbind') await _unbindCurrentDevice();
+              if (v == 'stress_threshold') await _showStressThresholdDialog();
               if (v == 'esp_prov') await _openEspProvisionPage();
               if (v == 'esp_reset') await _resetEsp32Provisioning();
             },
@@ -1417,6 +1490,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 value: 'band_unbind',
                 enabled: !_bindingActionInProgress,
                 child: const Text('解绑当前小米手环'),
+              ),
+              const PopupMenuItem(
+                value: 'stress_threshold',
+                child: Text('设置压力报警阈值'),
               ),
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
@@ -1571,7 +1648,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   ),
                 ),
                 const SizedBox(height: 8),
-                _buildStressPanel(),
+                _buildStressChip(),
                 const SizedBox(height: 6),
                 Container(
                   padding:
@@ -1743,9 +1820,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
   }
 
-  Widget _buildStressPanel() {
+  Widget _buildStressChip() {
     final value = stressValue;
-    final text = value == null ? '压力值：收集中…' : '压力值：$value';
+    final text = value == null
+        ? '压力值：收集中…'
+        : '压力值：$value · 阈值 $_stressAlertThreshold';
     final color = value == null
         ? Colors.blueGrey
         : value >= _stressAlertThreshold + 20
@@ -1755,93 +1834,36 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 : Colors.green;
     final subtitle = value == null
         ? '正在通过心率变化计算压力值（约需 5 秒数据）'
-        : '更新时间：${stressUpdatedAt != null ? _formatTime(stressUpdatedAt!) : '--'}';
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Card(
-        elevation: 2,
-        shadowColor: Colors.black12,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: color.shade50.withValues(alpha: 0.9),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: color.shade200),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.psychology_alt_outlined,
-                            size: 16, color: color.shade700),
-                        const SizedBox(width: 6),
-                        Text(
-                          text,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: color.shade700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '报警阈值 $_stressAlertThreshold',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black54,
-                    ),
-                  ),
-                ],
+        : '更新时间：${stressUpdatedAt != null ? _formatTime(stressUpdatedAt!) : '--'}\n'
+            '压力算法：优先使用手环 stress；拿不到时按心率基线抬升、变异度、上升趋势估算。\n'
+            '阈值请从右上角菜单「设置压力报警阈值」调整。';
+    return Tooltip(
+      message: subtitle,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.shade50.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: color.shade200),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.psychology_alt_outlined,
+              size: 16,
+              color: color.shade700,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              text,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color.shade700,
               ),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                style: const TextStyle(fontSize: 11, color: Colors.black45),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Text('30',
-                      style: TextStyle(fontSize: 10, color: Colors.black38)),
-                  Expanded(
-                    child: Slider(
-                      value: _stressAlertThreshold.toDouble(),
-                      min: 30,
-                      max: 90,
-                      divisions: 12,
-                      label: '$_stressAlertThreshold',
-                      onChanged: _setStressThreshold,
-                    ),
-                  ),
-                  const Text('90',
-                      style: TextStyle(fontSize: 10, color: Colors.black38)),
-                ],
-              ),
-              const SizedBox(height: 2),
-              const Text(
-                '压力算法：优先使用小米手环私有 stress 值；拿不到时，基于近 30 个心率样本计算。'
-                '综合三项：心率相对动态基线的抬升(50%)、近期变异度(25%)、上升趋势(25%)，'
-                '输出 0-100 分。低于阈值 5 分后才允许下一次触发，避免来回抖动。',
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.45,
-                  color: Colors.black54,
-                ),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

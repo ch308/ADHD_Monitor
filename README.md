@@ -288,7 +288,7 @@ flowchart TB
 | `_healingPlaybackActive` | 432/528 Hz 疗愈音是否在播放 |
 | `_massageStrokeOn` | 轻抚震动是否在循环 |
 | `_rearmSuppressedUntil` | 报警消除后的抑制窗口（默认 45 s 或观察到一次 alert=false 即解除） |
-| `_stressAlertThreshold` / `_stressAlertTriggered` | 可滑动 stress 阈值 / stress 阈值触发去抖标志 |
+| `_stressAlertThreshold` / `_stressAlertTriggered` | 顶栏菜单可滑动 stress 阈值 / stress 阈值触发去抖标志 |
 | `_boundEsp32DeviceId` | 当前 child 绑定的 ESP32 device\_id（从 SessionStore 恢复） |
 
 ### 3.3 触发条件（"还在焦虑中"）
@@ -296,7 +296,7 @@ flowchart TB
 两条独立触发链共用同一组 UI：
 
 1. **服务器 bpm 通道**：`fetchStatus()` 每 3 s 拉 `GET /webhook`，`alert=true` 触发。
-2. **手环 stress 通道**：`_maybeTriggerStressAlert(stress)`，阈值 `_stressAlertThreshold` 默认 60，可在主页 Slider 调整（30-90）：
+2. **手环 stress 通道**：`_maybeTriggerStressAlert(stress)`，阈值 `_stressAlertThreshold` 默认 60，可在顶栏菜单 Slider 调整（30-90）：
    - 阈值按孩子保存到 `SessionStore`，下次打开 App 会恢复；
    - `stress < 阈值-5` 才允许下次触发，避免抖动；
    - 处于 `_flowInProgress` / 抑制窗口时跳过。
@@ -641,7 +641,7 @@ flowchart LR
 - baseline 只在 `bpm < baseline+5` 时更新，**避免飙升把基线带高**。
 - 维度权重：基线抬升 50%、变异度 25%、趋势 25%。
 - 与手环私有 stress notify 互为补充：notify 拿不到值时用这个降级显示。
-- 主页压力卡片提供 Slider 调整报警阈值（30-90，默认 60），并展示算法摘要。
+- 顶栏菜单"设置压力报警阈值"提供 Slider 调整报警阈值（30-90，默认 60），并展示算法摘要。
 
 ### 6.2 Mi Band 6 认证（AES-128-ECB）
 
@@ -719,7 +719,7 @@ with _esp32_cmd_lock:
 之后只要满足"已过 45 s" **或** "至少看到一次服务器 `alert=false`" 之一，就允许下一次新报警进入。
 这避免了硬编码 2 分钟死等错过后续真实升高、也避免了 alert flag 抖动反复弹出。
 
-stress 通道独立去抖：`stress < 阈值-5` 才允许 `_stressAlertTriggered` 复位；阈值由主页 Slider 调整并按孩子本地保存。
+stress 通道独立去抖：`stress < 阈值-5` 才允许 `_stressAlertTriggered` 复位；阈值由顶栏菜单 Slider 调整并按孩子本地保存。
 
 ---
 
