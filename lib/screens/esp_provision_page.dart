@@ -1,4 +1,4 @@
-/// ESP32-S3 LCD 灯环配网 UI。
+/// ESP32-S3 LCD 毛绒球呼吸灯配网 UI。
 ///
 /// 流程：扫描 BLE 广播 → 选设备 → 输入家用 WiFi 的 SSID/密码 →
 ///       通过 BLE 把凭据写过去 → 板子连上路由器后自动 announce 到云端 →
@@ -22,7 +22,7 @@ class EspProvisionPage extends StatefulWidget {
   final CloudService cloudService;
   final int activeChildId;
 
-  /// 当前孩子已经绑定过的灯环 device_id（来自 home_screen 的本地状态）。
+  /// 当前孩子已经绑定过的毛绒球呼吸灯 device_id（来自 home_screen 的本地状态）。
   /// 给页面顶部展示"现在绑了哪台 / 要不要让它重新进入配网"用。
   final String? currentBoundDeviceId;
 
@@ -38,6 +38,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   String _status = '';
   ProvStatus _phase = ProvStatus.idle;
   List<EspProvDevice> _devices = const [];
+  List<Map<String, dynamic>> _cloudDevices = const [];
 
   @override
   void dispose() {
@@ -70,15 +71,33 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
       _busy = true;
       _status = '扫描中…';
       _devices = const [];
+      _cloudDevices = const [];
       _phase = ProvStatus.scanning;
     });
     try {
       if (!await _ensurePermissions()) return;
       final list = await EspProvisionService.scan();
       if (!mounted) return;
+      if (list.isEmpty) {
+        setState(() => _status = '未扫到 BLE 配网广播，正在查询云端已联网毛绒球呼吸灯…');
+        final cloudList = await widget.cloudService.fetchEsp32List();
+        if (!mounted) return;
+        setState(() {
+          _devices = const [];
+          _cloudDevices = cloudList;
+          _status = cloudList.isEmpty
+              ? '未扫到 BLE 设备，也未在云端看到已联网毛绒球呼吸灯。'
+                  '如果板子已经连上 WiFi，请确认服务器地址/登录状态；'
+                  '如果要重新配网，请长按 BOOT 5 秒。'
+              : '未扫到 BLE 广播，但云端已有 ${cloudList.length} 台毛绒球呼吸灯。'
+                  '已联网的毛绒球呼吸灯会关闭 BLE，可从下方直接绑定。';
+        });
+        return;
+      }
       setState(() {
         _devices = list;
-        _status = list.isEmpty ? '未扫到 ESP32（确认板子已开机且未配网）' : '扫到 ${list.length} 台';
+        _cloudDevices = const [];
+        _status = '扫到 ${list.length} 台待配网 ESP32';
       });
     } catch (e) {
       if (mounted) setState(() => _status = '扫描失败：$e');
@@ -147,6 +166,34 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     });
   }
 
+  Future<void> _bindCloudDevice(Map<String, dynamic> dev) async {
+    if (_busy) return;
+    final id = (dev['device_id'] ?? '').toString().toUpperCase();
+    if (id.isEmpty) return;
+    setState(() {
+      _busy = true;
+      _status = '正在绑定已联网毛绒球呼吸灯 $id …';
+    });
+    final ok = await widget.cloudService.bindEsp32(id, widget.activeChildId);
+    if (!mounted) return;
+    if (!ok) {
+      setState(() {
+        _busy = false;
+        _status = '绑定 $id 失败：请确认已登录、当前孩子有权限，且服务器能看到该毛绒球呼吸灯。';
+      });
+      return;
+    }
+    await SessionStore.saveBoundEsp32(widget.activeChildId, id);
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _status = '✅ 已绑定已联网毛绒球呼吸灯 $id，可以在呼吸页测试灯效了';
+    });
+    Future<void>.delayed(const Duration(seconds: 1), () {
+      if (mounted) Navigator.of(context).pop<String>(id);
+    });
+  }
+
   String _phaseLabel(ProvStatus s) {
     switch (s) {
       case ProvStatus.idle: return '空闲';
@@ -165,7 +212,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  /// 通过云端命令让已绑定灯环回到 BLE 配网模式（与 home_screen 的菜单项等价，
+  /// 通过云端命令让已绑定毛绒球呼吸灯回到 BLE 配网模式（与 home_screen 的菜单项等价，
   /// 仅在已绑定时露出；未绑定时本页只走"扫描 + 新设备配网"分支）。
   Future<void> _remoteResetBound() async {
     final id = widget.currentBoundDeviceId;
@@ -181,7 +228,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
       _status = ok
           ? '已下发重启命令，约 3–8 秒后板子会重新广播 ADHD_$id，'
               '届时点击下方"扫描设备"即可看到它。'
-          : '重启命令下发失败：灯环可能离线。'
+          : '重启命令下发失败：毛绒球呼吸灯可能离线。'
               '请改用物理方式：长按板子 BOOT 键 5 秒。';
     });
   }
@@ -190,7 +237,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   Widget build(BuildContext context) {
     final bound = widget.currentBoundDeviceId;
     return Scaffold(
-      appBar: AppBar(title: const Text('ESP32 灯环配网')),
+      appBar: AppBar(title: const Text('毛绒球呼吸灯配网')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -219,9 +266,9 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                     SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '灯环只支持 2.4GHz WiFi。'
+                        '毛绒球呼吸灯只支持 2.4GHz WiFi。'
                         '如果你的路由器把 2.4G/5G 拆成两个 SSID，'
-                        '请填 2.4G 的那一个；密码再正确，5GHz 的 SSID 灯环也连不上。',
+                        '请填 2.4G 的那一个；密码再正确，5GHz 的 SSID 毛绒球呼吸灯也连不上。',
                         style: TextStyle(fontSize: 12, color: Color(0xFF5D4000)),
                       ),
                     ),
@@ -271,36 +318,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                 ),
               const SizedBox(height: 8),
               Expanded(
-                child: _devices.isEmpty
-                    ? const Center(
-                        child: Text(
-                          '点击上方"扫描设备"开始',
-                          style: TextStyle(color: Colors.black45),
-                        ),
-                      )
-                    : ListView.separated(
-                        itemBuilder: (_, i) {
-                          final d = _devices[i];
-                          return ListTile(
-                            leading: const Icon(Icons.devices_other),
-                            title: Text(d.advName),
-                            subtitle: Text(
-                              'device_id=${d.deviceId}'
-                              '${d.rssi != null ? "  rssi=${d.rssi}dBm" : ""}',
-                            ),
-                            trailing: _busy
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2),
-                                  )
-                                : const Icon(Icons.chevron_right),
-                            onTap: _busy ? null : () => _provision(d),
-                          );
-                        },
-                        separatorBuilder: (_, __) => const Divider(height: 1),
-                        itemCount: _devices.length,
-                      ),
+                child: _buildDeviceList(),
               ),
             ],
           ),
@@ -309,7 +327,83 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     );
   }
 
-  /// 顶部"当前已绑定一台灯环"卡片：
+  Widget _buildDeviceList() {
+    if (_devices.isNotEmpty) {
+      return ListView.separated(
+        itemBuilder: (_, i) {
+          final d = _devices[i];
+          return ListTile(
+            leading: const Icon(Icons.bluetooth),
+            title: Text(d.advName),
+            subtitle: Text(
+              'BLE 待配网  device_id=${d.deviceId}'
+              '${d.rssi != null ? "  rssi=${d.rssi}dBm" : ""}',
+            ),
+            trailing: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.chevron_right),
+            onTap: _busy ? null : () => _provision(d),
+          );
+        },
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemCount: _devices.length,
+      );
+    }
+
+    if (_cloudDevices.isNotEmpty) {
+      return ListView.separated(
+        itemBuilder: (_, i) {
+          final d = _cloudDevices[i];
+          final id = (d['device_id'] ?? '').toString();
+          final childId = d['child_id'];
+          final nick = (d['child_nickname'] ?? '').toString();
+          final lastSeen = (d['last_seen_at'] ?? '').toString();
+          final boundToOtherChild =
+              childId != null && childId != widget.activeChildId;
+          return ListTile(
+            leading: const Icon(Icons.cloud_done_outlined),
+            title: Text(id),
+            subtitle: Text(
+              [
+                '已联网，BLE 已关闭',
+                if (childId == null)
+                  '未绑定'
+                else
+                  '已绑定：${nick.isEmpty ? "孩子 $childId" : nick}',
+                if (lastSeen.isNotEmpty) 'last_seen=$lastSeen',
+              ].join('  ·  '),
+            ),
+            trailing: _busy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : TextButton(
+                    onPressed:
+                        boundToOtherChild ? null : () => _bindCloudDevice(d),
+                    child: Text(childId == widget.activeChildId ? '重新保存' : '绑定'),
+                  ),
+          );
+        },
+        separatorBuilder: (_, __) => const Divider(height: 1),
+        itemCount: _cloudDevices.length,
+      );
+    }
+
+    return const Center(
+      child: Text(
+        '点击上方"扫描设备"开始',
+        style: TextStyle(color: Colors.black45),
+      ),
+    );
+  }
+
+  /// 顶部"当前已绑定一台毛绒球呼吸灯"卡片：
   /// - 直接显示 device_id，方便用户对照板子背面贴的 MAC；
   /// - 「让它重新配网」=> 走云端命令；
   /// - 「物理重置说明」=> 简单提示长按按键路径。
@@ -327,7 +421,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '当前孩子已绑定灯环：$deviceId',
+                    '当前孩子已绑定毛绒球呼吸灯：$deviceId',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -348,7 +442,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                   child: OutlinedButton.icon(
                     onPressed: _busy ? null : _remoteResetBound,
                     icon: const Icon(Icons.cloud_sync, size: 18),
-                    label: const Text('远程命令：让灯环重启进入 BLE'),
+                    label: const Text('远程命令：让毛绒球呼吸灯重启进入 BLE'),
                   ),
                 ),
               ],

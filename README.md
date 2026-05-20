@@ -2,7 +2,7 @@
 
 面向 ADHD（注意缺陷多动障碍）与自闭症谱系家庭的"边缘+云"陪伴方案。
 小米手环采集心率与压力，Flutter App 在父母手机端实时展示并触发陪伴流程，
-ESP32-S3 LCD 灯环作为"正念呼吸+倒计时"的实体陪伴道具，
+ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道具，
 腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发。
 
 ---
@@ -29,7 +29,7 @@ flowchart LR
     subgraph User["家庭场景"]
         Kid(["孩子<br/>戴小米手环"])
         Parent(["家长<br/>持手机"])
-        Lamp(["床边 ESP32-S3 LCD 灯环"])
+        Lamp(["床边 ESP32-S3 LCD 毛绒球呼吸灯"])
     end
 
     subgraph Phone["Flutter App (Android / iOS)"]
@@ -132,7 +132,7 @@ sequenceDiagram
     participant Cloud as Flask Server
 
     Board->>Board: 开机 → 读 NVS<br/>未配网 → 广播 ADHD_XXXXXXXX<br/>(BLE 服务 AD480001-…)
-    User->>App: 菜单 → "配网 ESP32 灯环"<br/>输入 WiFi SSID/密码
+    User->>App: 菜单 → "配网毛绒球呼吸灯"<br/>输入 WiFi SSID/密码
     App->>Board: BLE 扫描 → connect
     App->>Board: sec0 SessionData 握手
     Board-->>App: sec0 响应
@@ -408,7 +408,7 @@ flowchart TB
   - 这样即使家里路由器拔了一晚上，第二天恢复后板子也能在 ≤ 8 分钟内自动重新上线。
 - **重新配网**（换 WiFi / 换孩子 / 路由器换密码）有两条等价路径，最终都会调
   `Wireless_ResetProvisioning()` → `wifi_prov_mgr_reset_provisioning` + `esp_restart`，下次开机回到配网态：
-  - **远程路径（推荐）**：App 在主页菜单点「让灯环重新配网」→ `triggerEsp32ResetProvisioning(deviceId)`
+  - **远程路径（推荐）**：App 在主页菜单点「让毛绒球呼吸灯重新配网」→ `triggerEsp32ResetProvisioning(deviceId)`
     → 服务器把 `{"action":"reset_provisioning"}` 推进 cmd 队列
     → `cloud_poll` 任务在 `Cloud.c::dispatch_cmd` 里命中分支，关屏关灯后调
     `Wireless_ResetProvisioning()`。
@@ -423,7 +423,7 @@ flowchart TB
   - 由于 `device_id` 来自 efuse MAC，**不会变**；服务器端的 `child_id ↔ device_id` 绑定关系也**会保留**，
     新一轮 BLE 配网完成后板子重新 announce 即立刻上线，无需 App 端再次走"绑定到孩子"流程。
   - **服务器端配合**：每次 `POST /device/esp32/announce` 都会清空该 device 的 cmd 队列，
-    避免"用户重新配网完后灯环莫名其妙开始呼吸"这种残留命令重放问题；
+    避免"用户重新配网完后毛绒球呼吸灯莫名其妙开始呼吸"这种残留命令重放问题；
     `POST /device/<id>/cmd action=reset_provisioning` 在入队时也会先 `clear()` 旧命令，
     保证 reset 是该轮 long-poll 的唯一动作。
 
@@ -436,7 +436,7 @@ sequenceDiagram
     participant Board as ESP32-S3
 
     alt 在线路径（板子在 WiFi 上）
-        User->>App: 主页菜单 →「让灯环重新配网」
+        User->>App: 主页菜单 →「让毛绒球呼吸灯重新配网」
         App->>Cloud: POST /device/<id>/cmd<br/>{"action":"reset_provisioning"}
         Cloud->>Cloud: enqueue cmd（_esp32_cmd_queue）
         Cloud-->>Board: long-poll 200 JSON
@@ -448,7 +448,7 @@ sequenceDiagram
         Board->>Board: Wireless_ResetProvisioning()
     end
     Note over Board: 重启 → 检测到 NVS 凭据已清<br/>→ 起 BLE provisioning，广播 ADHD_<DEVID>
-    User->>App: 「配网 ESP32 灯环」→ 扫描
+    User->>App: 「配网毛绒球呼吸灯」→ 扫描
     App->>Board: BLE 配网（与首次一致）
     Board->>Cloud: announce<br/>（device_id 不变，绑定保留 → 立即可用）
 ```
@@ -561,7 +561,7 @@ flowchart TB
 | **AI 单次建议** | `POST /submit_log`（写记录 + 调 Kimi） |
 | **AI 足迹 / 周报** | `GET /footprint/today`, `GET /weekly_report/latest`, `GET /weekly_report/history`, `POST /weekly_report/generate` |
 | **手环绑定** | `GET /device/<mac>/binding`, `POST /device/bind`, `POST /device/unbind` |
-| **ESP32 灯环** | `POST /device/esp32/announce`, `GET /device/esp32/list`, `POST /device/esp32/bind`, `POST /device/esp32/unbind`, `GET\|POST /device/<device_id>/cmd` |
+| **毛绒球呼吸灯** | `POST /device/esp32/announce`, `GET /device/esp32/list`, `POST /device/esp32/bind`, `POST /device/esp32/unbind`, `GET\|POST /device/<device_id>/cmd` |
 
 ### 5.3 鉴权 & 权限
 
@@ -738,7 +738,7 @@ weekly_reports(id, week_start, week_end, summary, digest_json,
 
 device_bindings(id, mac_address UNIQUE, child_id, bound_by_user_id, created_at)  -- 手环
 esp32_devices(id, device_id UNIQUE, kind, child_id NULL, bound_by_user_id NULL,
-              first_seen_at, last_seen_at)                                       -- ESP32 灯环
+              first_seen_at, last_seen_at)                                       -- 毛绒球呼吸灯
 ```
 
 启动时 `init_db()` 会自动做"老库补列 + 老 `weekly_reports` 迁移到 (week\_start, child\_id) UNIQUE"。
@@ -771,8 +771,8 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
 | GET | `/device/<mac>/binding` | 选 | 查手环绑定 |
 | POST | `/device/bind` / `unbind` | 是 | 手环绑/解 |
 | POST | `/device/esp32/announce` | 否 | ESP32 上电自报 |
-| GET | `/device/esp32/list` | 是 | 列我可见的灯环（未绑 + 已绑给我家） |
-| POST | `/device/esp32/bind` / `unbind` | 是 | 灯环绑/解 |
+| GET | `/device/esp32/list` | 是 | 列我可见的毛绒球呼吸灯（未绑 + 已绑给我家） |
+| POST | `/device/esp32/bind` / `unbind` | 是 | 毛绒球呼吸灯绑/解 |
 | GET | `/device/<device_id>/cmd?wait=N` | 否 | ESP32 长轮询拉指令 |
 | POST | `/device/<device_id>/cmd` | 是 | App 推指令（action 白名单 + 范围校验） |
 
@@ -838,10 +838,10 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
    .\idf.ps1 build
    .\idf.ps1 -p COM4 flash monitor
    ```
-3. **首次烧录后**：板子会广播 `ADHD_<MAC末4字节hex>`，用 App 的"配网 ESP32 灯环"完成 WiFi + 云端绑定；
+3. **首次烧录后**：板子会广播 `ADHD_<MAC末4字节hex>`，用 App 的"配网毛绒球呼吸灯"完成 WiFi + 云端绑定；
    配网完成后板子自动 `wifi_prov_mgr_deinit` 关掉 BLE，**手机端不需要也无法再连这台板子的 BLE**。
 4. **重新配网**：
-   - 在线时：App 主页 →「让灯环重新配网」（菜单项），或配网页顶部"远程命令：让灯环重启进入 BLE"。
+   - 在线时：App 主页 →「让毛绒球呼吸灯重新配网」（菜单项），或配网页顶部"远程命令：让毛绒球呼吸灯重启进入 BLE"。
      云端会下发 `reset_provisioning` 命令，板子收到后清 NVS 并重启回到 BLE 广播态。
    - 离线时：长按板子 BOOT 键 ≥ 5 秒，板子会主动调 `Wireless_ResetProvisioning()` 清 NVS 并重启。
 
@@ -861,7 +861,7 @@ flutter run    # 真机推荐，模拟器没有 BLE
 ### 8.4 端到端冒烟测试清单
 
 1. 服务器起来后，`curl http://<host>:11760/webhook` 应返回 `{bpm:0, alert:false, …}`。
-2. App 登录 / 注册 / 创建孩子 → 顶栏菜单"配网 ESP32 灯环"。
+2. App 登录 / 注册 / 创建孩子 → 顶栏菜单"配网毛绒球呼吸灯"。
 3. ESP32 板子开机后 BLE 广播 `ADHD_XXXX`，扫到 → 输入家用 WiFi → 看到 "✅ 设备已绑定到当前孩子"。
 4. ESP32 LCD 黑屏待命；服务器日志能看到 `POST /device/esp32/announce` 与持续的 `GET /device/.../cmd` long-poll。
 5. App 点"引导孩子正念呼吸"→ ESP32 屏幕轻亮 + WS2812 进入蓝色呼吸。

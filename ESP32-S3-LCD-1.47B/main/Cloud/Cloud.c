@@ -34,7 +34,7 @@ static char s_resp_buf[CLOUD_RESP_MAX + 1];
 static size_t s_resp_len = 0;
 
 /** 呼吸 watchdog：如果手机端因为掉线 / 进程被杀，stop 命令丢了，
- *  灯环不应该一直亮着。breathing_start 启动这个一次性定时器，
+ *  毛绒球呼吸灯不应该一直亮着。breathing_start 启动这个一次性定时器，
  *  到期自动 RGB_All_Off + 灭屏；breathing_stop / all_off / reset_provisioning
  *  会取消它。 */
 #define BREATHING_WATCHDOG_DEFAULT_MS  (10 * 60 * 1000)  /* 10 分钟 */

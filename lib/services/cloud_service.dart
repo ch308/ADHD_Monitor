@@ -140,7 +140,7 @@ class CloudService {
     }
   }
 
-  // ── ESP32-S3 LCD 灯环：远程开关呼吸灯 / 倒计时灯 ──
+  // ── ESP32-S3 LCD 毛绒球呼吸灯：远程开关呼吸灯 / 倒计时灯 ──
 
   /// 列出当前用户能看到的 ESP32 设备（已绑定到我名下的孩子 + 尚未绑定的）。
   /// 每项是 `{device_id, kind, child_id, child_nickname, first_seen_at, last_seen_at}`。
@@ -255,7 +255,7 @@ class CloudService {
   /// 让 ESP32 清掉 NVS 中的 WiFi 凭据并重启进入 BLE 配网模式。
   ///
   /// 板子收到命令后会：
-  /// 1) 立刻关掉屏 / 灯环；
+  /// 1) 立刻关掉屏 / 毛绒球呼吸灯；
   /// 2) `wifi_prov_mgr_reset_provisioning()` 清空 NVS 中的 SSID/PASSWORD；
   /// 3) `esp_restart()` 重启；
   /// 4) 重启后没有凭据 → 自动重新打开 BLE 并广播 `ADHD_<DEVID>`。
