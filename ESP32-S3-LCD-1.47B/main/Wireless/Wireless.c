@@ -2,8 +2,10 @@
 
 #include "esp_mac.h"
 #include "esp_http_client.h"
+#include "esp_timer.h"
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
+#include "nvs.h"
 
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_ble.h"
@@ -24,10 +26,71 @@ static const char *PROV_TAG = "wifi_prov";
 
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
+/** 快速重连尝试次数：失败超过这个数后切到指数退避（不再立即 reconnect）。 */
 #define WIFI_MAX_RETRY     8
+/** 退避起始间隔（秒）。第 N 次进退避 = WIFI_BACKOFF_BASE_S << min(N, MAX_SHIFT) */
+#define WIFI_BACKOFF_BASE_S    30
+#define WIFI_BACKOFF_MAX_SHIFT 4    /* 30 / 60 / 120 / 240 / 480 s */
 
 static EventGroupHandle_t s_wifi_event_group;
 static int s_wifi_retry_num = 0;
+/** 进入退避态后的退避档位；GOT_IP 后清零。 */
+static int s_wifi_backoff_idx = 0;
+/** 退避用的一次性软定时器；周期触发 esp_wifi_connect，给 WiFi 长断恢复留生路。 */
+static esp_timer_handle_t s_reconnect_timer = NULL;
+
+static void wireless_reconnect_timer_cb(void *arg);
+
+static void wireless_schedule_backoff_reconnect(void)
+{
+    if (s_reconnect_timer == NULL) {
+        const esp_timer_create_args_t targs = {
+            .callback = wireless_reconnect_timer_cb,
+            .name = "wifi_reconnect",
+            .arg = NULL,
+        };
+        if (esp_timer_create(&targs, &s_reconnect_timer) != ESP_OK) {
+            ESP_LOGE(WIFI_TAG, "reconnect timer create failed");
+            return;
+        }
+    }
+    /* 取消可能存在的旧定时（disconnect 在 backoff 期间又来一次时） */
+    esp_timer_stop(s_reconnect_timer);
+
+    int shift = s_wifi_backoff_idx;
+    if (shift > WIFI_BACKOFF_MAX_SHIFT) shift = WIFI_BACKOFF_MAX_SHIFT;
+    uint32_t interval_s = (uint32_t)WIFI_BACKOFF_BASE_S << shift;
+    uint64_t interval_us = (uint64_t)interval_s * 1000ULL * 1000ULL;
+
+    ESP_LOGW(WIFI_TAG,
+             "STA stuck after %d fast retries, backoff #%d → reconnect in %us",
+             WIFI_MAX_RETRY, s_wifi_backoff_idx, (unsigned)interval_s);
+
+    if (esp_timer_start_once(s_reconnect_timer, interval_us) != ESP_OK) {
+        ESP_LOGE(WIFI_TAG, "reconnect timer start failed");
+        return;
+    }
+    s_wifi_backoff_idx++;
+}
+
+static void wireless_cancel_backoff_reconnect(void)
+{
+    if (s_reconnect_timer != NULL) {
+        esp_timer_stop(s_reconnect_timer);
+    }
+    s_wifi_backoff_idx = 0;
+}
+
+static void wireless_reconnect_timer_cb(void *arg)
+{
+    (void)arg;
+    /* 给"快速重连"窗口重新加载，让事件 handler 再走一遍 8 次的快速尝试 */
+    s_wifi_retry_num = 0;
+    Wireless_State = WIRELESS_STATE_CONNECTING;
+    ESP_LOGI(WIFI_TAG, "backoff timer fired, esp_wifi_connect()");
+    /* esp_wifi_connect 是非阻塞，定时器回调里调安全 */
+    (void)esp_wifi_connect();
+}
 
 static char s_device_id[9] = {0};       /* 8 hex chars + NUL */
 static char s_prov_name[24] = {0};      /* "ADHD_XXXXXXXX" */
@@ -146,10 +209,14 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             s_wifi_retry_num++;
             ESP_LOGW(WIFI_TAG, "STA disconnected, retry %d/%d", s_wifi_retry_num, WIFI_MAX_RETRY);
         } else {
-            if (s_wifi_event_group != NULL) {
+            /* 快速重试 8 次仍连不上：进入退避，但不彻底放弃。
+             * 路由器重启 / 长时间断网恢复后定时器触发会重新尝试。 */
+            if (s_wifi_event_group != NULL && s_wifi_backoff_idx == 0) {
+                /* 第一次进退避态时给 WIFI_Init 的 wait 解锁，让上层任务先收尾 */
                 xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
             }
             Wireless_State = WIRELESS_STATE_FAILED;
+            wireless_schedule_backoff_reconnect();
         }
         return;
     }
@@ -158,6 +225,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(WIFI_TAG, "got ip: " IPSTR, IP2STR(&event->ip_info.ip));
         s_wifi_retry_num = 0;
+        wireless_cancel_backoff_reconnect();
         WIFI_Sta_GotIp = true;
         if (wifi_probe_generate_204()) {
             WIFI_Sta_CaptivePortal = false;
@@ -287,8 +355,30 @@ uint16_t BLE_Scan(void) { return BLE_NUM; }
 void Wireless_ResetProvisioning(void)
 {
     ESP_LOGW(PROV_TAG, "resetting provisioning, will reboot");
-    wifi_prov_mgr_reset_provisioning();
-    /* 触发重启，下次开机直接进入 provisioning 状态 */
+
+    /* 二次开机后 wifi_prov_mgr 已经被 deinit 掉了，
+     * 部分 IDF 版本 reset_provisioning() 在 manager 未运行时会返回 INVALID_STATE。
+     * 失败就退化到 esp_wifi_restore()——直接清掉 NVS 里的 SSID/PASSWORD，效果一致。 */
+    esp_err_t r = wifi_prov_mgr_reset_provisioning();
+    if (r != ESP_OK) {
+        ESP_LOGW(PROV_TAG,
+                 "wifi_prov_mgr_reset_provisioning returned %s, falling back to esp_wifi_restore",
+                 esp_err_to_name(r));
+        esp_err_t r2 = esp_wifi_restore();
+        if (r2 != ESP_OK) {
+            ESP_LOGE(PROV_TAG, "esp_wifi_restore also failed: %s", esp_err_to_name(r2));
+            /* 兜底再兜底：直接 erase wifi NVS namespace */
+            nvs_handle_t h;
+            if (nvs_open("nvs.net80211", NVS_READWRITE, &h) == ESP_OK) {
+                nvs_erase_all(h);
+                nvs_commit(h);
+                nvs_close(h);
+                ESP_LOGW(PROV_TAG, "manually erased nvs.net80211 namespace");
+            }
+        }
+    }
+
+    /* 给日志一点时间冲出 UART，再重启 */
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 }

@@ -294,9 +294,19 @@ class EspProvisionService {
   /// 判断响应里的 status 字段是否为 0。
   /// resp_set_config / resp_apply_config 的结构都是
   ///   WiFiConfigPayload{ msg, resp_xxx{ status=1 enum, ... } }
+  ///
+  /// 严格模式：找不到预期的 resp_* 字段视为失败（fail closed），
+  /// 避免某些 BLE 栈在 read 时返回上一次会话残留的数据被误判成"成功"。
   static bool _isRespOk(Uint8List resp) {
-    if (resp.isEmpty) return false;
+    if (resp.isEmpty) {
+      debugPrint('EspProv _isRespOk: empty response');
+      return false;
+    }
     final fields = _decode(resp);
+    if (fields.isEmpty) {
+      debugPrint('EspProv _isRespOk: response not protobuf-decodable');
+      return false;
+    }
     // 查 resp_set_config(13) / resp_apply_config(15)，提取内嵌 status
     for (final f in fields) {
       if (f.fieldNo == 13 || f.fieldNo == 15) {
@@ -306,10 +316,13 @@ class EspProvisionService {
             return g.varint == 0;
           }
         }
-        return true; // status 缺省值即 0
+        // 内嵌 message 存在但无 status 字段 → status 缺省值 0 即成功
+        return true;
       }
     }
-    return true; // 没找到 resp_* 字段时，按宽松成功对待
+    debugPrint('EspProv _isRespOk: no resp_set_config/resp_apply_config '
+        'in fields=${fields.map((f) => f.fieldNo).toList()}');
+    return false;
   }
 
   /// 从 RespGetStatus 中提取 sta_state 字段（field=2，varint 枚举）。
