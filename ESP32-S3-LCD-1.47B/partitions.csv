@@ -1,5 +1,7 @@
 # Name,     Type, SubType, Offset,   Size, Flags
 # Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap,,,,
+# 16MB flash; factory bumped from 3M → 6M 以容纳 LVGL + BLE provisioning + Cloud + WS2812 全功能镜像。
+# NVS 偏移保持 0x9000 不变，已配网的板子无需 erase-flash 就能升级。
 nvs,        data, nvs,      0x9000,  0x6000,
-factory,0,0,        0x10000, 3M,
+factory,    0,    0,        0x10000, 6M,
 flash_test, data, fat,      ,        528K,
