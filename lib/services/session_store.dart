@@ -13,6 +13,9 @@ class SessionStore {
 
   /// 当前孩子绑定的 ESP32 device_id 前缀（device_id 由 ESP32 efuse MAC 派生）
   static const _kBoundEsp32Prefix = 'bound_esp32_';
+
+  /// 当前孩子的压力报警阈值前缀（0-100，默认 60）
+  static const _kStressThresholdPrefix = 'stress_threshold_';
   static const String defaultServerHost = '124.223.53.33';
 
   static Future<String?> getToken() async {
@@ -73,6 +76,21 @@ class SessionStore {
   static Future<void> removeBoundEsp32(int childId) async {
     final p = await SharedPreferences.getInstance();
     await p.remove('$_kBoundEsp32Prefix$childId');
+  }
+
+  static Future<int> getStressThreshold(int childId) async {
+    final p = await SharedPreferences.getInstance();
+    return (p.getInt('$_kStressThresholdPrefix$childId') ?? 60)
+        .clamp(30, 90)
+        .toInt();
+  }
+
+  static Future<void> saveStressThreshold(int childId, int threshold) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setInt(
+      '$_kStressThresholdPrefix$childId',
+      threshold.clamp(30, 90).toInt(),
+    );
   }
 
   static Future<void> clear() async {
