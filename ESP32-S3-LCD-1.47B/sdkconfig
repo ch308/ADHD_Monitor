@@ -1004,6 +1004,17 @@ CONFIG_BT_BLE_50_FEATURES_SUPPORTED=y
 CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
 CONFIG_EXAMPLE_WIFI_SSID=""
 CONFIG_EXAMPLE_WIFI_PASSWORD=""
+
+#
+# ADHD Cloud (server long-poll)
+#
+# default:
+CONFIG_ADHD_CLOUD_HOST="124.223.53.33"
+# default:
+CONFIG_ADHD_CLOUD_PORT=11760
+# default:
+CONFIG_ADHD_CLOUD_POLL_WAIT_S=25
+# end of ADHD Cloud (server long-poll)
 # end of Example Configuration
 
 #
@@ -4859,6 +4870,38 @@ CONFIG_LV_BUILD_EXAMPLES=y
 # CONFIG_LV_DEMO_MUSIC_AUTO_PLAY is not set
 # end of Demos
 # end of LVGL configuration
+
+#
+# cJSON
+#
+# default:
+CONFIG_CJSON_NESTING_LIMIT=1000
+# default:
+CONFIG_CJSON_CIRCULAR_LIMIT=10000
+# end of cJSON
+
+#
+# Network Provisioning Manager
+#
+# default:
+CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI=y
+# default:
+CONFIG_NETWORK_PROV_SCAN_MAX_ENTRIES=16
+# default:
+CONFIG_NETWORK_PROV_AUTOSTOP_TIMEOUT=30
+# default:
+# CONFIG_NETWORK_PROV_BLE_BONDING is not set
+# default:
+# CONFIG_NETWORK_PROV_BLE_FORCE_ENCRYPTION is not set
+# default:
+# CONFIG_NETWORK_PROV_BLE_NOTIFY is not set
+# default:
+# CONFIG_NETWORK_PROV_KEEP_BLE_ON_AFTER_PROV is not set
+# default:
+CONFIG_NETWORK_PROV_WIFI_STA_ALL_CHANNEL_SCAN=y
+# default:
+# CONFIG_NETWORK_PROV_WIFI_STA_FAST_SCAN is not set
+# end of Network Provisioning Manager
 # end of Component config
 
 # default:

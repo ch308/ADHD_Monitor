@@ -7,8 +7,8 @@
 #include "freertos/task.h"
 #include "nvs.h"
 
-#include "wifi_provisioning/manager.h"
-#include "wifi_provisioning/scheme_ble.h"
+#include "network_provisioning/manager.h"
+#include "network_provisioning/scheme_ble.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -161,33 +161,33 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 {
     (void)arg;
 
-    if (event_base == WIFI_PROV_EVENT) {
+    if (event_base == NETWORK_PROV_EVENT) {
         switch (event_id) {
-            case WIFI_PROV_START:
+            case NETWORK_PROV_START:
                 ESP_LOGI(PROV_TAG, "BLE provisioning started, name=%s", s_prov_name);
                 Wireless_State = WIRELESS_STATE_PROVISIONING;
                 break;
-            case WIFI_PROV_CRED_RECV: {
+            case NETWORK_PROV_WIFI_CRED_RECV: {
                 wifi_sta_config_t *cfg = (wifi_sta_config_t *)event_data;
                 ESP_LOGI(PROV_TAG, "got creds, SSID=%s", (const char *)cfg->ssid);
                 Wireless_State = WIRELESS_STATE_CONNECTING;
                 break;
             }
-            case WIFI_PROV_CRED_FAIL: {
-                wifi_prov_sta_fail_reason_t *reason = (wifi_prov_sta_fail_reason_t *)event_data;
+            case NETWORK_PROV_WIFI_CRED_FAIL: {
+                network_prov_wifi_sta_fail_reason_t *reason = (network_prov_wifi_sta_fail_reason_t *)event_data;
                 ESP_LOGE(PROV_TAG, "creds failed, reason=%s",
-                         (*reason == WIFI_PROV_STA_AUTH_ERROR) ? "AUTH" : "AP_NOT_FOUND");
+                         (*reason == NETWORK_PROV_WIFI_STA_AUTH_ERROR) ? "AUTH" : "AP_NOT_FOUND");
                 Wireless_State = WIRELESS_STATE_FAILED;
                 /* 抛出 reset 让 manager 重新接受新的凭据 */
-                wifi_prov_mgr_reset_sm_state_on_failure();
+                network_prov_mgr_reset_wifi_sm_state_on_failure();
                 break;
             }
-            case WIFI_PROV_CRED_SUCCESS:
+            case NETWORK_PROV_WIFI_CRED_SUCCESS:
                 ESP_LOGI(PROV_TAG, "creds accepted, applying");
                 break;
-            case WIFI_PROV_END:
+            case NETWORK_PROV_END:
                 ESP_LOGI(PROV_TAG, "provisioning ended, releasing manager");
-                wifi_prov_mgr_deinit();
+                network_prov_mgr_deinit();
                 break;
             default:
                 break;
@@ -286,29 +286,29 @@ void WIFI_Init(void *arg)
 
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(NETWORK_PROV_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
 
-    /* 让 wifi_provisioning manager 帮我们看 NVS 里是否已经配过网。
+    /* 让 network_provisioning manager 帮我们看 NVS 里是否已经配过网。
      * 第一次刷机会一定是 false。 */
-    wifi_prov_mgr_config_t pmgr_cfg = {
-        .scheme = wifi_prov_scheme_ble,
-        .scheme_event_handler = WIFI_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM,
+    network_prov_mgr_config_t pmgr_cfg = {
+        .scheme = network_prov_scheme_ble,
+        .scheme_event_handler = NETWORK_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM,
     };
-    ESP_ERROR_CHECK(wifi_prov_mgr_init(pmgr_cfg));
+    ESP_ERROR_CHECK(network_prov_mgr_init(pmgr_cfg));
 
     bool provisioned = false;
-    ESP_ERROR_CHECK(wifi_prov_mgr_is_provisioned(&provisioned));
+    ESP_ERROR_CHECK(network_prov_mgr_is_wifi_provisioned(&provisioned));
 
     if (!provisioned) {
         ESP_LOGI(PROV_TAG, "device not provisioned, start BLE provisioning");
-        wifi_prov_scheme_ble_set_service_uuid(s_prov_service_uuid);
-        ESP_ERROR_CHECK(wifi_prov_mgr_start_provisioning(
-            WIFI_PROV_SECURITY_0, NULL, s_prov_name, NULL));
+        network_prov_scheme_ble_set_service_uuid(s_prov_service_uuid);
+        ESP_ERROR_CHECK(network_prov_mgr_start_provisioning(
+            NETWORK_PROV_SECURITY_2, NULL, s_prov_name, NULL));
         /* 等 provision 完成、manager 自动 deinit 并触发 STA 连接 */
-        wifi_prov_mgr_wait();
+        network_prov_mgr_wait();
     } else {
         ESP_LOGI(PROV_TAG, "device already provisioned, releasing manager");
-        wifi_prov_mgr_deinit();
+        network_prov_mgr_deinit();
         wireless_connect_with_nvs();
     }
 
@@ -346,9 +346,9 @@ uint16_t WIFI_Scan(void)
     return ap_count;
 }
 
-/* BLE_Init / BLE_Scan：现在 BLE 由 wifi_provisioning + scheme_ble 接管，
+/* BLE_Init / BLE_Scan：现在 BLE 由 network_provisioning + scheme_ble 接管，
  * 这里保留空壳，让 LVGL_Example 老逻辑能编。配网完成后 BTDM 控制器
- * 会被 WIFI_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM 释放掉。 */
+ * 会被 NETWORK_PROV_SCHEME_BLE_EVENT_HANDLER_FREE_BTDM 释放掉。 */
 void BLE_Init(void *arg) { (void)arg; vTaskDelete(NULL); }
 uint16_t BLE_Scan(void) { return BLE_NUM; }
 
@@ -356,13 +356,13 @@ void Wireless_ResetProvisioning(void)
 {
     ESP_LOGW(PROV_TAG, "resetting provisioning, will reboot");
 
-    /* 二次开机后 wifi_prov_mgr 已经被 deinit 掉了，
+    /* 二次开机后 network_prov_mgr 已经被 deinit 掉了，
      * 部分 IDF 版本 reset_provisioning() 在 manager 未运行时会返回 INVALID_STATE。
      * 失败就退化到 esp_wifi_restore()——直接清掉 NVS 里的 SSID/PASSWORD，效果一致。 */
-    esp_err_t r = wifi_prov_mgr_reset_provisioning();
+    esp_err_t r = network_prov_mgr_reset_wifi_provisioning();
     if (r != ESP_OK) {
         ESP_LOGW(PROV_TAG,
-                 "wifi_prov_mgr_reset_provisioning returned %s, falling back to esp_wifi_restore",
+                 "network_prov_mgr_reset_wifi_provisioning returned %s, falling back to esp_wifi_restore",
                  esp_err_to_name(r));
         esp_err_t r2 = esp_wifi_restore();
         if (r2 != ESP_OK) {
