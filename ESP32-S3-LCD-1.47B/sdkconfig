@@ -4055,8 +4055,10 @@ CONFIG_MBEDTLS_PKCS1_V21=y
 #
 # Protocomm
 #
-# default:
-# CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0 is not set
+# IDF 6.x 默认只编 sec2，但本项目 Flutter 客户端只实现了 sec0 协议
+# (lib/services/esp_provision_service.dart 里的最小 protobuf)，
+# 所以这里强制把 SEC0 也编进去；sec2 留着不影响体积，方便后续升级。
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y
 # default:
 # CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1 is not set
 # default:
