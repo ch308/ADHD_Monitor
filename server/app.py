@@ -182,7 +182,7 @@ def init_db():
         )
         """
     )
-    # ESP32-S3 灯环设备：device_id 由 efuse MAC 派生（Wireless_GetDeviceId）
+    # ESP32-S3 毛绒球呼吸灯设备：device_id 由 efuse MAC 派生（Wireless_GetDeviceId）
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS esp32_devices (
@@ -1501,7 +1501,7 @@ def esp32_announce():
 
     板子刚启动（包括正常重启 / 重新配网完成 / 掉电恢复）→ 此前队列里
     残留的命令对新会话没有意义，必须丢掉，避免出现"用户重新配网完后
-    灯环莫名其妙开始呼吸"这种残留命令重放问题。
+    毛绒球呼吸灯莫名其妙开始呼吸"这种残留命令重放问题。
     """
     data = request.json or {}
     device_id = _normalize_device_id(data.get("device_id") or "")
@@ -1625,7 +1625,7 @@ def esp32_unbind():
 
 # 允许 ESP32 端推送的命令白名单（其它会被拒，避免恶意/误用）
 # reset_provisioning：让板子清掉 NVS 中的 WiFi 凭据并重启进入 BLE 配网模式，
-# 用于"换 WiFi / 把灯环送给别人 / 想重新走配网流程"等场景。
+# 用于"换 WiFi / 把毛绒球呼吸灯送给别人 / 想重新走配网流程"等场景。
 _ESP32_ALLOWED_ACTIONS = {
     "breathing_start", "breathing_stop",
     "countdown_start", "countdown_stop",

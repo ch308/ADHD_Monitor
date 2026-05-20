@@ -124,7 +124,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   bool _bindingCheckInProgress = false;
   bool _bindingActionInProgress = false;
 
-  /// 当前孩子已绑定的 ESP32-S3 灯环 device_id（null=未绑定/未配网）
+  /// 当前孩子已绑定的毛绒球呼吸灯 device_id（null=未绑定/未配网）
   String? _boundEsp32DeviceId;
 
   /// 手环 stress 触发"还在焦虑中"的阈值（小米手环 stress 0-100）
@@ -406,7 +406,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
   Future<void> _bindCurrentDevice() async {
     final mac = _miBandService.connectedMacAddress;
-    if (mac == null || mac.isEmpty) return;
+    if (mac == null || mac.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前还没有连接到小米手环，无法绑定')),
+      );
+      return;
+    }
     if (_bindingActionInProgress) return;
     _bindingActionInProgress = true;
     if (mounted) setState(() {});
@@ -438,7 +444,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
   Future<void> _unbindCurrentDevice() async {
     final mac = _miBandService.connectedMacAddress;
-    if (mac == null || mac.isEmpty) return;
+    if (mac == null || mac.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('当前还没有连接到小米手环，无法解绑')),
+      );
+      return;
+    }
     if (_bindingActionInProgress) return;
     _bindingActionInProgress = true;
     if (mounted) setState(() {});
@@ -654,7 +666,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       setState(() => message = _resolveStatusMessage());
     }
 
-    // 进入正念呼吸：通知 ESP32 灯环开始呼吸灯效（与 UI 呼吸球同步周期）
+    // 进入正念呼吸：通知毛绒球呼吸灯开始呼吸灯效（与 UI 呼吸球同步周期）
     final esp = _boundEsp32DeviceId;
     if (esp != null && esp.isNotEmpty) {
       unawaited(_cloudService.triggerEsp32BreathingStart(
@@ -680,7 +692,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
     } finally {
       _breathingPageVisible = false;
-      // 用户从呼吸页返回/取消：通知 ESP32 灯环停止
+      // 用户从呼吸页返回/取消：通知毛绒球呼吸灯停止
       if (esp != null && esp.isNotEmpty) {
         unawaited(_cloudService.triggerEsp32BreathingStop(esp));
       }
@@ -713,9 +725,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
   }
 
-  /// 让当前绑定的 ESP32 灯环清空 WiFi 凭据并重启进入 BLE 配网模式。
+  /// 让当前绑定的毛绒球呼吸灯清空 WiFi 凭据并重启进入 BLE 配网模式。
   ///
-  /// 适用场景：换路由器 / 换 WiFi 密码 / 想把灯环搬到别的网络。
+  /// 适用场景：换路由器 / 换 WiFi 密码 / 想把毛绒球呼吸灯搬到别的网络。
   /// 注意：device_id 来自 efuse MAC 不会变，服务器端绑定关系会保留，
   /// 所以重新配网完成后无需再走"绑定到孩子"流程。
   Future<void> _resetEsp32Provisioning() async {
@@ -723,8 +735,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     if (deviceId == null || deviceId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('当前孩子还没有绑定 ESP32 灯环，无法发起远程重新配网。'
-              '请先用"配网 ESP32 灯环"完成首次配网。'),
+          content: Text('当前孩子还没有绑定毛绒球呼吸灯，无法发起远程重新配网。'
+              '请先用"配网毛绒球呼吸灯"完成首次配网。'),
         ),
       );
       return;
@@ -733,9 +745,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('让灯环重新配网？'),
+        title: const Text('让毛绒球呼吸灯重新配网？'),
         content: Text(
-          '将向灯环 $deviceId 下发重启指令：\n'
+          '将向毛绒球呼吸灯 $deviceId 下发重启指令：\n'
           '• 板子会清掉当前 WiFi 凭据并重启；\n'
           '• 重启后会广播 ADHD_$deviceId，等待手机 BLE 配网；\n'
           '• 服务器端绑定不变，配网完成后会自动重新上线。\n\n'
@@ -748,7 +760,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('确认重启灯环'),
+            child: const Text('确认重启毛绒球呼吸灯'),
           ),
         ],
       ),
@@ -760,7 +772,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     if (!pushed) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('远程重启命令下发失败：灯环当前可能离线。'
+          content: Text('远程重启命令下发失败：毛绒球呼吸灯当前可能离线。'
               '可以长按板子 BOOT 键 5 秒进入物理重置流程。'),
         ),
       );
@@ -769,8 +781,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('已下发重启命令，灯环将在数秒内广播 ADHD_$deviceId，'
-            '请点击右上角"配网 ESP32 灯环"完成 BLE 配网。'),
+        content: Text('已下发重启命令，毛绒球呼吸灯将在数秒内广播 ADHD_$deviceId，'
+            '请点击右上角"配网毛绒球呼吸灯"完成 BLE 配网。'),
         duration: const Duration(seconds: 6),
       ),
     );
@@ -1368,16 +1380,30 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'logout') widget.onLogout?.call();
               if (v == 'invite') await _showInviteMemberDialog();
               if (v == 'switch') await _showSwitchChildDialog();
+              if (v == 'band_bind') await _bindCurrentDevice();
+              if (v == 'band_unbind') await _unbindCurrentDevice();
               if (v == 'esp_prov') await _openEspProvisionPage();
               if (v == 'esp_reset') await _resetEsp32Provisioning();
             },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
-              PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
-              PopupMenuItem(value: 'esp_prov', child: Text('配网 ESP32 灯环')),
-              PopupMenuItem(value: 'esp_reset', child: Text('让灯环重新配网')),
-              PopupMenuDivider(),
-              PopupMenuItem(value: 'logout', child: Text('退出登录')),
+            itemBuilder: (ctx) => [
+              const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
+              const PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'band_bind',
+                enabled: !_bindingActionInProgress,
+                child: const Text('绑定小米手环到当前孩子'),
+              ),
+              PopupMenuItem(
+                value: 'band_unbind',
+                enabled: !_bindingActionInProgress,
+                child: const Text('解绑当前小米手环'),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
+              const PopupMenuItem(value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],
           ),
           IconButton(
@@ -1431,8 +1457,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 const SizedBox(height: 12),
                 // ── 蓝牙手环连接状态条 ──
                 _buildBandStatusBanner(),
-                // ── 手环设备绑定状态条 ──
-                _buildDeviceBindingBanner(),
                 // ── 心率圆环区域 ──
                 GestureDetector(
                   onTap: () {
