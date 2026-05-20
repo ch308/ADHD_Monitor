@@ -203,12 +203,37 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                 '板子第一次刷机后或者刚被"重新配网"后会自动广播 BLE。',
                 style: TextStyle(fontSize: 13, color: Colors.black54),
               ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8E1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFFE082)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber_rounded,
+                        size: 18, color: Color(0xFFB26A00)),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '灯环只支持 2.4GHz WiFi。'
+                        '如果你的路由器把 2.4G/5G 拆成两个 SSID，'
+                        '请填 2.4G 的那一个；密码再正确，5GHz 的 SSID 灯环也连不上。',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF5D4000)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 12),
               TextField(
                 controller: _ssidCtrl,
                 decoration: const InputDecoration(
-                  labelText: 'WiFi SSID',
-                  hintText: '例如 home_5g_wifi',
+                  labelText: 'WiFi SSID（2.4GHz）',
+                  hintText: '例如 home_2.4G',
                   border: OutlineInputBorder(),
                 ),
               ),

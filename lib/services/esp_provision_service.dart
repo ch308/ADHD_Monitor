@@ -56,14 +56,40 @@ enum ProvStatus {
   failed,
 }
 
+/// ESP32 端报告的 Wi-Fi 失败原因（与 wifi_provisioning.proto 中
+/// WifiConnectFailedReason 枚举对齐）。
+enum ProvFailReason {
+  /// 未提供（无失败 / 解析不到字段）
+  unknown,
+
+  /// AUTH_ERROR = 0：AP 拒绝（密码错 / 加密协议不匹配）。
+  authError,
+
+  /// AP_NOT_FOUND = 1：扫描后没找到这个 SSID。
+  /// 最常见的诱因是 SSID 是 5GHz 频段——ESP32-S3 的射频只支持 2.4GHz。
+  apNotFound,
+
+  /// Flutter 端 poll 到自身 deadline 时 ESP32 还在 Connecting，
+  /// manager 还没下定论；这一般也是连接超长，建议用户排查 SSID/密码。
+  pollTimeout,
+}
+
 /// 配网结果。Wi-Fi 状态来自 ESP32 GetStatus 上报。
 class ProvResult {
-  ProvResult.ok(this.deviceId) : success = true, message = '';
-  ProvResult.fail(this.deviceId, this.message) : success = false;
+  ProvResult.ok(this.deviceId)
+      : success = true,
+        message = '',
+        failReason = ProvFailReason.unknown;
+  ProvResult.fail(
+    this.deviceId,
+    this.message, {
+    this.failReason = ProvFailReason.unknown,
+  }) : success = false;
 
   final bool success;
   final String deviceId;
   final String message;
+  final ProvFailReason failReason;
 }
 
 class EspProvisionService {
@@ -182,9 +208,13 @@ class EspProvisionService {
 
       // ── 4. 轮询 GetStatus 直到 ESP32 报告 Connected ────────────────────
       emit(ProvStatus.pollingStatus);
-      final ok = await _pollUntilConnected(cfg);
-      if (!ok) {
-        return ProvResult.fail(target.deviceId, 'ESP32 未能连上 WiFi（检查 SSID/密码）');
+      final r = await _pollUntilConnected(cfg);
+      if (!r.ok) {
+        return ProvResult.fail(
+          target.deviceId,
+          _failMessage(r.reason),
+          failReason: r.reason,
+        );
       }
 
       emit(ProvStatus.connectedOk);
@@ -212,21 +242,59 @@ class EspProvisionService {
     return Uint8List.fromList(resp);
   }
 
-  static Future<bool> _pollUntilConnected(BluetoothCharacteristic ch) async {
+  /// 轮询 ESP32 的 GetStatus。
+  ///
+  /// deadline 给到 45s：network_prov_mgr 内部默认 retry 5 次、每次 ~3s 才会
+  /// 把 sta_state 切到 ConnectionFailed；连上慢的 AP（弱信号、DHCP 慢）也要 ~10s+。
+  /// 之前 20s 太紧，常规情况都会被 Flutter 端先 timeout 掉。
+  static Future<_PollOutcome> _pollUntilConnected(
+    BluetoothCharacteristic ch,
+  ) async {
     final start = DateTime.now();
-    const deadline = Duration(seconds: 20);
+    const deadline = Duration(seconds: 45);
+    var iter = 0;
+    int lastState = -1;
+    int? lastReason;
     while (DateTime.now().difference(start) < deadline) {
+      iter++;
       final resp = await _writeRead(ch, _encodeCmdGetStatus());
-      final state = _parseStaState(resp);
-      if (state == 0) {
-        return true; // Connected
+      final parsed = _parseRespGetStatus(resp);
+      lastState = parsed.state;
+      lastReason = parsed.reason;
+      debugPrint(
+        'EspProv poll #$iter: state=${parsed.state} reason=${parsed.reason} '
+        'elapsed=${DateTime.now().difference(start).inSeconds}s '
+        'raw=${resp.length}B',
+      );
+      if (parsed.state == 0) {
+        return _PollOutcome(true, ProvFailReason.unknown);
       }
-      if (state == 3) {
-        return false; // ConnectionFailed
+      if (parsed.state == 3) {
+        // ConnectionFailed：依据 fail_reason 区分密码错 / 找不到 AP。
+        final reason = parsed.reason == 0
+            ? ProvFailReason.authError
+            : parsed.reason == 1
+                ? ProvFailReason.apNotFound
+                : ProvFailReason.unknown;
+        return _PollOutcome(false, reason);
       }
       await Future<void>.delayed(const Duration(milliseconds: 800));
     }
-    return false;
+    debugPrint('EspProv poll deadline; lastState=$lastState lastReason=$lastReason');
+    return _PollOutcome(false, ProvFailReason.pollTimeout);
+  }
+
+  static String _failMessage(ProvFailReason r) {
+    switch (r) {
+      case ProvFailReason.authError:
+        return 'WiFi 密码错误，板子被 AP 拒绝认证';
+      case ProvFailReason.apNotFound:
+        return '找不到这个 WiFi（SSID 拼写？ESP32-S3 只支持 2.4GHz，5GHz SSID 看不到）';
+      case ProvFailReason.pollTimeout:
+        return '等待 ESP32 连接 WiFi 超时；常见原因：SSID 是 5GHz 频段、密码错、信号太弱';
+      case ProvFailReason.unknown:
+        return 'ESP32 未能连上 WiFi（检查 SSID/密码）';
+    }
   }
 
   // ────────── 最小化 protobuf（按 esp-idf wifi_provisioning .proto 字段号）──────────
@@ -325,23 +393,40 @@ class EspProvisionService {
     return false;
   }
 
-  /// 从 RespGetStatus 中提取 sta_state 字段（field=2，varint 枚举）。
-  /// 返回值约定：0=Connected, 1=Connecting, 2=Disconnected, 3=ConnectionFailed, -1=未知
-  static int _parseStaState(Uint8List resp) {
-    if (resp.isEmpty) return -1;
+  /// 从 RespGetStatus 同时提取 sta_state（field=2）与 fail_reason（field=10）。
+  ///
+  /// state: 0=Connected, 1=Connecting, 2=Disconnected, 3=ConnectionFailed, -1=未知
+  /// reason: 0=AUTH_ERROR, 1=AP_NOT_FOUND, null=未上报（state 不一定为 3 时常见）
+  static _RespStatus _parseRespGetStatus(Uint8List resp) {
+    if (resp.isEmpty) return const _RespStatus(-1, null);
     final outer = _decode(resp);
     for (final f in outer) {
       if (f.fieldNo == 11) {
         // resp_get_status
         final sub = _decode(f.lenBytes!);
+        int state = -1;
+        int? reason;
         for (final g in sub) {
-          if (g.fieldNo == 2) return g.varint ?? -1;
+          if (g.fieldNo == 2) state = g.varint ?? -1;
+          if (g.fieldNo == 10) reason = g.varint;
         }
-        return -1;
+        return _RespStatus(state, reason);
       }
     }
-    return -1;
+    return const _RespStatus(-1, null);
   }
+}
+
+class _RespStatus {
+  const _RespStatus(this.state, this.reason);
+  final int state;
+  final int? reason;
+}
+
+class _PollOutcome {
+  const _PollOutcome(this.ok, this.reason);
+  final bool ok;
+  final ProvFailReason reason;
 }
 
 // ─────────────── 内置最小 protobuf reader/writer ───────────────
