@@ -840,6 +840,9 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
    .\idf.ps1 build
    .\idf.ps1 -p COM4 flash monitor
    ```
+   分区表见 `partitions.csv`：`factory = 6M`（含 LVGL + BLE provisioning + Cloud + WS2812 全功能镜像）。
+   如果之前 build 报 `binary size has exceeded the limit`，拉新代码后先 `idf.py reconfigure` 让 IDF 重新读分区表。
+   NVS 偏移仍是 0x9000，已配网的板子无需 `erase-flash` 就能升级。
 3. **首次烧录后**：板子会广播 `ADHD_<MAC末4字节hex>`，用 App 的"配网毛绒球呼吸灯"完成 WiFi + 云端绑定；
    配网完成后板子自动 `wifi_prov_mgr_deinit` 关掉 BLE，**手机端不需要也无法再连这台板子的 BLE**。
 4. **重新配网**：
