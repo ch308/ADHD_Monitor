@@ -12,3 +12,16 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
 # WiFi STA（menuconfig 里 “Example Configuration” 可改；此处保证符号存在便于编译）
 CONFIG_EXAMPLE_WIFI_SSID=""
 CONFIG_EXAMPLE_WIFI_PASSWORD=""
+
+# ─── BLE provisioning 安全级别 ─────────────────────────────────────────────
+# 本项目 Flutter 端 (lib/services/esp_provision_service.dart) 只手写实现了 sec0
+# SessionData 协议；sec1/sec2 需要 SRP6a + PoP 等密码学握手，对端没有实现。
+# IDF 6.x 默认仅启用 sec2（关掉 sec0），导致 NETWORK_PROV_SECURITY_0 编译时
+# 不可见。这里强制启用 sec0；sec2 也保留，方便日后真要升级时 menuconfig 切换。
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2=y
+
+# ─── Suppress legacy I2C deprecation pragma ────────────────────────────────
+# QMI8658 / I2C_Driver 仍在用 legacy driver/i2c.h（v7.0 移除前还能用）。
+# 暂时关掉编译期的 #pragma message 噪音；下一步把 I2C 迁移到 i2c_master.h 时移除此行。
+CONFIG_I2C_SUPPRESS_DEPRECATE_WARN=y
