@@ -2,5 +2,5 @@ dependencies:
   idf: ">=4.4"
   lvgl/lvgl: "~8.3.0"
   espressif/led_strip: "^2.4.1"
-  # IDF 6.x 把 wifi_provisioning 从内置组件拆出来了，需要显式声明
-  espressif/wifi_provisioning: "*"
+  # IDF 6.x 把 provisioning 从内置组件拆出来了，改名 network_provisioning
+  espressif/network_provisioning: "^1.2.1"

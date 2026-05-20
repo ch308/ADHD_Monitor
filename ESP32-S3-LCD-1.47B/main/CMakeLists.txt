@@ -31,5 +31,6 @@ idf_component_register(
                               "./Simulated_Gesture"
                               "."
                          REQUIRES esp_http_client esp_netif esp_wifi esp_event nvs_flash
-                                  bt protocomm json esp_timer
+                                  bt protocomm cjson esp_timer esp_lcd esp_driver_ledc
+                                 fatfs spi_flash esp_adc sdmmc driver
                        )
