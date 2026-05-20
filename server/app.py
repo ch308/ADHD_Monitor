@@ -1497,12 +1497,23 @@ def _get_esp32_device(device_id: str):
 
 @app.route("/device/esp32/announce", methods=["POST"])
 def esp32_announce():
-    """ESP32 上电时调用。无需登录。"""
+    """ESP32 上电时调用。无需登录。
+
+    板子刚启动（包括正常重启 / 重新配网完成 / 掉电恢复）→ 此前队列里
+    残留的命令对新会话没有意义，必须丢掉，避免出现"用户重新配网完后
+    灯环莫名其妙开始呼吸"这种残留命令重放问题。
+    """
     data = request.json or {}
     device_id = _normalize_device_id(data.get("device_id") or "")
     if not _ESP32_DEVICE_ID_RE.match(device_id):
         return jsonify({"status": "error", "message": "invalid device_id"}), 400
     _touch_esp32_device(device_id, data.get("kind"))
+    with _esp32_cmd_lock:
+        dropped = _esp32_cmd_queue.pop(device_id, None)
+    if dropped:
+        app.logger.info(
+            "esp32 announce %s dropped %d stale cmd(s)", device_id, len(dropped)
+        )
     return jsonify({"status": "ok", "device_id": device_id}), 200
 
 
@@ -1681,6 +1692,15 @@ def esp32_cmd(device_id: str):
         cmd_obj.update(payload)
         with _esp32_cmd_lock:
             q = _esp32_cmd_queue.setdefault(device_id, deque())
+            # reset_provisioning 是终态操作：板子收到后立即清 NVS + 重启，
+            # 之前队列里堆着的灯效命令（如 breathing_start）对重启后的板子毫无意义，
+            # 全部丢弃，只保留 reset_provisioning 自己。
+            if action == "reset_provisioning" and len(q) > 0:
+                app.logger.info(
+                    "esp32 reset_provisioning for %s drops %d pending cmd(s)",
+                    device_id, len(q),
+                )
+                q.clear()
             q.append(cmd_obj)
             _esp32_cmd_lock.notify_all()
         return jsonify({"status": "ok", "queued": cmd_obj}), 200

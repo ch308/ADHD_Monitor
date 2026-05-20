@@ -395,6 +395,12 @@ flowchart TB
 - **二次开机**：Manager 检测到 NVS 已存凭据 → `wifi_prov_mgr_deinit` → 直接 `esp_wifi_start`，**完全不开 BLE**。
 - **Captive Portal 探测**：连上后跑一次 `http://connectivitycheck.gstatic.com/generate_204`，
   不是 204 就把 `WIFI_Sta_CaptivePortal=true` 抛出来给 UI 使用。
+- **断线重连策略**（家用路由器重启 / WiFi 长断时不掉队）：
+  - 前 8 次 `WIFI_EVENT_STA_DISCONNECTED` → 立即 `esp_wifi_connect()` 快速重连；
+  - 仍连不上 → 进入指数退避：30s → 60s → 120s → 240s → 480s（cap），用 `esp_timer_start_once`
+    一次性触发 `esp_wifi_connect()`，每次失败后退避档位 +1；
+  - 一旦 `IP_EVENT_STA_GOT_IP` 触发，定时器取消、retry 与退避档位双双清零。
+  - 这样即使家里路由器拔了一晚上，第二天恢复后板子也能在 ≤ 8 分钟内自动重新上线。
 - **重新配网**（换 WiFi / 换孩子 / 路由器换密码）有两条等价路径，最终都会调
   `Wireless_ResetProvisioning()` → `wifi_prov_mgr_reset_provisioning` + `esp_restart`，下次开机回到配网态：
   - **远程路径（推荐）**：App 在主页菜单点「让灯环重新配网」→ `triggerEsp32ResetProvisioning(deviceId)`
@@ -404,8 +410,17 @@ flowchart TB
   - **物理路径（兜底）**：板子离线时，长按 BOOT 键 ≥ 5 秒。
     `Button_Driver` 在 `LONG_PRESS_START` 记录时间戳，`LONG_PRESS_HOLD` 每 5 ms 检查一次累计时长，
     超过 5 s 时主动调 `Wireless_ResetProvisioning()`；中途松手会清零，避免误触。
+  - **`Wireless_ResetProvisioning()` 三层兜底**：
+    1) 先调 `wifi_prov_mgr_reset_provisioning()`；
+    2) 失败（manager 已 deinit 等）→ 调 `esp_wifi_restore()`；
+    3) 再失败 → 直接 `nvs_open("nvs.net80211")` + `nvs_erase_all` 把 WiFi 命名空间擦干净。
+       任一路径成功后 `esp_restart()`，确保下次开机一定回到 BLE 配网态。
   - 由于 `device_id` 来自 efuse MAC，**不会变**；服务器端的 `child_id ↔ device_id` 绑定关系也**会保留**，
     新一轮 BLE 配网完成后板子重新 announce 即立刻上线，无需 App 端再次走"绑定到孩子"流程。
+  - **服务器端配合**：每次 `POST /device/esp32/announce` 都会清空该 device 的 cmd 队列，
+    避免"用户重新配网完后灯环莫名其妙开始呼吸"这种残留命令重放问题；
+    `POST /device/<id>/cmd action=reset_provisioning` 在入队时也会先 `clear()` 旧命令，
+    保证 reset 是该轮 long-poll 的唯一动作。
 
 ```mermaid
 sequenceDiagram
@@ -449,12 +464,17 @@ timeout = (wait + 5)s = 30s
 
 | action | 字段 | 行为 |
 | --- | --- | --- |
-| `breathing_start` | `cycle_ms`（1200–30000） | `Set_Backlight(60)` + `RGB_Start_Breathing(cycle_ms)` |
-| `breathing_stop` | — | `RGB_Stop_Breathing` + `RGB_Stop_Countdown` + `Set_Backlight(0)` |
+| `breathing_start` | `cycle_ms`（1200–30000）<br/>`ttl_ms`（可选，默认 600000） | `Set_Backlight(60)` + `RGB_Start_Breathing(cycle_ms)` + arm watchdog |
+| `breathing_stop` | — | `RGB_Stop_Breathing` + `RGB_Stop_Countdown` + `Set_Backlight(0)` + cancel watchdog |
 | `countdown_start` | `total_ms`（1000–600000） | `Set_Backlight(60)` + `RGB_Start_Countdown(total_ms)` |
 | `countdown_stop` | — | `RGB_Stop_Countdown` |
-| `all_off` | — | `RGB_All_Off` + `Set_Backlight(0)` |
-| `reset_provisioning` | — | 关屏关灯后 `Wireless_ResetProvisioning()` → 清 NVS + `esp_restart` |
+| `all_off` | — | `RGB_All_Off` + `Set_Backlight(0)` + cancel watchdog |
+| `reset_provisioning` | — | 关屏关灯 + cancel watchdog 后 `Wireless_ResetProvisioning()` → 清 NVS + `esp_restart` |
+
+**呼吸 watchdog**：`breathing_start` 会用 `esp_timer_start_once` 启动一个一次性兜底定时器（默认 10 分钟，
+可通过 `ttl_ms` 字段覆盖）。如果 App 进程被杀 / 手机离线导致 `breathing_stop` 命令永远到不了，
+板子也不会一直亮着——定时器到期会自动 `RGB_All_Off + Set_Backlight(0)`。`breathing_stop` /
+`all_off` / `reset_provisioning` 都会取消这个定时器。
 
 云端也支持 `{"cmds":[…]}` 数组形式批量下发，板子按顺序执行。
 

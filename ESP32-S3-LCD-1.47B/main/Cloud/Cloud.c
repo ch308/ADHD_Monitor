@@ -33,6 +33,50 @@ static unsigned long s_last_success_ms = 0;
 static char s_resp_buf[CLOUD_RESP_MAX + 1];
 static size_t s_resp_len = 0;
 
+/** 呼吸 watchdog：如果手机端因为掉线 / 进程被杀，stop 命令丢了，
+ *  灯环不应该一直亮着。breathing_start 启动这个一次性定时器，
+ *  到期自动 RGB_All_Off + 灭屏；breathing_stop / all_off / reset_provisioning
+ *  会取消它。 */
+#define BREATHING_WATCHDOG_DEFAULT_MS  (10 * 60 * 1000)  /* 10 分钟 */
+static esp_timer_handle_t s_breathing_watchdog = NULL;
+
+static void breathing_watchdog_cb(void *arg)
+{
+    (void)arg;
+    ESP_LOGW(TAG, "breathing watchdog fired (stop cmd never arrived) → all_off");
+    RGB_All_Off();
+    Set_Backlight(0);
+}
+
+static void breathing_watchdog_arm(uint32_t timeout_ms)
+{
+    if (s_breathing_watchdog == NULL) {
+        const esp_timer_create_args_t targs = {
+            .callback = breathing_watchdog_cb,
+            .name = "breath_wdt",
+            .arg = NULL,
+        };
+        if (esp_timer_create(&targs, &s_breathing_watchdog) != ESP_OK) {
+            ESP_LOGE(TAG, "breathing watchdog create failed");
+            return;
+        }
+    }
+    /* 重置：先停再启，避免旧定时器和新的叠加 */
+    esp_timer_stop(s_breathing_watchdog);
+    if (timeout_ms == 0) {
+        timeout_ms = BREATHING_WATCHDOG_DEFAULT_MS;
+    }
+    esp_timer_start_once(s_breathing_watchdog, (uint64_t)timeout_ms * 1000ULL);
+    ESP_LOGI(TAG, "breathing watchdog armed: %u ms", (unsigned)timeout_ms);
+}
+
+static void breathing_watchdog_cancel(void)
+{
+    if (s_breathing_watchdog != NULL) {
+        esp_timer_stop(s_breathing_watchdog);
+    }
+}
+
 static unsigned long now_ms(void)
 {
     return (unsigned long)(esp_timer_get_time() / 1000ULL);
@@ -82,8 +126,15 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         if (cJSON_IsNumber(c)) {
             cycle_ms = c->valueint;
         }
+        /* 服务器可选下发 ttl_ms 覆盖默认 watchdog 时长（防丢 stop 命令） */
+        uint32_t ttl_ms = 0;
+        const cJSON *ttl = cJSON_GetObjectItemCaseSensitive(params, "ttl_ms");
+        if (cJSON_IsNumber(ttl) && ttl->valueint > 0) {
+            ttl_ms = (uint32_t)ttl->valueint;
+        }
         Set_Backlight(60);  /* 命令到了，把屏轻轻点亮一些 */
         RGB_Start_Breathing((uint32_t)cycle_ms);
+        breathing_watchdog_arm(ttl_ms);
         ESP_LOGI(TAG, "→ breathing_start cycle_ms=%d", cycle_ms);
         return;
     }
@@ -91,6 +142,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         RGB_Stop_Breathing();
         RGB_Stop_Countdown();
         Set_Backlight(0);
+        breathing_watchdog_cancel();
         ESP_LOGI(TAG, "→ breathing_stop");
         return;
     }
@@ -113,6 +165,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
     if (strcmp(action, "all_off") == 0) {
         RGB_All_Off();
         Set_Backlight(0);
+        breathing_watchdog_cancel();
         ESP_LOGI(TAG, "→ all_off");
         return;
     }
@@ -121,6 +174,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
          * Wireless_ResetProvisioning() 内部 esp_restart()，不会返回。 */
         RGB_All_Off();
         Set_Backlight(0);
+        breathing_watchdog_cancel();
         ESP_LOGW(TAG, "→ reset_provisioning (clear creds & reboot to BLE prov)");
         vTaskDelay(pdMS_TO_TICKS(300));
         Wireless_ResetProvisioning();
