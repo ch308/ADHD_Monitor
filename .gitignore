@@ -50,3 +50,14 @@ ESP32-S3-LCD-1.47B/.vscode/
 ESP32-S3-LCD-1.47B/managed_components/
 ESP32-S3-LCD-1.47B/sdkconfig.old
 ESP32-S3-LCD-1.47B/dependencies.lock
+
+# Server 本地产物 / 机密
+server/.venv/
+server/.env
+server/*.env
+.env
+.env.local
+.env.*.local
+server/adhd_data.db
+server/app.log
+server/app.error.log
