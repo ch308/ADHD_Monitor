@@ -926,6 +926,33 @@ menu "ADHD Monitor integration"
         depends on ADHD_MONITOR_REMOTE_CMD
         default 11760
         range 1 65535
+
+    config ADHD_MONITOR_BYPASS_OTA
+        bool "Bypass xiaozhi OTA (seed websocket NVS from Kconfig)"
+        depends on ADHD_MONITOR_REMOTE_CMD
+        default y
+        help
+            When enabled, firmware skips both CheckAssetsVersion and CheckNewVersion
+            (the original xiaozhi OTA path) and seeds the `websocket` NVS namespace
+            from ADHD_MONITOR_WS_URL / ADHD_MONITOR_WS_TOKEN at every boot.
+            InitializeProtocol() is forced to use the WebSocket protocol.
+            This makes Path A independent of any OTA/activation server.
+
+    config ADHD_MONITOR_WS_URL
+        string "ADHD Monitor xiaozhi WebSocket URL"
+        depends on ADHD_MONITOR_BYPASS_OTA
+        default "ws://127.0.0.1:11760/xiaozhi/ws"
+        help
+            Full ws:// or wss:// URL of /xiaozhi/ws on your ADHD_Monitor Flask server.
+            Example: ws://124.223.53.33:11760/xiaozhi/ws
+
+    config ADHD_MONITOR_WS_TOKEN
+        string "ADHD Monitor xiaozhi WebSocket token"
+        depends on ADHD_MONITOR_BYPASS_OTA
+        default ""
+        help
+            Optional. Sent as `Authorization: Bearer <token>` during the WS handshake.
+            Must match the server XIAOZHI_WEBSOCKET_TOKEN env var (or both be empty).
 endmenu
 
 endmenu

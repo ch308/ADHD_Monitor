@@ -1,22 +1,30 @@
 #include "adhd_remote_cmd.h"
 
-#if CONFIG_ADHD_MONITOR_REMOTE_CMD
-
-#include <cctype>
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 #include <cstring>
 #include <string>
+#include <esp_log.h>
+#endif
 
+#if CONFIG_ADHD_MONITOR_BYPASS_OTA
+#include "settings.h"
+#endif
+
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD
+#include <cctype>
 #include <cJSON.h>
 #include <esp_http_client.h>
-#include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-
 #include "application.h"
 #include "system_info.h"
+#endif
 
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 static const char* TAG = "adhd_cmd";
+#endif
 
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD
 static std::string MacNoColonUpper() {
     std::string mac = SystemInfo::GetMacAddress();
     std::string out;
@@ -29,6 +37,34 @@ static std::string MacNoColonUpper() {
     }
     return out;
 }
+#endif
+
+#if CONFIG_ADHD_MONITOR_BYPASS_OTA
+void adhd_remote_cmd_seed_settings(void) {
+    Settings settings("websocket", true);
+
+    const char* url = CONFIG_ADHD_MONITOR_WS_URL;
+    const char* token = CONFIG_ADHD_MONITOR_WS_TOKEN;
+    if (url && url[0] != '\0') {
+        if (settings.GetString("url") != std::string(url)) {
+            settings.SetString("url", url);
+        }
+    }
+    if (token && token[0] != '\0') {
+        if (settings.GetString("token") != std::string(token)) {
+            settings.SetString("token", token);
+        }
+    }
+    if (settings.GetInt("version") == 0) {
+        settings.SetInt("version", 1);
+    }
+    ESP_LOGI(TAG, "websocket NVS seeded: url=%s", url);
+}
+#else
+void adhd_remote_cmd_seed_settings(void) {}
+#endif
+
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD
 
 static bool HttpPostJson(const std::string& url, const std::string& body) {
     esp_http_client_config_t cfg = {};

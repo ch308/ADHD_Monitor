@@ -107,7 +107,7 @@ ADHD_Monitor/
 │
 └── server/
     ├── app.py                        # Flask 主程序（路由 + Kimi + 周报 + ESP32 长轮询 + Path A 注册）
-    ├── xiaozhi_bridge.py             # Path A：/xiaozhi/ota + /xiaozhi/ws（Kimi + edge-tts + 可选 Whisper）
+    ├── xiaozhi_bridge.py             # Path A：/xiaozhi/ws（Kimi + edge-tts + 可选 Whisper，无 OTA）
     ├── requirements.txt              # Python 依赖（含 flask-sock / opuslib / edge-tts 等）
     ├── ecosystem.config.js           # PM2 进程描述（从仓库外 env 文件注入密钥，见 §8.1）
     ├── .env.example                  # 环境变量模板（不含真实密钥，可复制到 ~/.config/…）
@@ -608,20 +608,28 @@ sequenceDiagram
 - ESP32 端 `Cloud.c` 两种都能解析。
 - hold 上限 60 s，下限 0 s；ESP32 客户端默认 25 s。
 
-### 5.4.1 Path A：小智（xiaozhi-esp32）自建语音云
+### 5.4.1 Path A：小智（xiaozhi-esp32）自建语音云（**无 OTA**）
 
-本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云：设备 OTA 拉取 `websocket.url` 指向本服务的 **`/xiaozhi/ws`**（WebSocket 音频 + JSON），语音链路为 **上行 Opus →（可选 Whisper）→ Kimi → edge-tts → 下行 Opus**。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧启用 **`ADHD_MONITOR_REMOTE_CMD`** 后，后台任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道并连上自建 WS。
+本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus →（可选 Whisper）→ Kimi → edge-tts → 下行 Opus**。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
 
 | 组件 | 说明 |
 |------|------|
-| `server/xiaozhi_bridge.py` | `GET/POST /xiaozhi/ota` 返回 OTA JSON（`websocket` / `server_time` 等）；`flask-sock` 注册 **`/xiaozhi/ws`** |
+| `server/xiaozhi_bridge.py` | 仅暴露 **`/xiaozhi/ws`**（`flask-sock`），握手时校验 `Authorization: Bearer <XIAOZHI_WEBSOCKET_TOKEN>`（留空则不校验）|
 | `server/app.py` | 扩展命令白名单 `xiaozhi_invoke_chat` / `xiaozhi_abort`；`device_id` 归一化去掉冒号；`submit_log` 后入队；绑定接口支持 **`kind`** |
-| `xiaozhi-esp32-2.2.4/main/adhd_remote_cmd.cc` | 长轮询 + `POST /device/esp32/announce`（`kind: xiaozhi`） |
+| `xiaozhi-esp32-2.2.4/main/adhd_remote_cmd.cc` | 启动时 `seed_settings()` 把 Kconfig 的 URL/token 写入 NVS；之后做 `POST /device/esp32/announce` + 长轮询 |
+| `xiaozhi-esp32-2.2.4/main/application.cc` | `CONFIG_ADHD_MONITOR_BYPASS_OTA` 打开后，`ActivationTask` 跳过 OTA 调用，`InitializeProtocol` 强制 `WebsocketProtocol` |
 | Flutter | 菜单「绑定小智设备 (MAC)」→ `bindEsp32(..., kind: 'xiaozhi')` |
 
-**服务器依赖**（`server/requirements.txt`）：`flask-sock`、`opuslib`（需系统 **libopus**）、**`ffmpeg`** 在 `PATH` 中、`edge-tts`；语音识别另需 **`OPENAI_API_KEY`**（Whisper 官方 API，与 Kimi 密钥分离）。**公网部署**请设置 **`ADHD_PUBLIC_BASE_URL`**（如 `https://你的域名:11760`）或分别设置 **`XIAOZHI_WEBSOCKET_URL`** / **`XIAOZHI_OTA_URL`**，以便 OTA JSON 中的 `wss://…` 对设备可达。
+**服务器依赖**（`server/requirements.txt`）：`flask-sock`、`opuslib`（需系统 **libopus**）、**`ffmpeg`** 在 `PATH` 中、`edge-tts`；语音识别另需 **`OPENAI_API_KEY`**（Whisper 官方 API，与 Kimi 密钥分离）。可设置 **`XIAOZHI_WEBSOCKET_TOKEN`** 强制设备携带匹配的 Bearer token；不设置则任何来源的 `/xiaozhi/ws` 都允许接入（仅用于内网/本地测试）。
 
-**固件配置**：`idf.py menuconfig` → **Xiaozhi Assistant → Default OTA URL** 设为 `http://<你的Flask>:11760/xiaozhi/ota`；再打开 **ADHD Monitor integration → Long-poll…**，填写与 OTA 同网可达的 **`ADHD_MONITOR_CMD_HOST`**（IP 或域名，不要带 `http://`）。烧录后设备会写入 NVS 中的 `websocket` 配置并走自建协议。
+**固件配置**：`idf.py menuconfig` → **ADHD Monitor integration**：
+
+1. 打开 **`Long-poll ADHD Monitor /device/<mac>/cmd`**；
+2. 填写 **`ADHD_MONITOR_CMD_HOST`** / **`ADHD_MONITOR_CMD_PORT`**（用于命令通道与 announce）；
+3. 默认勾选的 **`Bypass xiaozhi OTA (seed websocket NVS from Kconfig)`** 保留打开；
+4. 填写 **`ADHD_MONITOR_WS_URL`**（例：`ws://124.223.53.33:11760/xiaozhi/ws`）与可选的 **`ADHD_MONITOR_WS_TOKEN`**（与服务器 `XIAOZHI_WEBSOCKET_TOKEN` 一致）。
+
+烧录后无需任何 OTA URL 配置——设备每次启动都用 Kconfig 中的值覆盖 NVS `websocket` 命名空间，并直接走 WebSocket 协议。
 
 ### 5.5 AI 单次建议 & 趋势对比
 

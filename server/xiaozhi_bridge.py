@@ -1,5 +1,8 @@
-# Path A: xiaozhi-esp32 WebSocket bridge (hello / listen / opus) + OTA JSON + session hints
-# for Kimi replies and edge-tts playback. Optional ASR: OpenAI Whisper (OPENAI_API_KEY).
+# Path A: xiaozhi-esp32 WebSocket bridge (hello / listen / opus) + Kimi reply +
+# edge-tts playback. OTA is intentionally NOT exposed here — devices must be
+# pre-flashed with `CONFIG_ADHD_MONITOR_BYPASS_OTA=y` so they seed the
+# `websocket` NVS namespace from Kconfig at boot and never call any OTA
+# endpoint. Optional ASR: OpenAI Whisper (set OPENAI_API_KEY).
 
 from __future__ import annotations
 
@@ -12,7 +15,6 @@ import tempfile
 import time
 import uuid
 import wave
-from typing import Any
 
 import requests
 from openai import OpenAI
@@ -49,30 +51,8 @@ def pop_xinvoke_hint(device_id: str) -> dict[str, str]:
     return ent[1]
 
 
-def _public_ws_url() -> str:
-    u = (os.getenv("XIAOZHI_WEBSOCKET_URL") or "").strip()
-    if u:
-        return u
-    base = (os.getenv("ADHD_PUBLIC_BASE_URL") or "").strip().rstrip("/")
-    if base.startswith("https://"):
-        return "wss://" + base[len("https://") :] + "/xiaozhi/ws"
-    if base.startswith("http://"):
-        return "ws://" + base[len("http://") :] + "/xiaozhi/ws"
-    return ""
-
-
-def _public_ota_http_url() -> str:
-    u = (os.getenv("XIAOZHI_OTA_URL") or "").strip()
-    if u:
-        return u
-    base = (os.getenv("ADHD_PUBLIC_BASE_URL") or "").strip().rstrip("/")
-    if base:
-        return base + "/xiaozhi/ota"
-    return ""
-
-
-def _ws_token() -> str:
-    return (os.getenv("XIAOZHI_WEBSOCKET_TOKEN") or "adhd-local-token").strip()
+def _expected_token() -> str:
+    return (os.getenv("XIAOZHI_WEBSOCKET_TOKEN") or "").strip()
 
 
 def _unpack_uplink_audio_v2_v3(protocol_version: int, data: bytes) -> bytes | None:
@@ -198,7 +178,9 @@ def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
     try:
 
         async def _run() -> None:
-            comm = edge_tts.Communicate(text, os.getenv("XIAOZHI_TTS_VOICE", "zh-CN-XiaoxiaoNeural"))
+            comm = edge_tts.Communicate(
+                text, os.getenv("XIAOZHI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+            )
             await comm.save(mp3)
 
         asyncio.run(_run())
@@ -222,7 +204,9 @@ def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
         raw = open(pcm_path, "rb").read()
         if not raw:
             return []
-        enc = __import__("opuslib").Encoder(out_sr, 1, __import__("opuslib").APPLICATION_VOIP)
+        enc = __import__("opuslib").Encoder(
+            out_sr, 1, __import__("opuslib").APPLICATION_VOIP
+        )
         samples_per_frame = int(out_sr * 60 / 1000)
         bytes_per_frame = samples_per_frame * 2
         packets: list[bytes] = []
@@ -251,12 +235,13 @@ class XiaozhiConn:
         self.uplink_packets: list[bytes] = []
         self.device_mac = ""
         self._session_ended = False
+        self.hint_opening = ""
+        self.hint_context = ""
 
     def send_json(self, obj: dict) -> None:
         self.ws.send(json.dumps(obj, ensure_ascii=False))
 
     def run(self) -> None:
-        # Device-Id from handshake (Werkzeug stores headers on environ)
         try:
             from flask import request
 
@@ -334,7 +319,9 @@ class XiaozhiConn:
             except OSError:
                 pass
         if not user_text:
-            user_text = "（没有听清你说的话；若需语音识别请配置 OPENAI_API_KEY 以使用 Whisper。）"
+            user_text = (
+                "（没有听清你说的话；若需语音识别请配置 OPENAI_API_KEY 以使用 Whisper。）"
+            )
         self._reply_turn(user_text)
 
     def _reply_turn(self, user_text: str) -> None:
@@ -346,13 +333,20 @@ class XiaozhiConn:
             "回答控制在 2～4 句中文。"
         )
         if self.hint_context:
-            sys_prompt += "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考）：\n" + self.hint_context
+            sys_prompt += (
+                "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考）：\n"
+                + self.hint_context
+            )
         reply = _kimi_reply(sys_prompt, user_text)
         if self.hint_opening and len(reply) < 400:
             reply = self.hint_opening + reply
 
-        self.send_json({"session_id": self.session_id, "type": "stt", "text": user_text})
-        self.send_json({"session_id": self.session_id, "type": "tts", "state": "start"})
+        self.send_json(
+            {"session_id": self.session_id, "type": "stt", "text": user_text}
+        )
+        self.send_json(
+            {"session_id": self.session_id, "type": "tts", "state": "start"}
+        )
         self.send_json(
             {
                 "session_id": self.session_id,
@@ -363,7 +357,9 @@ class XiaozhiConn:
         )
         for pkt in _tts_to_opus_packets(reply, 24000):
             self.ws.send(pkt)
-        self.send_json({"session_id": self.session_id, "type": "tts", "state": "stop"})
+        self.send_json(
+            {"session_id": self.session_id, "type": "tts", "state": "stop"}
+        )
         try:
             self.ws.close()
         except Exception:
@@ -371,42 +367,26 @@ class XiaozhiConn:
 
 
 def register_xiaozhi(app, sock) -> None:
-    from flask import jsonify, request
-
-    @app.route("/xiaozhi/ota", methods=["GET", "POST"])
-    def xiaozhi_ota():
-        body: dict[str, Any] = {}
-        if request.method == "POST":
-            try:
-                body = request.get_json(force=True, silent=True) or {}
-            except Exception:
-                body = {}
-        app_ver = "0.0.0"
-        if isinstance(body, dict):
-            app_obj = body.get("application")
-            if isinstance(app_obj, dict):
-                app_ver = str(app_obj.get("version") or app_ver)
-
-        ws_url = _public_ws_url()
-        ota_self = _public_ota_http_url()
-        if not ws_url:
-            log.warning("XIAOZHI_WEBSOCKET_URL / ADHD_PUBLIC_BASE_URL unset; device WS URL empty")
-
-        resp = {
-            "firmware": {"version": app_ver, "url": ""},
-            "websocket": {
-                "url": ws_url,
-                "token": _ws_token(),
-                "version": 1,
-            },
-            "server_time": {"timestamp": int(time.time() * 1000), "timezone_offset": 480},
-        }
-        if ota_self:
-            resp["ota"] = {"url": ota_self}
-        return jsonify(resp)
+    """Mount only the WebSocket endpoint on the shared Flask app + flask-sock."""
+    from flask import request
 
     @sock.route("/xiaozhi/ws")
     def xiaozhi_ws(ws):
+        expected = _expected_token()
+        if expected:
+            sent = (request.headers.get("Authorization") or "").strip()
+            if sent.startswith("Bearer "):
+                sent = sent[len("Bearer ") :].strip()
+            if sent != expected:
+                log.warning(
+                    "xiaozhi ws rejected: token mismatch from device %s",
+                    request.headers.get("Device-Id", "?"),
+                )
+                try:
+                    ws.close()
+                except Exception:
+                    pass
+                return
         try:
             XiaozhiConn(ws).run()
         except Exception:

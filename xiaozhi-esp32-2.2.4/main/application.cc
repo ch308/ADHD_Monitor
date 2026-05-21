@@ -327,11 +327,18 @@ void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
+#if CONFIG_ADHD_MONITOR_BYPASS_OTA
+    // Path A: skip both CheckAssetsVersion and CheckNewVersion entirely.
+    // The websocket NVS is seeded from Kconfig before protocol init.
+    ESP_LOGI(TAG, "ADHD bypass OTA: seeding websocket NVS from Kconfig");
+    adhd_remote_cmd_seed_settings();
+#else
     // Check for new assets version
     CheckAssetsVersion();
 
     // Check for new firmware version
     CheckNewVersion();
+#endif
 
     // Initialize the protocol
     InitializeProtocol();
@@ -480,6 +487,11 @@ void Application::InitializeProtocol() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
+#if CONFIG_ADHD_MONITOR_BYPASS_OTA
+    // Path A always speaks WebSocket against ADHD_Monitor Flask.
+    ESP_LOGI(TAG, "ADHD bypass OTA: forcing WebsocketProtocol");
+    protocol_ = std::make_unique<WebsocketProtocol>();
+#else
     if (ota_->HasMqttConfig()) {
         protocol_ = std::make_unique<MqttProtocol>();
     } else if (ota_->HasWebsocketConfig()) {
@@ -488,6 +500,7 @@ void Application::InitializeProtocol() {
         ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
         protocol_ = std::make_unique<MqttProtocol>();
     }
+#endif
 
     protocol_->OnConnected([this]() {
         DismissAlert();
