@@ -3,7 +3,7 @@
 面向 ADHD（注意缺陷多动障碍）与自闭症谱系家庭的"边缘+云"陪伴方案。
 小米手环采集心率与压力，Flutter App 在父母手机端实时展示并触发陪伴流程，
 ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道具，
-腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发。
+腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发；可选接入 **小智 xiaozhi-esp32** 自建语音与远程唤醒（Path A，见 §5.4.1）。
 
 ---
 
@@ -102,8 +102,13 @@ ADHD_Monitor/
 │   ├── partitions.csv / sdkconfig    # 16 MB Flash, Octal PSRAM
 │   └── idf_component.yml             # 含 network_provisioning / led_strip / lvgl 等
 │
+├── xiaozhi-esp32-2.2.4/              # 小智 AI 固件（Path A：menuconfig 改 OTA + 可选 ADHD 长轮询）
+│   └── main/                         # 含 adhd_remote_cmd.cc（CONFIG_ADHD_MONITOR_REMOTE_CMD）
+│
 └── server/
-    ├── app.py                        # Flask 主程序（路由 + Kimi + 周报调度 + ESP32 长轮询）
+    ├── app.py                        # Flask 主程序（路由 + Kimi + 周报 + ESP32 长轮询 + Path A 注册）
+    ├── xiaozhi_bridge.py             # Path A：/xiaozhi/ota + /xiaozhi/ws（Kimi + edge-tts + 可选 Whisper）
+    ├── requirements.txt              # Python 依赖（含 flask-sock / opuslib / edge-tts 等）
     ├── ecosystem.config.js           # PM2 进程描述（从仓库外 env 文件注入密钥，见 §8.1）
     ├── .env.example                  # 环境变量模板（不含真实密钥，可复制到 ~/.config/…）
     ├── .venv/                        # 建议的 Python venv（本地创建，已 .gitignore）
@@ -602,6 +607,21 @@ sequenceDiagram
 - 单条命令时返回 `{action, …}`；多条时返回 `{cmds: [...]}`。
 - ESP32 端 `Cloud.c` 两种都能解析。
 - hold 上限 60 s，下限 0 s；ESP32 客户端默认 25 s。
+
+### 5.4.1 Path A：小智（xiaozhi-esp32）自建语音云
+
+本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云：设备 OTA 拉取 `websocket.url` 指向本服务的 **`/xiaozhi/ws`**（WebSocket 音频 + JSON），语音链路为 **上行 Opus →（可选 Whisper）→ Kimi → edge-tts → 下行 Opus**。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧启用 **`ADHD_MONITOR_REMOTE_CMD`** 后，后台任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道并连上自建 WS。
+
+| 组件 | 说明 |
+|------|------|
+| `server/xiaozhi_bridge.py` | `GET/POST /xiaozhi/ota` 返回 OTA JSON（`websocket` / `server_time` 等）；`flask-sock` 注册 **`/xiaozhi/ws`** |
+| `server/app.py` | 扩展命令白名单 `xiaozhi_invoke_chat` / `xiaozhi_abort`；`device_id` 归一化去掉冒号；`submit_log` 后入队；绑定接口支持 **`kind`** |
+| `xiaozhi-esp32-2.2.4/main/adhd_remote_cmd.cc` | 长轮询 + `POST /device/esp32/announce`（`kind: xiaozhi`） |
+| Flutter | 菜单「绑定小智设备 (MAC)」→ `bindEsp32(..., kind: 'xiaozhi')` |
+
+**服务器依赖**（`server/requirements.txt`）：`flask-sock`、`opuslib`（需系统 **libopus**）、**`ffmpeg`** 在 `PATH` 中、`edge-tts`；语音识别另需 **`OPENAI_API_KEY`**（Whisper 官方 API，与 Kimi 密钥分离）。**公网部署**请设置 **`ADHD_PUBLIC_BASE_URL`**（如 `https://你的域名:11760`）或分别设置 **`XIAOZHI_WEBSOCKET_URL`** / **`XIAOZHI_OTA_URL`**，以便 OTA JSON 中的 `wss://…` 对设备可达。
+
+**固件配置**：`idf.py menuconfig` → **Xiaozhi Assistant → Default OTA URL** 设为 `http://<你的Flask>:11760/xiaozhi/ota`；再打开 **ADHD Monitor integration → Long-poll…**，填写与 OTA 同网可达的 **`ADHD_MONITOR_CMD_HOST`**（IP 或域名，不要带 `http://`）。烧录后设备会写入 NVS 中的 `websocket` 配置并走自建协议。
 
 ### 5.5 AI 单次建议 & 趋势对比
 

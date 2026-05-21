@@ -166,16 +166,25 @@ class CloudService {
   }
 
   /// 把 ESP32 device_id 绑到指定孩子。需要登录 + 是该孩子的成员。
-  Future<bool> bindEsp32(String deviceId, int childIdToBind) async {
+  /// [kind] 例如 `xiaozhi` 用于小智板；毛绒球可不传。
+  Future<bool> bindEsp32(
+    String deviceId,
+    int childIdToBind, {
+    String? kind,
+  }) async {
     try {
+      final body = <String, dynamic>{
+        'device_id': deviceId.toUpperCase(),
+        'child_id': childIdToBind,
+      };
+      if (kind != null && kind.trim().isNotEmpty) {
+        body['kind'] = kind.trim();
+      }
       final r = await http
           .post(
             Uri.parse('${_base()}/device/esp32/bind'),
             headers: _authHeaders(),
-            body: json.encode({
-              'device_id': deviceId.toUpperCase(),
-              'child_id': childIdToBind,
-            }),
+            body: json.encode(body),
           )
           .timeout(timeout);
       if (r.statusCode >= 200 && r.statusCode < 300) {
