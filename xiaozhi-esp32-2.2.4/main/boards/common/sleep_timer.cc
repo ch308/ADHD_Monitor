@@ -99,7 +99,7 @@ void SleepTimer::CheckTimer() {
                     esp_light_sleep_start();
                     lvgl_port_resume();
 
-                    auto wakeup_reason = esp_sleep_get_wakeup_cause();
+                    auto wakeup_reason = esp_sleep_get_wakeup_causes();
                     ESP_LOGI(TAG, "Wake up from light sleep, wakeup_reason: %d", wakeup_reason);
                     if (wakeup_reason != ESP_SLEEP_WAKEUP_TIMER) {
                         break;
