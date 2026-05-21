@@ -11,12 +11,7 @@
       "Bash(ssh *)",
       "Bash(C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe *)",
       "Bash(cmd *)",
-      "WebFetch(domain:124.223.53.33)",
-      "Bash(ls -la c:/adhd_monitor/adhd_monitor/xiaozhi-esp32-2.2.4/ 2>/dev/null || ls -la c:/adhd_monitor/xiaozhi-esp32-2.2.4/ 2>/dev/null || echo \"Not found at expected paths\")",
-      "Read(//c/adhd_monitor/**)",
-      "Read(//c/esp/**)",
-      "Read(//c/Users/Administrator/**)",
-      "WebFetch(domain:components.espressif.com)"
+      "WebFetch(domain:124.223.53.33)"
     ]
   }
 }
