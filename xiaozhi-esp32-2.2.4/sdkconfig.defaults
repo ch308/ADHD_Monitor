@@ -76,3 +76,13 @@ CONFIG_LV_USE_WIN=n
 CONFIG_LV_BUILD_EXAMPLES=n
 CONFIG_LV_BUILD_DEMOS=n
 
+# ADHD Monitor 星星机器人 BLE WiFi provisioning (Path A).
+# Without these the firmware silently falls back to USE_HOTSPOT_WIFI_PROVISIONING
+# (its Kconfig default), the BLE branch in wifi_board.cc never compiles, and
+# the Flutter app cannot find any "XIAOZHI_<MAC>" advertisement.
+# CONFIG_USE_HOTSPOT_WIFI_PROVISIONING is not set
+CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING=y
+CONFIG_BT_ENABLED=y
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y
+
