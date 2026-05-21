@@ -92,17 +92,52 @@ class ProvResult {
   final ProvFailReason failReason;
 }
 
+/// 我们支持的 ESP32 设备种类。
+///
+/// - [plush]：ESP32-S3-LCD 毛绒球呼吸灯，BLE 广播名前缀 `ADHD_`。
+/// - [xiaozhi]：xiaozhi-esp32 星星机器人，BLE 广播名前缀 `XIAOZHI_`。
+///
+/// 两种设备共用同一个 protocomm 服务 UUID 与 sec0 协议，唯一区别就是
+/// 广播名前缀 → 在 Flutter 端按前缀分流，避免在同一次扫描里把两种设备混进
+/// 同一个绑定流程。
+enum EspProvKind {
+  plush,
+  xiaozhi;
+
+  /// BLE 广播名前缀（设备端 `network_prov_mgr_start_provisioning` 里设的）。
+  String get advPrefix {
+    switch (this) {
+      case EspProvKind.plush:
+        return 'ADHD_';
+      case EspProvKind.xiaozhi:
+        return 'XIAOZHI_';
+    }
+  }
+
+  /// `cloud_service.bindEsp32(...)` 的 `kind` 字段，写到 `esp32_devices.kind`，
+  /// 服务器据此决定 submit_log 后是否自动入队 `xiaozhi_invoke_chat`。
+  String? get bindKind {
+    switch (this) {
+      case EspProvKind.plush:
+        return null; // 默认 esp32-s3-lcd
+      case EspProvKind.xiaozhi:
+        return 'xiaozhi';
+    }
+  }
+}
+
 class EspProvisionService {
-  static const _kAdvPrefix = 'ADHD_';
   static const _scanTimeout = Duration(seconds: 10);
   static const _ioTimeout = Duration(seconds: 8);
 
-  /// 扫描在线的 ADHD ESP32 板子。
+  /// 扫描在线的 ADHD ESP32 板子；按 [kind] 过滤广播名前缀。
   /// 返回的列表按 RSSI 强到弱排序。
   static Future<List<EspProvDevice>> scan({
     Duration timeout = _scanTimeout,
+    EspProvKind kind = EspProvKind.plush,
   }) async {
     final results = <String, EspProvDevice>{};
+    final advPrefix = kind.advPrefix;
     StreamSubscription<List<ScanResult>>? sub;
     try {
       if (await FlutterBluePlus.isScanning.first) {
@@ -113,8 +148,8 @@ class EspProvisionService {
           final name = r.device.platformName.isNotEmpty
               ? r.device.platformName
               : r.advertisementData.advName;
-          if (!name.startsWith(_kAdvPrefix)) continue;
-          final deviceId = name.substring(_kAdvPrefix.length).toUpperCase();
+          if (!name.startsWith(advPrefix)) continue;
+          final deviceId = name.substring(advPrefix.length).toUpperCase();
           if (deviceId.isEmpty) continue;
           results[deviceId] = EspProvDevice(
             deviceId: deviceId,

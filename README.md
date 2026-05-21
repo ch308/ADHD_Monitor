@@ -618,16 +618,22 @@ sequenceDiagram
 | `server/app.py` | 扩展命令白名单 `xiaozhi_invoke_chat` / `xiaozhi_abort`；`device_id` 归一化去掉冒号；`submit_log` 后入队；绑定接口支持 **`kind`** |
 | `xiaozhi-esp32-2.2.4/main/adhd_remote_cmd.cc` | 启动时 `seed_settings()` 把 Kconfig 的 URL/token 写入 NVS；之后做 `POST /device/esp32/announce` + 长轮询 |
 | `xiaozhi-esp32-2.2.4/main/application.cc` | `CONFIG_ADHD_MONITOR_BYPASS_OTA` 打开后，`ActivationTask` 跳过 OTA 调用，`InitializeProtocol` 强制 `WebsocketProtocol` |
-| Flutter | 菜单「绑定小智设备 (MAC)」→ `bindEsp32(..., kind: 'xiaozhi')` |
+| Flutter | 顶栏菜单「**配网星星机器人** / **让星星机器人重新配网**」→ 与毛绒球同源的 `EspProvisionPage`（`kind: EspProvKind.xiaozhi`）；广播名前缀 `XIAOZHI_<MAC8>`，绑定时向云端打 `kind=xiaozhi` 标签。也保留「绑定小智设备 (MAC)」做手动 fallback |
+| `xiaozhi-esp32-2.2.4/main/adhd_prov_ble.{h,cc}` | 当 `CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING=y` 时启用：用 ESP-IDF `network_prov_mgr` + `scheme_ble`（security 0、服务 UUID `ad480001-…`）暴露与毛绒球**完全相同的 BLE 配网协议**，广播名 `XIAOZHI_<MAC8>`；NETWORK_PROV_END 后 `esp_restart()` 让 xiaozhi 自带的 `WifiManager` 在下次启动时读 NVS 接管 STA。`reset_provisioning` 命令通过 `adhd_remote_cmd.cc` 触发 |
 
 **服务器依赖**（`server/requirements.txt`）：`flask-sock`、`opuslib`（需系统 **libopus**）、**`ffmpeg`** 在 `PATH` 中、`edge-tts`、`requests`；语音识别走 **百度短语音识别标准版**（[文档](https://cloud.baidu.com/doc/SPEECH/s/Jlbxdezuf)），需要在百度智能云控制台创建语音应用拿到 **`BAIDU_SPEECH_API_KEY`** / **`BAIDU_SPEECH_SECRET_KEY`**，写到 `~/.config/adhd-monitor.env`。可选 **`BAIDU_SPEECH_DEV_PID`**（默认 1537=普通话）、**`BAIDU_SPEECH_CUID`**（控制台调用源标识）。可设置 **`XIAOZHI_WEBSOCKET_TOKEN`** 强制设备携带匹配的 Bearer token；不设置则任何来源的 `/xiaozhi/ws` 都允许接入（仅用于内网/本地测试）。
 
-**固件配置**：`idf.py menuconfig` → **ADHD Monitor integration**：
+**固件配置**：`idf.py menuconfig`：
 
-1. 打开 **`Long-poll ADHD Monitor /device/<mac>/cmd`**；
-2. 填写 **`ADHD_MONITOR_CMD_HOST`** / **`ADHD_MONITOR_CMD_PORT`**（用于命令通道与 announce）；
-3. 默认勾选的 **`Bypass xiaozhi OTA (seed websocket NVS from Kconfig)`** 保留打开；
-4. 填写 **`ADHD_MONITOR_WS_URL`**（例：`ws://124.223.53.33:11760/xiaozhi/ws`）与可选的 **`ADHD_MONITOR_WS_TOKEN`**（与服务器 `XIAOZHI_WEBSOCKET_TOKEN` 一致）。
+1. **ADHD Monitor integration**：
+   1. 打开 **`Long-poll ADHD Monitor /device/<mac>/cmd`**；
+   2. 填写 **`ADHD_MONITOR_CMD_HOST`** / **`ADHD_MONITOR_CMD_PORT`**（命令通道 + announce + `reset_provisioning`）；
+   3. 默认勾选的 **`Bypass xiaozhi OTA (seed websocket NVS from Kconfig)`** 保留打开；
+   4. 填写 **`ADHD_MONITOR_WS_URL`**（例：`ws://124.223.53.33:11760/xiaozhi/ws`）与可选的 **`ADHD_MONITOR_WS_TOKEN`**（与服务器 `XIAOZHI_WEBSOCKET_TOKEN` 一致）。
+2. **WiFi Configuration Method**：勾选 **`ADHD Monitor BLE (network_provisioning, sec0)`**。其余三项（Hotspot / Acoustic / Esp Blufi）保持关闭，否则 `WifiBoard::StartWifiConfigMode()` 会优先走那条路径。这一项打开后：
+   - 出厂未配网时启动会广播 `XIAOZHI_<MAC8>`（与毛绒球的 `ADHD_<MAC8>` 同协议、同服务 UUID `ad480001-…`），App 在「配网星星机器人」页面扫到后即可写入 SSID/密码；
+   - 配网成功 → `esp_restart()` → xiaozhi 自带的 `WifiManager` 用 NVS 中的凭据接管 STA → 长轮询 `/device/<MAC>/cmd` + 走 `/xiaozhi/ws`；
+   - 「让星星机器人重新配网」下发 `reset_provisioning` 命令 → `adhd_prov_ble_reset_and_reboot()` 清掉 wifi NVS（包括 xiaozhi `SsidManager` 用的 `wifi` 命名空间）→ 重启重新进入 BLE 配网。
 
 烧录后无需任何 OTA URL 配置——设备每次启动都用 Kconfig 中的值覆盖 NVS `websocket` 命名空间，并直接走 WebSocket 协议。
 

@@ -13,6 +13,7 @@ import '../models/band_stress_data.dart';
 import '../models/device_binding.dart';
 import '../models/heart_rate_data.dart';
 import '../services/cloud_service.dart';
+import '../services/esp_provision_service.dart' show EspProvKind;
 import '../services/foreground_task_service.dart';
 import '../services/miband_service.dart';
 import '../services/session_store.dart';
@@ -127,6 +128,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   /// 当前孩子已绑定的毛绒球呼吸灯 device_id（null=未绑定/未配网）
   String? _boundEsp32DeviceId;
 
+  /// 当前孩子已绑定的 xiaozhi 星星机器人 device_id（null=未绑定/未配网）
+  String? _boundXiaozhiDeviceId;
+
   /// 手环 stress 触发"还在焦虑中"的阈值（小米手环 stress 0-100），可由家长滑动调整。
   static const int _defaultStressAlertThreshold = 60;
   int _stressAlertThreshold = _defaultStressAlertThreshold;
@@ -198,6 +202,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     unawaited(_initForegroundService());
     // 从本地缓存恢复"当前孩子绑定的 ESP32"
     unawaited(_restoreBoundEsp32());
+    unawaited(_restoreBoundXiaozhi());
     unawaited(_restoreStressThreshold());
   }
 
@@ -212,6 +217,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     if (!mounted) return;
     if (id != null && id.isNotEmpty) {
       setState(() => _boundEsp32DeviceId = id);
+    }
+  }
+
+  Future<void> _restoreBoundXiaozhi() async {
+    final id = await SessionStore.getBoundXiaozhi(widget.activeChildId);
+    if (!mounted) return;
+    if (id != null && id.isNotEmpty) {
+      setState(() => _boundXiaozhiDeviceId = id);
     }
   }
 
@@ -816,6 +829,25 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
   }
 
+  /// 入口：跳转到 xiaozhi 星星机器人 BLE 配网页面（与毛绒球完全相同的 UI 和流程，
+  /// 只是广播名前缀换成 `XIAOZHI_`、绑定时给云端打 `kind=xiaozhi` 标签）。
+  Future<void> _openXiaozhiProvisionPage() async {
+    final id = await Navigator.of(context).push<String>(
+      MaterialPageRoute<String>(
+        builder: (ctx) => EspProvisionPage(
+          cloudService: _cloudService,
+          activeChildId: widget.activeChildId,
+          currentBoundDeviceId: _boundXiaozhiDeviceId,
+          kind: EspProvKind.xiaozhi,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (id != null && id.isNotEmpty) {
+      setState(() => _boundXiaozhiDeviceId = id);
+    }
+  }
+
   /// 让当前绑定的毛绒球呼吸灯清空 WiFi 凭据并重启进入 BLE 配网模式。
   ///
   /// 适用场景：换路由器 / 换 WiFi 密码 / 想把毛绒球呼吸灯搬到别的网络。
@@ -879,6 +911,69 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
   }
 
+  /// 让当前绑定的 xiaozhi 星星机器人清空 WiFi 凭据并重启进入 BLE 配网模式。
+  ///
+  /// 命令流和毛绒球一致：服务器把 `reset_provisioning` 入队，板子长轮询拿到
+  /// 后调用 `adhd_prov_ble_reset_and_reboot()` 清掉 NVS 里的 wifi 凭据 + 重启，
+  /// 之后会广播 `XIAOZHI_<MAC8>`，App 在配网页一扫就看到。
+  Future<void> _resetXiaozhiProvisioning() async {
+    final deviceId = _boundXiaozhiDeviceId;
+    if (deviceId == null || deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前孩子还没有绑定星星机器人，无法发起远程重新配网。'
+              '请先用"配网星星机器人"完成首次配网。'),
+        ),
+      );
+      return;
+    }
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('让星星机器人重新配网？'),
+        content: Text(
+          '将向星星机器人 $deviceId 下发重启指令：\n'
+          '• 板子会清掉当前 WiFi 凭据并重启；\n'
+          '• 重启后会广播 XIAOZHI_$deviceId，等待手机 BLE 配网；\n'
+          '• 服务器端绑定不变，配网完成后会自动重新上线。\n\n'
+          '确认继续吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('确认重启星星机器人'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final pushed = await _cloudService.triggerEsp32ResetProvisioning(deviceId);
+    if (!mounted) return;
+    if (!pushed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('远程重启命令下发失败：星星机器人当前可能离线。'
+              '可以长按板子 BOOT 键 5 秒进入物理重置流程。'),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已下发重启命令，星星机器人将在数秒内广播 XIAOZHI_$deviceId，'
+            '请点击右上角"配网星星机器人"完成 BLE 配网。'),
+        duration: const Duration(seconds: 6),
+      ),
+    );
+  }
+
   /// 绑定小智（xiaozhi）板：输入 WiFi MAC，服务器 `esp32_devices.kind` 记为 xiaozhi，用于 submit_log 后自动唤醒。
   Future<void> _showXiaozhiBindDialog() async {
     final ctrl = TextEditingController();
@@ -933,6 +1028,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       widget.activeChildId,
       kind: 'xiaozhi',
     );
+    if (!mounted) return;
+    if (ok) {
+      // 让"让星星机器人重新配网"知道该往哪台设备发命令。
+      await SessionStore.saveBoundXiaozhi(widget.activeChildId, raw);
+      if (mounted) setState(() => _boundXiaozhiDeviceId = raw);
+    }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -1538,6 +1639,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'stress_threshold') await _showStressThresholdDialog();
               if (v == 'esp_prov') await _openEspProvisionPage();
               if (v == 'esp_reset') await _resetEsp32Provisioning();
+              if (v == 'xiaozhi_prov') await _openXiaozhiProvisionPage();
+              if (v == 'xiaozhi_reset') await _resetXiaozhiProvisioning();
               if (v == 'xiaozhi_bind') await _showXiaozhiBindDialog();
             },
             itemBuilder: (ctx) => [
@@ -1561,6 +1664,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
               const PopupMenuItem(value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
+              const PopupMenuItem(
+                value: 'xiaozhi_prov',
+                child: Text('配网星星机器人'),
+              ),
+              const PopupMenuItem(
+                value: 'xiaozhi_reset',
+                child: Text('让星星机器人重新配网'),
+              ),
               const PopupMenuItem(
                 value: 'xiaozhi_bind',
                 child: Text('绑定小智设备 (MAC)'),

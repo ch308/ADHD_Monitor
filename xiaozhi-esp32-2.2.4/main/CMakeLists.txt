@@ -33,6 +33,7 @@ set(SOURCES "audio/audio_codec.cc"
             "system_info.cc"
             "application.cc"
             "adhd_remote_cmd.cc"
+            "adhd_prov_ble.cc"
             "ota.cc"
             "settings.cc"
             "device_state_machine.cc"
@@ -914,6 +915,7 @@ idf_component_register(SRCS ${SOURCES}
                         efuse
                         bt
                         fatfs
+                        network_provisioning
                     )
 
 # Use target_compile_definitions to define BOARD_TYPE, BOARD_NAME
