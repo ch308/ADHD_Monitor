@@ -31,7 +31,7 @@ dependencies:
   78/xiaozhi-fonts: ~1.6.0
   espressif/led_strip: ~3.0.2
   espressif/esp_codec_dev: ~1.5.4
-  espressif/esp-sr: ~2.3.0
+  espressif/esp-sr: ~2.4.1
   espressif/button: ~4.1.5
   espressif/knob: ^1.0.0
   espressif/esp32-camera:
@@ -121,6 +121,19 @@ dependencies:
     version: ^0.3.1
     rules:
     - if: target in [esp32s3, esp32p4]
+
+  # ---- v6.0 compatibility shims --------------------------------------------
+  # Managed components below declare dependencies on names that were built-in
+  # in IDF v5.x but moved to the component registry in v6.0.  Listing them
+  # here as top-level deps resolves the transitive references.
+  espressif/cjson: "*"
+  espressif/mqtt: "*"
+  espressif/cbor: "*"
+  espressif/mdns: "*"
+  espressif/esp_websocket_client: "*"
+  espressif/network_provisioning: "*"
+  espressif/libsodium: "*"
+  # --------------------------------------------------------------------------
 
   ## Required IDF version
   idf:
