@@ -1,5 +1,15 @@
 tmp/
-components/
+components/*
+!components/json/
+!components/json/**
+!components/esp_lcd_nv3023/
+!components/esp_lcd_nv3023/**
+!components/custom_io_expander_ch32v003/
+!components/custom_io_expander_ch32v003/**
+!components/uart-uhci/
+!components/uart-uhci/**
+!components/sscma_client/
+!components/sscma_client/**
 managed_components/
 build/
 dist/

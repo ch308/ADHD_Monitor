@@ -7,20 +7,38 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#if defined(CONFIG_IDF_TARGET_ESP32P4) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 // ESP32-P4 使用 esp_video 组件提供的 V4L2 头文件
 #include <linux/videodev2.h>
 #else
-// ESP32-S3 等其他芯片：定义常用的 V4L2 像素格式
+// ESP32-S3 等其他芯片：定义常用的 V4L2 像素格式，避免 esp_video 的 ioctl 宏与系统头冲突
+#ifndef V4L2_PIX_FMT_RGB565
 #define V4L2_PIX_FMT_RGB565 0x50424752  // 'RGBP'
+#endif
+#ifndef V4L2_PIX_FMT_RGB565X
 #define V4L2_PIX_FMT_RGB565X 0x52474250 // 'PRGB'
+#endif
+#ifndef V4L2_PIX_FMT_RGB24
 #define V4L2_PIX_FMT_RGB24 0x33424752   // 'RGB3'
+#endif
+#ifndef V4L2_PIX_FMT_YUYV
 #define V4L2_PIX_FMT_YUYV 0x56595559    // 'YUYV'
+#endif
+#ifndef V4L2_PIX_FMT_YUV422P
 #define V4L2_PIX_FMT_YUV422P 0x36315559 // 'YU16'
+#endif
+#ifndef V4L2_PIX_FMT_YUV420
 #define V4L2_PIX_FMT_YUV420 0x32315559  // 'YU12'
+#endif
+#ifndef V4L2_PIX_FMT_GREY
 #define V4L2_PIX_FMT_GREY 0x59455247    // 'GREY'
+#endif
+#ifndef V4L2_PIX_FMT_UYVY
 #define V4L2_PIX_FMT_UYVY 0x59565955    // 'UYVY'
+#endif
+#ifndef V4L2_PIX_FMT_JPEG
 #define V4L2_PIX_FMT_JPEG 0x4745504A    // 'JPEG'
+#endif
 #endif
 
 typedef uint32_t v4l2_pix_fmt_t;
