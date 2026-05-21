@@ -20,6 +20,9 @@
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
 #include "blufi.h"
 #endif
+#ifdef CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
+#include "adhd_prov_ble.h"
+#endif
 
 static const char *TAG = "WifiBoard";
 
@@ -178,6 +181,17 @@ void WifiBoard::StartWifiConfigMode() {
     auto &blufi = Blufi::GetInstance();
     // initialize esp-blufi protocol
     blufi.init();
+#elif CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
+    // ADHD Monitor 星星机器人 BLE provisioning. Same protocol as the plush ball
+    // (network_provisioning + scheme_ble + sec0). Blocks until the Flutter app
+    // hands credentials over, then esp_restart()s so WifiManager picks them up
+    // on the next boot.
+    Application::GetInstance().Schedule([]() {
+        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE,
+                                         "ADHD_Monitor BLE 配网中…",
+                                         "gear", Lang::Sounds::OGG_WIFICONFIG);
+    });
+    adhd_prov_ble_start_blocking();
 #endif
 #if CONFIG_USE_ACOUSTIC_WIFI_PROVISIONING
     // Start acoustic provisioning task

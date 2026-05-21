@@ -1,8 +1,12 @@
-/// ESP32-S3 LCD 毛绒球呼吸灯配网 UI。
+/// ESP32-S3 LCD 毛绒球呼吸灯 / xiaozhi-esp32 星星机器人 BLE 配网 UI。
 ///
 /// 流程：扫描 BLE 广播 → 选设备 → 输入家用 WiFi 的 SSID/密码 →
 ///       通过 BLE 把凭据写过去 → 板子连上路由器后自动 announce 到云端 →
 ///       App 调 cloud_service.bindEsp32 完成最后的绑定。
+///
+/// 同一个页面通过 [EspProvisionPage.kind] 在毛绒球（`ADHD_<MAC8>`）和
+/// 星星机器人（`XIAOZHI_<MAC8>`）之间切换，两种设备复用同一份 protocomm
+/// + sec0 BLE 协议代码（[EspProvisionService]）。
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -17,14 +21,18 @@ class EspProvisionPage extends StatefulWidget {
     required this.cloudService,
     required this.activeChildId,
     this.currentBoundDeviceId,
+    this.kind = EspProvKind.plush,
   });
 
   final CloudService cloudService;
   final int activeChildId;
 
-  /// 当前孩子已经绑定过的毛绒球呼吸灯 device_id（来自 home_screen 的本地状态）。
+  /// 当前孩子已经绑定过的同类型设备 device_id（来自 home_screen 的本地状态）。
   /// 给页面顶部展示"现在绑了哪台 / 要不要让它重新进入配网"用。
   final String? currentBoundDeviceId;
+
+  /// 配网设备种类：毛绒球（默认）或 xiaozhi 星星机器人。
+  final EspProvKind kind;
 
   @override
   State<EspProvisionPage> createState() => _EspProvisionPageState();
@@ -39,6 +47,39 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   ProvStatus _phase = ProvStatus.idle;
   List<EspProvDevice> _devices = const [];
   List<Map<String, dynamic>> _cloudDevices = const [];
+
+  /// 设备类型对应的人话标签：贯穿整个 UI（标题、提示文字、卡片）。
+  String get _deviceLabel {
+    switch (widget.kind) {
+      case EspProvKind.plush:
+        return '毛绒球呼吸灯';
+      case EspProvKind.xiaozhi:
+        return '星星机器人';
+    }
+  }
+
+  /// 重新配网 / 物理重置时屏幕上要给用户念的"那串编号"，与 ESP32 端
+  /// network_prov_mgr_start_provisioning 设的广播名前缀一致。
+  String get _advPrefix => widget.kind.advPrefix;
+
+  /// 把刚配好的 device_id 落到本地缓存，按设备类型分两个键。
+  Future<void> _persistBound(String deviceId) {
+    if (widget.kind == EspProvKind.xiaozhi) {
+      return SessionStore.saveBoundXiaozhi(widget.activeChildId, deviceId);
+    }
+    return SessionStore.saveBoundEsp32(widget.activeChildId, deviceId);
+  }
+
+  /// 云端 list 接口里挑出当前设备类型那一类。毛绒球用空 / esp32-s3-lcd 类型；
+  /// xiaozhi 用 `kind=xiaozhi`。
+  bool _matchKind(Map<String, dynamic> dev) {
+    final raw = (dev['kind'] ?? '').toString().toLowerCase();
+    if (widget.kind == EspProvKind.xiaozhi) {
+      return raw == 'xiaozhi';
+    }
+    // 毛绒球：除了 xiaozhi 都视为毛绒球（包含空值与 esp32-s3-lcd-1.47B）。
+    return raw != 'xiaozhi';
+  }
 
   @override
   void dispose() {
@@ -76,28 +117,30 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     });
     try {
       if (!await _ensurePermissions()) return;
-      final list = await EspProvisionService.scan();
+      final list = await EspProvisionService.scan(kind: widget.kind);
       if (!mounted) return;
       if (list.isEmpty) {
-        setState(() => _status = '未扫到 BLE 配网广播，正在查询云端已联网毛绒球呼吸灯…');
-        final cloudList = await widget.cloudService.fetchEsp32List();
+        setState(() => _status = '未扫到 BLE 配网广播，正在查询云端已联网$_deviceLabel…');
+        final cloudListAll = await widget.cloudService.fetchEsp32List();
+        // 只显示当前类型的设备，避免在毛绒球菜单里看到星星机器人，反之亦然。
+        final cloudList = cloudListAll.where(_matchKind).toList(growable: false);
         if (!mounted) return;
         setState(() {
           _devices = const [];
           _cloudDevices = cloudList;
           _status = cloudList.isEmpty
-              ? '未扫到 BLE 设备，也未在云端看到已联网毛绒球呼吸灯。'
+              ? '未扫到 BLE 设备，也未在云端看到已联网$_deviceLabel。'
                   '如果板子已经连上 WiFi，请确认服务器地址/登录状态；'
                   '如果要重新配网，请长按 BOOT 5 秒。'
-              : '未扫到 BLE 广播，但云端已有 ${cloudList.length} 台毛绒球呼吸灯。'
-                  '已联网的毛绒球呼吸灯会关闭 BLE，可从下方直接绑定。';
+              : '未扫到 BLE 广播，但云端已有 ${cloudList.length} 台$_deviceLabel。'
+                  '已联网的$_deviceLabel会关闭 BLE，可从下方直接绑定。';
         });
         return;
       }
       setState(() {
         _devices = list;
         _cloudDevices = const [];
-        _status = '扫到 ${list.length} 台待配网 ESP32';
+        _status = '扫到 ${list.length} 台待配网$_deviceLabel';
       });
     } catch (e) {
       if (mounted) setState(() => _status = '扫描失败：$e');
@@ -144,7 +187,11 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     bool bound = false;
     for (var i = 0; i < 8 && mounted; i++) {
       await Future<void>.delayed(const Duration(seconds: 2));
-      bound = await widget.cloudService.bindEsp32(result.deviceId, widget.activeChildId);
+      bound = await widget.cloudService.bindEsp32(
+        result.deviceId,
+        widget.activeChildId,
+        kind: widget.kind.bindKind,
+      );
       if (bound) break;
     }
     if (!mounted) return;
@@ -155,11 +202,13 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
       });
       return;
     }
-    await SessionStore.saveBoundEsp32(widget.activeChildId, result.deviceId);
+    await _persistBound(result.deviceId);
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _status = '✅ 设备已绑定到当前孩子，可以在呼吸页测试灯效了';
+      _status = widget.kind == EspProvKind.xiaozhi
+          ? '✅ 星星机器人已绑定到当前孩子，submit_log 后会自动陪聊'
+          : '✅ 设备已绑定到当前孩子，可以在呼吸页测试灯效了';
     });
     Future<void>.delayed(const Duration(seconds: 1), () {
       if (mounted) Navigator.of(context).pop<String>(result.deviceId);
@@ -172,22 +221,28 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     if (id.isEmpty) return;
     setState(() {
       _busy = true;
-      _status = '正在绑定已联网毛绒球呼吸灯 $id …';
+      _status = '正在绑定已联网$_deviceLabel $id …';
     });
-    final ok = await widget.cloudService.bindEsp32(id, widget.activeChildId);
+    final ok = await widget.cloudService.bindEsp32(
+      id,
+      widget.activeChildId,
+      kind: widget.kind.bindKind,
+    );
     if (!mounted) return;
     if (!ok) {
       setState(() {
         _busy = false;
-        _status = '绑定 $id 失败：请确认已登录、当前孩子有权限，且服务器能看到该毛绒球呼吸灯。';
+        _status = '绑定 $id 失败：请确认已登录、当前孩子有权限，且服务器能看到该$_deviceLabel。';
       });
       return;
     }
-    await SessionStore.saveBoundEsp32(widget.activeChildId, id);
+    await _persistBound(id);
     if (!mounted) return;
     setState(() {
       _busy = false;
-      _status = '✅ 已绑定已联网毛绒球呼吸灯 $id，可以在呼吸页测试灯效了';
+      _status = widget.kind == EspProvKind.xiaozhi
+          ? '✅ 已绑定已联网星星机器人 $id'
+          : '✅ 已绑定已联网毛绒球呼吸灯 $id，可以在呼吸页测试灯效了';
     });
     Future<void>.delayed(const Duration(seconds: 1), () {
       if (mounted) Navigator.of(context).pop<String>(id);
@@ -212,7 +267,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
   }
 
-  /// 通过云端命令让已绑定毛绒球呼吸灯回到 BLE 配网模式（与 home_screen 的菜单项等价，
+  /// 通过云端命令让已绑定的同类型设备回到 BLE 配网模式（与 home_screen 的菜单项等价，
   /// 仅在已绑定时露出；未绑定时本页只走"扫描 + 新设备配网"分支）。
   Future<void> _remoteResetBound() async {
     final id = widget.currentBoundDeviceId;
@@ -226,9 +281,9 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     setState(() {
       _busy = false;
       _status = ok
-          ? '已下发重启命令，约 3–8 秒后板子会重新广播 ADHD_$id，'
+          ? '已下发重启命令，约 3–8 秒后板子会重新广播 $_advPrefix$id，'
               '届时点击下方"扫描设备"即可看到它。'
-          : '重启命令下发失败：毛绒球呼吸灯可能离线。'
+          : '重启命令下发失败：$_deviceLabel可能离线。'
               '请改用物理方式：长按板子 BOOT 键 5 秒。';
     });
   }
@@ -237,7 +292,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   Widget build(BuildContext context) {
     final bound = widget.currentBoundDeviceId;
     return Scaffold(
-      appBar: AppBar(title: const Text('毛绒球呼吸灯配网')),
+      appBar: AppBar(title: Text('$_deviceLabel配网')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -245,10 +300,10 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (bound != null && bound.isNotEmpty) _buildBoundCard(bound),
-              const Text(
+              Text(
                 '把家里的 WiFi 名和密码填好，再选下面扫到的板子；'
-                '板子第一次刷机后或者刚被"重新配网"后会自动广播 BLE。',
-                style: TextStyle(fontSize: 13, color: Colors.black54),
+                '板子第一次刷机后或者刚被"重新配网"后会自动广播 $_advPrefix… BLE。',
+                style: const TextStyle(fontSize: 13, color: Colors.black54),
               ),
               const SizedBox(height: 8),
               Container(
@@ -258,18 +313,18 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: const Color(0xFFFFE082)),
                 ),
-                child: const Row(
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(Icons.warning_amber_rounded,
+                    const Icon(Icons.warning_amber_rounded,
                         size: 18, color: Color(0xFFB26A00)),
-                    SizedBox(width: 6),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: Text(
-                        '毛绒球呼吸灯只支持 2.4GHz WiFi。'
+                        '$_deviceLabel只支持 2.4GHz WiFi。'
                         '如果你的路由器把 2.4G/5G 拆成两个 SSID，'
-                        '请填 2.4G 的那一个；密码再正确，5GHz 的 SSID 毛绒球呼吸灯也连不上。',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF5D4000)),
+                        '请填 2.4G 的那一个；密码再正确，5GHz 的 SSID $_deviceLabel也连不上。',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF5D4000)),
                       ),
                     ),
                   ],
@@ -403,11 +458,14 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     );
   }
 
-  /// 顶部"当前已绑定一台毛绒球呼吸灯"卡片：
+  /// 顶部"当前已绑定一台同类型设备"卡片：
   /// - 直接显示 device_id，方便用户对照板子背面贴的 MAC；
   /// - 「让它重新配网」=> 走云端命令；
   /// - 「物理重置说明」=> 简单提示长按按键路径。
   Widget _buildBoundCard(String deviceId) {
+    final icon = widget.kind == EspProvKind.xiaozhi
+        ? Icons.smart_toy_outlined
+        : Icons.lightbulb_outline;
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Padding(
@@ -417,11 +475,11 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
           children: [
             Row(
               children: [
-                const Icon(Icons.lightbulb_outline, size: 20),
+                Icon(icon, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '当前孩子已绑定毛绒球呼吸灯：$deviceId',
+                    '当前孩子已绑定$_deviceLabel：$deviceId',
                     style: const TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -442,7 +500,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                   child: OutlinedButton.icon(
                     onPressed: _busy ? null : _remoteResetBound,
                     icon: const Icon(Icons.cloud_sync, size: 18),
-                    label: const Text('远程命令：让毛绒球呼吸灯重启进入 BLE'),
+                    label: Text('远程命令：让$_deviceLabel重启进入 BLE'),
                   ),
                 ),
               ],

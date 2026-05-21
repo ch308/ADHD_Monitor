@@ -18,6 +18,9 @@
 #include <freertos/task.h>
 #include "application.h"
 #include "system_info.h"
+#if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
+#include "adhd_prov_ble.h"
+#endif
 #endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
@@ -117,6 +120,18 @@ static void HandleOneCommand(cJSON* root) {
         Application::GetInstance().Schedule([]() {
             Application::GetInstance().ResetProtocol();
         });
+    } else if (strcmp(act, "reset_provisioning") == 0) {
+        // Same wire format as the plush-ball flow: clear the WiFi NVS and
+        // reboot so the device re-enters BLE provisioning advertising.
+        // Only effective when CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING is on;
+        // otherwise xiaozhi will fall back to whatever wifi-config method
+        // is enabled (hotspot/blufi/acoustic) on next boot.
+#if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
+        ESP_LOGW(TAG, "→ reset_provisioning (BLE prov enabled)");
+        adhd_prov_ble_reset_and_reboot();
+#else
+        ESP_LOGW(TAG, "reset_provisioning received but BLE provisioning disabled — ignoring");
+#endif
     }
 }
 

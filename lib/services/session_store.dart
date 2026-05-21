@@ -14,6 +14,10 @@ class SessionStore {
   /// 当前孩子绑定的 ESP32 device_id 前缀（device_id 由 ESP32 efuse MAC 派生）
   static const _kBoundEsp32Prefix = 'bound_esp32_';
 
+  /// 当前孩子绑定的 xiaozhi 星星机器人 device_id 前缀（同样由 efuse MAC 派生，
+  /// 但和毛绒球独立存：一个孩子可以同时绑一只毛绒球 + 一只星星机器人）
+  static const _kBoundXiaozhiPrefix = 'bound_xiaozhi_';
+
   /// 当前孩子的压力报警阈值前缀（0-100，默认 60）
   static const _kStressThresholdPrefix = 'stress_threshold_';
   static const String defaultServerHost = '124.223.53.33';
@@ -76,6 +80,24 @@ class SessionStore {
   static Future<void> removeBoundEsp32(int childId) async {
     final p = await SharedPreferences.getInstance();
     await p.remove('$_kBoundEsp32Prefix$childId');
+  }
+
+  /// 获取指定孩子绑定的 xiaozhi 星星机器人 device_id（null 表示未绑定）
+  static Future<String?> getBoundXiaozhi(int childId) async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString('$_kBoundXiaozhiPrefix$childId');
+  }
+
+  /// 保存孩子与 xiaozhi 星星机器人的绑定关系
+  static Future<void> saveBoundXiaozhi(int childId, String deviceId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString('$_kBoundXiaozhiPrefix$childId', deviceId.toUpperCase());
+  }
+
+  /// 删除孩子的 xiaozhi 星星机器人绑定
+  static Future<void> removeBoundXiaozhi(int childId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove('$_kBoundXiaozhiPrefix$childId');
   }
 
   static Future<int> getStressThreshold(int childId) async {

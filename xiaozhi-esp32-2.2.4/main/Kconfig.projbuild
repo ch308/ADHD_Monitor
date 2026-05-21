@@ -793,6 +793,20 @@ menu "WiFi Configuration Method"
         select BT_BLE_42_FEATURES_SUPPORTED
         select BT_BLE_BLUFI_ENABLE
         select MBEDTLS_DHM_C
+
+    config USE_ADHD_BLE_WIFI_PROVISIONING
+        bool "ADHD Monitor BLE (network_provisioning, sec0)"
+        select BT_ENABLED
+        select BT_BLE_42_FEATURES_SUPPORTED
+        select ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0
+        help
+            Use ESP-IDF network_provisioning + scheme_ble (security 0) to receive
+            WiFi credentials from the ADHD Monitor Flutter app — exact same
+            protocol as the ESP32-S3-LCD plush-ball board (毛绒球呼吸灯).
+            Advertising name: XIAOZHI_<8-hex MAC suffix>
+            Service UUID:    ad480001-7f86-46ad-a02e-3ca5849da5b6
+            On NETWORK_PROV_END the device reboots so the existing WifiManager
+            picks up the freshly-stored credentials from NVS on next boot.
 endmenu
 
 config AUDIO_DEBUG_UDP_SERVER
