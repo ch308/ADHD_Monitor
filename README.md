@@ -610,7 +610,7 @@ sequenceDiagram
 
 ### 5.4.1 Path A：小智（xiaozhi-esp32）自建语音云（**无 OTA**）
 
-本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus →（可选 Whisper）→ Kimi → edge-tts → 下行 Opus**。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
+本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus → 百度短语音 ASR → Kimi → edge-tts → 下行 Opus**（不再依赖 OpenAI）。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
 
 | 组件 | 说明 |
 |------|------|
@@ -620,7 +620,7 @@ sequenceDiagram
 | `xiaozhi-esp32-2.2.4/main/application.cc` | `CONFIG_ADHD_MONITOR_BYPASS_OTA` 打开后，`ActivationTask` 跳过 OTA 调用，`InitializeProtocol` 强制 `WebsocketProtocol` |
 | Flutter | 菜单「绑定小智设备 (MAC)」→ `bindEsp32(..., kind: 'xiaozhi')` |
 
-**服务器依赖**（`server/requirements.txt`）：`flask-sock`、`opuslib`（需系统 **libopus**）、**`ffmpeg`** 在 `PATH` 中、`edge-tts`；语音识别另需 **`OPENAI_API_KEY`**（Whisper 官方 API，与 Kimi 密钥分离）。可设置 **`XIAOZHI_WEBSOCKET_TOKEN`** 强制设备携带匹配的 Bearer token；不设置则任何来源的 `/xiaozhi/ws` 都允许接入（仅用于内网/本地测试）。
+**服务器依赖**（`server/requirements.txt`）：`flask-sock`、`opuslib`（需系统 **libopus**）、**`ffmpeg`** 在 `PATH` 中、`edge-tts`、`requests`；语音识别走 **百度短语音识别标准版**（[文档](https://cloud.baidu.com/doc/SPEECH/s/Jlbxdezuf)），需要在百度智能云控制台创建语音应用拿到 **`BAIDU_SPEECH_API_KEY`** / **`BAIDU_SPEECH_SECRET_KEY`**，写到 `~/.config/adhd-monitor.env`。可选 **`BAIDU_SPEECH_DEV_PID`**（默认 1537=普通话）、**`BAIDU_SPEECH_CUID`**（控制台调用源标识）。可设置 **`XIAOZHI_WEBSOCKET_TOKEN`** 强制设备携带匹配的 Bearer token；不设置则任何来源的 `/xiaozhi/ws` 都允许接入（仅用于内网/本地测试）。
 
 **固件配置**：`idf.py menuconfig` → **ADHD Monitor integration**：
 

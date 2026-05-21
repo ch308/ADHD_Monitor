@@ -2,7 +2,8 @@
 # edge-tts playback. OTA is intentionally NOT exposed here — devices must be
 # pre-flashed with `CONFIG_ADHD_MONITOR_BYPASS_OTA=y` so they seed the
 # `websocket` NVS namespace from Kconfig at boot and never call any OTA
-# endpoint. Optional ASR: OpenAI Whisper (set OPENAI_API_KEY).
+# endpoint. ASR uses Baidu short-speech recognition (vop.baidu.com); set
+# BAIDU_SPEECH_API_KEY / BAIDU_SPEECH_SECRET_KEY (no OpenAI required).
 
 from __future__ import annotations
 
@@ -14,7 +15,6 @@ import struct
 import tempfile
 import time
 import uuid
-import wave
 
 import requests
 from openai import OpenAI
@@ -103,60 +103,139 @@ def _kimi_reply(system: str, user_text: str) -> str:
     return (r.choices[0].message.content or "").strip()
 
 
-def _transcribe_wav(wav_path: str) -> str:
-    key = (os.getenv("OPENAI_API_KEY") or "").strip()
-    if not key:
+# ── 百度短语音识别（替代 OpenAI Whisper）─────────────────────────────────
+# 文档：https://cloud.baidu.com/doc/SPEECH/s/Jlbxdezuf
+#   1) 用 API Key + Secret Key 走 OAuth 2.0 client_credentials 拿 access_token
+#      （有效期 ~30 天，本地缓存，避免每轮调用都换 token）
+#   2) 走 RAW 上传：POST http://vop.baidu.com/server_api?cuid=...&token=...&dev_pid=1537
+#      Content-Type: audio/pcm;rate=16000 ，body 为 16k/16bit/单声道 PCM。
+#      （JSON+base64 上传也可，但要多 1/3 体积。）
+#   3) 返回 JSON： err_no=0 时 result[0] 即识别文本。
+
+_baidu_token_cache: dict[str, float | str] = {"value": "", "expire_at": 0.0}
+
+
+def _baidu_get_access_token() -> str:
+    api_key = (os.getenv("BAIDU_SPEECH_API_KEY") or "").strip()
+    secret_key = (os.getenv("BAIDU_SPEECH_SECRET_KEY") or "").strip()
+    if not api_key or not secret_key:
+        return ""
+    now = time.monotonic()
+    cached = _baidu_token_cache.get("value") or ""
+    expire_at = float(_baidu_token_cache.get("expire_at") or 0.0)
+    if cached and now < expire_at:
+        return str(cached)
+    try:
+        r = requests.post(
+            "https://aip.baidubce.com/oauth/2.0/token",
+            params={
+                "grant_type": "client_credentials",
+                "client_id": api_key,
+                "client_secret": secret_key,
+            },
+            timeout=10,
+        )
+    except Exception as e:
+        log.warning("baidu oauth failed: %s", e)
+        return ""
+    if r.status_code != 200:
+        log.warning("baidu oauth http %s: %s", r.status_code, r.text[:400])
+        return ""
+    data = r.json() if r.content else {}
+    token = (data.get("access_token") or "").strip()
+    expires_in = int(data.get("expires_in") or 0)
+    if not token:
+        log.warning("baidu oauth no token: %s", data)
+        return ""
+    # 提前 10 分钟续期，避免拿到刚过期的 token
+    _baidu_token_cache["value"] = token
+    _baidu_token_cache["expire_at"] = now + max(expires_in - 600, 300)
+    return token
+
+
+def _baidu_cuid() -> str:
+    cuid = (os.getenv("BAIDU_SPEECH_CUID") or "").strip()
+    return cuid or "adhd-monitor-server"
+
+
+def _baidu_dev_pid() -> int:
+    """1537=普通话(默认)，1737=英语，1637=粤语，1837=四川话。"""
+    raw = (os.getenv("BAIDU_SPEECH_DEV_PID") or "").strip()
+    try:
+        return int(raw) if raw else 1537
+    except ValueError:
+        return 1537
+
+
+def _transcribe_pcm(pcm_bytes: bytes, sample_rate: int = 16000) -> str:
+    """把 16k/16bit/单声道 PCM 上送百度短语音识别，返回中文文本（失败返回 ''）。"""
+    if not pcm_bytes:
+        return ""
+    if sample_rate not in (8000, 16000):
+        log.warning("baidu asr unsupported sample_rate=%d, fallback to 16000", sample_rate)
+        sample_rate = 16000
+    # 百度短语音上限 ~60s；16k/16bit/单声道 = 32000 B/s，~1.92 MB
+    max_bytes = sample_rate * 2 * 60
+    if len(pcm_bytes) > max_bytes:
+        log.warning(
+            "baidu asr clip overlength %d>%d bytes, truncating",
+            len(pcm_bytes),
+            max_bytes,
+        )
+        pcm_bytes = pcm_bytes[:max_bytes]
+    token = _baidu_get_access_token()
+    if not token:
         return ""
     try:
-        with open(wav_path, "rb") as f:
-            r = requests.post(
-                "https://api.openai.com/v1/audio/transcriptions",
-                headers={"Authorization": f"Bearer {key}"},
-                files={"file": ("audio.wav", f, "audio/wav")},
-                data={"model": "whisper-1"},
-                timeout=120,
-            )
-        if r.status_code != 200:
-            log.warning("whisper http %s: %s", r.status_code, r.text[:500])
-            return ""
-        data = r.json()
-        return (data.get("text") or "").strip()
+        r = requests.post(
+            "https://vop.baidu.com/server_api",
+            params={
+                "cuid": _baidu_cuid(),
+                "token": token,
+                "dev_pid": _baidu_dev_pid(),
+            },
+            headers={"Content-Type": f"audio/pcm;rate={sample_rate}"},
+            data=pcm_bytes,
+            timeout=30,
+        )
     except Exception as e:
-        log.warning("whisper failed: %s", e)
+        log.warning("baidu asr request failed: %s", e)
         return ""
+    if r.status_code != 200:
+        log.warning("baidu asr http %s: %s", r.status_code, r.text[:400])
+        return ""
+    try:
+        data = r.json()
+    except ValueError:
+        log.warning("baidu asr non-json: %s", r.text[:400])
+        return ""
+    if int(data.get("err_no", -1)) != 0:
+        log.warning("baidu asr err_no=%s err_msg=%s", data.get("err_no"), data.get("err_msg"))
+        return ""
+    result = data.get("result") or []
+    if not isinstance(result, list) or not result:
+        return ""
+    return str(result[0]).strip()
 
 
-def _opus_to_wav(opus_packets: list[bytes], sample_rate: int = 16000) -> str | None:
+def _opus_to_pcm(opus_packets: list[bytes], sample_rate: int = 16000) -> bytes:
+    """解码所有上行 opus 帧 → 16k/16bit/单声道 PCM 字节流，供百度 ASR 直接 RAW 上送。"""
     if not opus_packets:
-        return None
+        return b""
     try:
         dec = __import__("opuslib").Decoder(sample_rate, 1)
     except Exception as e:
         log.error("opuslib decoder: %s", e)
-        return None
+        return b""
     pcm = bytearray()
-    frame_samples = int(sample_rate * 60 / 1000)  # 60ms frames
+    frame_samples = int(sample_rate * 60 / 1000)  # 设备默认 60ms 帧
     for pkt in opus_packets:
         try:
             chunk = dec.decode(bytes(pkt), frame_samples)
             pcm.extend(chunk)
         except Exception as ex:
             log.debug("opus frame skip: %s", ex)
-    if not pcm:
-        return None
-    fd, path = tempfile.mkstemp(suffix=".wav")
-    import os as _os
-
-    _os.close(fd)
-    try:
-        with wave.open(path, "wb") as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(sample_rate)
-            wf.writeframes(bytes(pcm))
-        return path
-    except Exception:
-        return None
+    return bytes(pcm)
 
 
 def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
@@ -310,17 +389,12 @@ class XiaozhiConn:
         if self._session_ended:
             self.uplink_packets = []
             return
-        user_text = ""
-        wav = _opus_to_wav(self.uplink_packets, 16000)
-        if wav:
-            user_text = _transcribe_wav(wav)
-            try:
-                os.remove(wav)
-            except OSError:
-                pass
+        pcm = _opus_to_pcm(self.uplink_packets, 16000)
+        user_text = _transcribe_pcm(pcm, 16000) if pcm else ""
         if not user_text:
             user_text = (
-                "（没有听清你说的话；若需语音识别请配置 OPENAI_API_KEY 以使用 Whisper。）"
+                "（没有听清你说的话；请检查服务器 BAIDU_SPEECH_API_KEY / "
+                "BAIDU_SPEECH_SECRET_KEY 是否配置正确。）"
             )
         self._reply_turn(user_text)
 
