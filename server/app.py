@@ -17,6 +17,16 @@ app = Flask(__name__)
 # 开启跨域支持，确保安卓手机 App 可以顺利访问
 CORS(app)
 
+try:
+    from flask_sock import Sock
+
+    _xiaozhi_sock = Sock(app)
+    from xiaozhi_bridge import register_xiaozhi
+
+    register_xiaozhi(app, _xiaozhi_sock)
+except ImportError as exc:
+    print("xiaozhi Path A bridge disabled (missing dependency?):", exc)
+
 # Kimi 使用 OpenAI SDK 兼容接口；请在服务器环境变量中配置 MOONSHOT_API_KEY
 client = OpenAI(
     api_key=os.getenv("MOONSHOT_API_KEY", "你的_MOONSHOT_API_KEY"),
@@ -579,6 +589,11 @@ def submit_log():
     except Exception as e:
         print(f"❌ 家长记录写入错误: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+    try:
+        _enqueue_xiaozhi_for_child(child_id, observation, advice)
+    except Exception as e:
+        app.logger.warning("xiaozhi enqueue after submit_log: %s", e)
 
     return jsonify({"advice": advice, "child_id": child_id}), 200
 
@@ -1441,7 +1456,8 @@ def _now_str() -> str:
 
 
 def _normalize_device_id(raw: str) -> str:
-    return (raw or "").strip().upper()
+    s = (raw or "").strip().upper()
+    return s.replace(":", "").replace("-", "")
 
 
 def _touch_esp32_device(device_id: str, kind: str | None) -> None:
@@ -1493,6 +1509,47 @@ def _get_esp32_device(device_id: str):
         "first_seen_at": row[4],
         "last_seen_at": row[5],
     }
+
+
+def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT device_id FROM esp32_devices
+        WHERE child_id = ?
+          AND kind IS NOT NULL
+          AND LOWER(kind) LIKE '%xiaozhi%'
+        """,
+        (child_id,),
+    )
+    rows = [r[0] for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str) -> None:
+    ids = _xiaozhi_device_ids_for_child(child_id)
+    if not ids:
+        return
+    from xiaozhi_bridge import stash_xinvoke_hint
+
+    opening = (
+        os.getenv("XIAOZHI_DEFAULT_OPENING", "").strip()
+        or "嗨，我注意到家长刚记了一条关心你的记录，想跟你轻声说几句。"
+    )
+    ctx = f"家长观察记录：\n{observation}\n\nKimi 给家长的建议摘要：\n{advice}"
+    cmd_obj = {
+        "action": "xiaozhi_invoke_chat",
+        "opening_line": opening[:500],
+        "context": ctx[:8000],
+    }
+    with _esp32_cmd_lock:
+        for did in ids:
+            stash_xinvoke_hint(did, cmd_obj["opening_line"], cmd_obj["context"])
+            q = _esp32_cmd_queue.setdefault(did, deque())
+            q.append(dict(cmd_obj))
+        _esp32_cmd_lock.notify_all()
 
 
 @app.route("/device/esp32/announce", methods=["POST"])
@@ -1569,6 +1626,8 @@ def esp32_bind():
     if child_id <= 0:
         return jsonify({"status": "error", "message": "child_id required"}), 400
 
+    kind = (data.get("kind") or "").strip() or None
+
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     if not _user_can_access_child(cursor, user["id"], child_id):
@@ -1583,15 +1642,25 @@ def esp32_bind():
             """
             INSERT INTO esp32_devices
                 (device_id, kind, child_id, bound_by_user_id, first_seen_at, last_seen_at)
-            VALUES (?, NULL, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (device_id, child_id, user["id"], now, now),
+            (device_id, kind, child_id, user["id"], now, now),
         )
     else:
-        cursor.execute(
-            "UPDATE esp32_devices SET child_id = ?, bound_by_user_id = ?, last_seen_at = ? WHERE id = ?",
-            (child_id, user["id"], now, row[0]),
-        )
+        if kind:
+            cursor.execute(
+                """
+                UPDATE esp32_devices
+                SET child_id = ?, bound_by_user_id = ?, last_seen_at = ?, kind = ?
+                WHERE id = ?
+                """,
+                (child_id, user["id"], now, kind, row[0]),
+            )
+        else:
+            cursor.execute(
+                "UPDATE esp32_devices SET child_id = ?, bound_by_user_id = ?, last_seen_at = ? WHERE id = ?",
+                (child_id, user["id"], now, row[0]),
+            )
     conn.commit()
     conn.close()
     return jsonify({"status": "ok", "device_id": device_id, "child_id": child_id}), 200
@@ -1631,6 +1700,8 @@ _ESP32_ALLOWED_ACTIONS = {
     "countdown_start", "countdown_stop",
     "all_off",
     "reset_provisioning",
+    "xiaozhi_invoke_chat",
+    "xiaozhi_abort",
 }
 
 
@@ -1663,6 +1734,17 @@ def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
         if not 1000 <= tm <= 600000:
             return False, "total_ms out of range (1000..600000)"
         payload["total_ms"] = tm
+    if action == "xiaozhi_invoke_chat":
+        ol = (payload.get("opening_line") or "").strip()
+        if len(ol) > 500:
+            return False, "opening_line too long (max 500)"
+        payload["opening_line"] = ol
+        ctx = (payload.get("context") or "").strip()
+        if len(ctx) > 8000:
+            return False, "context too long (max 8000)"
+        payload["context"] = ctx
+    if action == "xiaozhi_abort":
+        pass
     return True, ""
 
 
@@ -1698,6 +1780,17 @@ def esp32_cmd(device_id: str):
 
         cmd_obj = {"action": action}
         cmd_obj.update(payload)
+        if action == "xiaozhi_invoke_chat":
+            try:
+                from xiaozhi_bridge import stash_xinvoke_hint
+
+                stash_xinvoke_hint(
+                    device_id,
+                    str(cmd_obj.get("opening_line", "")),
+                    str(cmd_obj.get("context", "")),
+                )
+            except Exception:
+                pass
         with _esp32_cmd_lock:
             q = _esp32_cmd_queue.setdefault(device_id, deque())
             # reset_provisioning 是终态操作：板子收到后立即清 NVS + 重启，

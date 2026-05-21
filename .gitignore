@@ -51,6 +51,13 @@ ESP32-S3-LCD-1.47B/managed_components/
 ESP32-S3-LCD-1.47B/sdkconfig.old
 ESP32-S3-LCD-1.47B/dependencies.lock
 
+# xiaozhi-esp32（Path A）本地构建产物
+xiaozhi-esp32-2.2.4/build/
+xiaozhi-esp32-2.2.4/.vscode/
+xiaozhi-esp32-2.2.4/managed_components/
+xiaozhi-esp32-2.2.4/sdkconfig.old
+xiaozhi-esp32-2.2.4/dependencies.lock
+
 # Server 本地产物 / 机密
 server/.venv/
 server/.env

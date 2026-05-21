@@ -879,6 +879,68 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
   }
 
+  /// 绑定小智（xiaozhi）板：输入 WiFi MAC，服务器 `esp32_devices.kind` 记为 xiaozhi，用于 submit_log 后自动唤醒。
+  Future<void> _showXiaozhiBindDialog() async {
+    final ctrl = TextEditingController();
+    final submit = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('绑定小智设备 (MAC)'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '请输入设备 Wi‑Fi MAC（12 位十六进制）。可从路由器后台或板子配网界面查看；'
+                '绑定后请在小智固件 menuconfig 中打开 ADHD Monitor integration 并填写同一服务器 IP。',
+                style: TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'MAC / device_id',
+                  hintText: '例：AABBCCDDEEFF 或 AA:BB:CC:DD:EE:FF',
+                ),
+                autocorrect: false,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('绑定到当前孩子'),
+          ),
+        ],
+      ),
+    );
+    if (submit != true || !mounted) return;
+    final raw = ctrl.text.trim().replaceAll(RegExp(r'[:\-\s]'), '').toUpperCase();
+    if (!RegExp(r'^[0-9A-F]{12}$').hasMatch(raw)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入 12 位十六进制 MAC。')),
+      );
+      return;
+    }
+    final ok = await _cloudService.bindEsp32(
+      raw,
+      widget.activeChildId,
+      kind: 'xiaozhi',
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? '已绑定小智设备 $raw 到当前孩子' : '绑定失败：请确认已登录且网络正常'),
+      ),
+    );
+  }
+
   Future<void> fetchHistory() async {
     if (_miBandService.isStreaming) return;
     try {
@@ -1476,6 +1538,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'stress_threshold') await _showStressThresholdDialog();
               if (v == 'esp_prov') await _openEspProvisionPage();
               if (v == 'esp_reset') await _resetEsp32Provisioning();
+              if (v == 'xiaozhi_bind') await _showXiaozhiBindDialog();
             },
             itemBuilder: (ctx) => [
               const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
@@ -1498,6 +1561,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
               const PopupMenuItem(value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
+              const PopupMenuItem(
+                value: 'xiaozhi_bind',
+                child: Text('绑定小智设备 (MAC)'),
+              ),
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],
