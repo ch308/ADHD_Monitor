@@ -987,16 +987,19 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                '请输入设备 Wi‑Fi MAC（12 位十六进制）。可从路由器后台或板子配网界面查看；'
-                '绑定后请在小智固件 menuconfig 中打开 ADHD Monitor integration 并填写同一服务器 IP。',
+                '输入 BLE 配网时看到的 device_id（XIAOZHI_ 后面那 8 位十六进制，'
+                '例如 XIAOZHI_E0160560 就填 E0160560；也可以贴整段 12 位 Wi‑Fi MAC，'
+                'App 会自动取后 8 位）。\n\n'
+                '已经连上 Wi‑Fi 的板子不会再播 XIAOZHI_… 配网名 — 这时也可以用本对话框直接绑，'
+                '无需重新走 BLE。',
                 style: TextStyle(fontSize: 13),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: ctrl,
                 decoration: const InputDecoration(
-                  labelText: 'MAC / device_id',
-                  hintText: '例：AABBCCDDEEFF 或 AA:BB:CC:DD:EE:FF',
+                  labelText: 'device_id（8 位）或 MAC（12 位）',
+                  hintText: '例：E0160560，或 98:88:E0:16:05:60',
                 ),
                 autocorrect: false,
               ),
@@ -1016,10 +1019,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       ),
     );
     if (submit != true || !mounted) return;
-    final raw = ctrl.text.trim().replaceAll(RegExp(r'[:\-\s]'), '').toUpperCase();
-    if (!RegExp(r'^[0-9A-F]{12}$').hasMatch(raw)) {
+    final cleaned = ctrl.text.trim().replaceAll(RegExp(r'[:\-\s]'), '').toUpperCase();
+    String raw;
+    if (RegExp(r'^[0-9A-F]{8}$').hasMatch(cleaned)) {
+      raw = cleaned;
+    } else if (RegExp(r'^[0-9A-F]{12}$').hasMatch(cleaned)) {
+      // 与 adhd_prov_ble / Wireless.c 相同：device_id = STA MAC 的后 4 个字节
+      // (8 个十六进制字符)，因此 12 位 MAC 取后 8 位。
+      raw = cleaned.substring(cleaned.length - 8);
+    } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入 12 位十六进制 MAC。')),
+        const SnackBar(content: Text('请输入 8 位 device_id（例 E0160560）或 12 位完整 MAC。')),
       );
       return;
     }

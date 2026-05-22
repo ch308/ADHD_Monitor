@@ -19,6 +19,10 @@
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 
+#if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
+#include "adhd_prov_ble.h"
+#endif
+
 #ifdef SH1106
 #include <esp_lcd_panel_sh1106.h>
 #endif
@@ -129,7 +133,7 @@ private:
         display_ = new OledDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y);
     }
 
-    void InitializeButtons() {
+    void     InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
@@ -137,6 +141,18 @@ private:
                 return;
             }
             app.ToggleChatState();
+        });
+        // 长按 BOOT 5s：无论当前在何状态，都清掉 WiFi 凭据并重启回 BLE 配网。
+        // 用户的实际反馈：Flutter 显示「配网失败」但板子 NVS 里其实写过凭据 →
+        // 下次启动直接联网，再也广播不出 XIAOZHI_<MAC>，App 找不到设备又点不到
+        // "重配"。给硬件按键留一条出路，按住 5s 即可强制回到配网态。
+        boot_button_.OnLongPress([this]() {
+#if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
+            ESP_LOGW(TAG, "BOOT long-press → adhd_prov_ble_reset_and_reboot");
+            adhd_prov_ble_reset_and_reboot();
+#else
+            EnterWifiConfigMode();
+#endif
         });
         touch_button_.OnPressDown([this]() {
             Application::GetInstance().StartListening();

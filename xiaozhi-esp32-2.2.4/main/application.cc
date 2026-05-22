@@ -303,6 +303,16 @@ void Application::HandleNetworkDisconnectedEvent() {
 void Application::HandleActivationDoneEvent() {
     ESP_LOGI(TAG, "Activation done");
 
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+    // 在用户的串口里强制留下一行，便于确认实际烧录的固件是否包含 Path A 集成。
+    // 之前用户多次反映"Flutter 显示配网失败"，但日志里完全没有 adhd_cmd 行，
+    // 往往是 c:\adhd_monitor\... 这个独立 checkout 没有同步最新代码就 rebuild。
+    ESP_LOGW(TAG, "ADHD path A active: announce host=%s:%d ws=%s",
+             CONFIG_ADHD_MONITOR_CMD_HOST,
+             CONFIG_ADHD_MONITOR_CMD_PORT,
+             CONFIG_ADHD_MONITOR_WS_URL);
+#endif
+
     SystemInfo::PrintHeapStats();
     SetDeviceState(kDeviceStateIdle);
 
