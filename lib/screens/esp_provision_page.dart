@@ -13,6 +13,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../services/cloud_service.dart';
 import '../services/esp_provision_service.dart';
+import '../services/miband_service.dart';
 import '../services/session_store.dart';
 
 class EspProvisionPage extends StatefulWidget {
@@ -22,6 +23,7 @@ class EspProvisionPage extends StatefulWidget {
     required this.activeChildId,
     this.currentBoundDeviceId,
     this.kind = EspProvKind.plush,
+    this.miBandService,
   });
 
   final CloudService cloudService;
@@ -33,6 +35,12 @@ class EspProvisionPage extends StatefulWidget {
 
   /// 配网设备种类：毛绒球（默认）或 xiaozhi 星星机器人。
   final EspProvKind kind;
+
+  /// 主页持有的米带服务实例。配网页面只在进入时调 [MiBand6Auth.pauseAutoReconnect]，
+  /// 退出时再 [MiBand6Auth.resumeAutoReconnect]，避免米带 5–60 s 退避定时器在
+  /// ESP32 BLE 还在跑 protocomm 时强行连米带，把 host 栈撑爆触发 LINK_SUPERVISION
+  /// _TIMEOUT 把 ESP32 链路掐掉（实测就是这条路径导致"BLE 配置失败"的）。
+  final MiBand6Auth? miBandService;
 
   @override
   State<EspProvisionPage> createState() => _EspProvisionPageState();
@@ -85,7 +93,19 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   void dispose() {
     _ssidCtrl.dispose();
     _passCtrl.dispose();
+    // 离开配网页：让米带自动重连恢复（如果当前不在 streaming，会立刻安排
+    // 一次最短退避的重连尝试）。
+    widget.miBandService?.resumeAutoReconnect();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // 进入配网页就把米带的自动重连暂停掉，从根上消除「配网到一半米带 5 s
+    // 退避定时器强行重连 → host 栈顶不住 → ESP32 link 被 LINK_SUPERVISION
+    // _TIMEOUT 掐掉」的死亡链路。
+    widget.miBandService?.pauseAutoReconnect();
   }
 
   Future<bool> _ensurePermissions() async {
@@ -194,9 +214,17 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     setState(() => _status = awaitingCloud
         ? '凭据已发送，板子正在加入 WiFi（最多 60 秒）…'
         : 'WiFi 已连上，正在向云端登记…');
+
+    // 立刻打一次 bind：服务器对未知 device_id 会自动 INSERT 一行
+    // （server/app.py:1638-1648），所以即便板子还没 announce，这一步也能让
+    // 云端立刻识别到这台 xiaozhi/毛绒球，避免出现"远端没有待绑定设备"。
+    bool bound = await widget.cloudService.bindEsp32(
+      result.deviceId,
+      widget.activeChildId,
+      kind: widget.kind.bindKind,
+    );
     final retries = awaitingCloud ? 30 : 8;
-    bool bound = false;
-    for (var i = 0; i < retries && mounted; i++) {
+    for (var i = 0; i < retries && mounted && !bound; i++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       bound = await widget.cloudService.bindEsp32(
         result.deviceId,

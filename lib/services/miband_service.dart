@@ -424,6 +424,29 @@ class MiBand6Auth {
   // 自动重连
   // ──────────────────────────────────────────────────────────────
 
+  /// 上层（ESP 配网页等）在做关键 BLE 操作时调用，避免自动重连定时器在
+  /// 5–60 s 后强行连米带，把 Android host 栈逼到顶不住两条 GATT，
+  /// 进而把 ESP32 那条 link 用 LINK_SUPERVISION_TIMEOUT 掐掉。
+  bool _autoReconnectPaused = false;
+  void pauseAutoReconnect() {
+    _autoReconnectPaused = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    debugPrint('MiBand6Auth: auto-reconnect paused.');
+  }
+
+  /// 恢复自动重连：如果之前掉过线（_device 非空且不是用户主动断开），
+  /// 立刻安排一次最短退避的重连尝试。
+  void resumeAutoReconnect() {
+    if (!_autoReconnectPaused) return;
+    _autoReconnectPaused = false;
+    debugPrint('MiBand6Auth: auto-reconnect resumed.');
+    if (_userInitiatedDisconnect) return;
+    if (_device == null) return;
+    if (_streaming) return;
+    _scheduleReconnect();
+  }
+
   void _onUnexpectedDisconnect() {
     if (_userInitiatedDisconnect) return;
     debugPrint('MiBand6Auth: device disconnected unexpectedly.');
@@ -451,6 +474,10 @@ class MiBand6Auth {
 
   void _scheduleReconnect() {
     if (_userInitiatedDisconnect) return;
+    if (_autoReconnectPaused) {
+      debugPrint('MiBand6Auth: reconnect skipped (paused for ESP provisioning).');
+      return;
+    }
     if (_device == null) return;
     _reconnectTimer?.cancel();
     final idx = _reconnectAttempt.clamp(0, _reconnectBackoffSeconds.length - 1);
@@ -463,6 +490,7 @@ class MiBand6Auth {
 
   Future<void> _attemptReconnect() async {
     if (_userInitiatedDisconnect) return;
+    if (_autoReconnectPaused) return;
     final dev = _device;
     if (dev == null) return;
     debugPrint('MiBand6Auth: auto-reconnect attempt…');

@@ -199,6 +199,10 @@ class EspProvisionService {
     BluetoothCharacteristic? cfg;
     final dev = target.bluetoothDevice;
     void emit(ProvStatus s) => onStatus?.call(s);
+    // ApplyConfig 成功后，凭据已经落到 ESP32 NVS。之后任何 BLE 异常都不应再
+    // 回退到「配网失败」——板子会自己跑完 STA 关联或直接重启加入 WiFi，最终
+    // 通过云端 announce 出现。HomeScreen / EspProvisionPage 会负责走 cloud-wait。
+    bool applyConfigOk = false;
 
     try {
       emit(ProvStatus.connecting);
@@ -281,6 +285,7 @@ class EspProvisionService {
           '若长按 BOOT 键 5 秒也可立即重置。',
         );
       }
+      applyConfigOk = true;
 
       // ── 4. 轮询 GetStatus 直到 ESP32 报告 Connected ────────────────────
       emit(ProvStatus.pollingStatus);
@@ -303,6 +308,18 @@ class EspProvisionService {
         failReason: r.reason,
       );
     } catch (e) {
+      // ApplyConfig 之后的异常（最常见 FlutterBluePlusException with code 133
+      // = GATT_ERROR + LINK_SUPERVISION_TIMEOUT，多由米带/其它 GATT 链路抢
+      // host 栈触发）不应当作配网失败——板子已经拿到凭据并会自动加入 WiFi，
+      // 让上层走 cloud-wait 即可。
+      if (applyConfigOk) {
+        debugPrint(
+          'EspProvisionService.provision: BLE dropped after ApplyConfig ($e) — '
+          'treating as creds-delivered, cloud-wait will pick it up.',
+        );
+        emit(ProvStatus.credsDeliveredAwaitingCloud);
+        return ProvResult.ok(target.deviceId);
+      }
       emit(ProvStatus.failed);
       debugPrint('EspProvisionService.provision error: $e');
       return ProvResult.fail(target.deviceId, e.toString());
@@ -363,6 +380,13 @@ class EspProvisionService {
         debugPrint('EspProv poll #$iter read timeout: $e');
         await Future<void>.delayed(const Duration(milliseconds: 400));
         continue;
+      } catch (e) {
+        // flutter_blue_plus 也可能抛 FlutterBluePlusException（不继承自
+        // PlatformException）。例如米带自动重连定时器把 host 栈撑爆后，
+        // 第一次写就会拿到 GATT_ERROR (133) + LINK_SUPERVISION_TIMEOUT。
+        // 与 PlatformException 一致地按"BLE 掉线但凭据已送达"处理。
+        debugPrint('EspProv poll #$iter generic error: $e — switching to cloud-wait');
+        return const _PollOutcome(false, ProvFailReason.bleDroppedAwaitCloud);
       }
       lastState = parsed.state;
       lastReason = parsed.reason;

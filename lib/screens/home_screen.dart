@@ -820,6 +820,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           cloudService: _cloudService,
           activeChildId: widget.activeChildId,
           currentBoundDeviceId: _boundEsp32DeviceId,
+          miBandService: _miBandService,
         ),
       ),
     );
@@ -839,6 +840,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           activeChildId: widget.activeChildId,
           currentBoundDeviceId: _boundXiaozhiDeviceId,
           kind: EspProvKind.xiaozhi,
+          miBandService: _miBandService,
         ),
       ),
     );

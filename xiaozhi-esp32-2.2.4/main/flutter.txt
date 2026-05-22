@@ -1,0 +1,438 @@
+Flutter run key commands.
+r Hot reload. 
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on DVC AN20 is available at: http://127.0.0.1:54449/FOZPVDUfp8E=/
+The Flutter DevTools debugger and profiler on DVC AN20 is available at:
+http://127.0.0.1:54449/FOZPVDUfp8E=/devtools/?uri=ws://127.0.0.1:54449/FOZPVDUfp8E=/ws
+I/TextToSpeech( 1418): Connected to ComponentInfo{com.huawei.hiai/com.huawei.hiai.tts.service.TtsSystemService}
+D/OpenGLRenderer( 1418): disableOutlineDraw is true
+I/TextToSpeech( 1418): Set up connection to ComponentInfo{com.huawei.hiai/com.huawei.hiai.tts.service.TtsSystemService}
+D/DecorView( 1418): showOrHideHighlightView: hasFocus=true; winMode=1; isMrgNull=true
+W/InputMethodManager( 1418): startInputReason = 1
+W/HwRemoteInputMethodManager( 1418): isCasting false because IHwDistributedWindowManager is invalid.
+I/DecorView[]( 1418): pkgName:com.example.adhd_monitor old windowMode:1 new windoMode:1, isFixedSize:false
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+I/HwViewRootImpl( 1418): removeInvalidNode jank list is null
+I/DecorView[]( 1418): pkgName:com.example.adhd_monitor old windowMode:1 new windoMode:1, isFixedSize:false
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+W/InputMethodManager( 1418): startInputReason = 5
+D/[FBP-Android]( 1418): [FBP] onMethodCall: flutterRestart
+D/[FBP-Android]( 1418): [FBP] initializing BluetoothAdapter
+D/[FBP-Android]( 1418): [FBP] disconnectAllDevices(flutterRestart)
+D/[FBP-Android]( 1418): [FBP] connectedPeripherals: 0
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+D/[FBP-Android]( 1418): [FBP] onMethodCall: getAdapterState
+D/[FBP-Android]( 1418): [FBP] onMethodCall: getSystemDevices
+D/AwareBitmapCacher( 1418): handleInit switch not opened pid=1418
+D/[FBP-Android]( 1418): [FBP] onMethodCall: startScan
+I/BluetoothAdapter( 1418): isLeEnabled(): ON
+D/BluetoothLeScanner( 1418): onScannerRegistered() - status=0 scannerId=15 mScannerId=0
+D/[FBP-Android]( 1418): [FBP] onMethodCall: stopScan
+I/BluetoothAdapter( 1418): isLeEnabled(): ON
+D/ProfileInstaller( 1418): Installing profile for com.example.adhd_monitor
+D/[FBP-Android]( 1418): [FBP] onMethodCall: connect
+D/BluetoothGatt( 1418): connect() - device: E7:AF:F3:**:**:**, auto: false
+D/BluetoothGatt( 1418): registerApp()
+D/BluetoothGatt( 1418): registerApp() - UUID=e0d1740c-5213-435c-a41c-68f7b42d8749
+D/BluetoothGatt( 1418): onClientRegistered() - status=0 clientIf=15
+D/BluetoothGatt( 1418): onClientConnectionState() - status=0 clientIf=15 device=E7:AF:F3:**:**:**
+D/[FBP-Android]( 1418): [FBP] onConnectionStateChange:connected
+D/[FBP-Android]( 1418): [FBP]   status: SUCCESS
+D/[FBP-Android]( 1418): [FBP] onMethodCall: requestMtu
+D/BluetoothGatt( 1418): configureMTU() - device: E7:AF:F3:**:**:** mtu: 512
+D/BluetoothGatt( 1418): onConnectionUpdated() - Device=E7:AF:F3:**:**:** interval=6 latency=0 timeout=500 status=0
+D/BluetoothGatt( 1418): onConfigureMTU() - Device=E7:AF:F3:**:**:** mtu=247 status=0
+D/[FBP-Android]( 1418): [FBP] onMtuChanged:
+D/[FBP-Android]( 1418): [FBP]   mtu: 247
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: discoverServices
+D/BluetoothGatt( 1418): discoverServices() - device: E7:AF:F3:**:**:**
+D/BluetoothGatt( 1418): onSearchComplete() = Device=E7:AF:F3:**:**:** Status=0
+D/[FBP-Android]( 1418): [FBP] onServicesDiscovered:
+D/[FBP-Android]( 1418): [FBP]   count: 12
+D/[FBP-Android]( 1418): [FBP]   status: 0GATT_SUCCESS
+D/BluetoothGatt( 1418): onConnectionUpdated() - Device=E7:AF:F3:**:**:** interval=39 latency=0 timeout=500 status=0
+I/flutter ( 1418): MiBand6Auth: discovered 12 GATT services:
+I/flutter ( 1418):   service 1800
+I/flutter ( 1418):     char 2a00 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a01 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a04 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1801
+I/flutter ( 1418):   service 180a
+I/flutter ( 1418):     char 2a25 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a27 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a28 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a23 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a50 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000014-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 00001530-0000-3512-2118-0009af100700
+I/flutter ( 1418):     char 00001531-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00001532-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1811
+I/flutter ( 1418):     char 2a46 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a44 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1802
+I/flutter ( 1418):     char 2a06 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 180d
+I/flutter ( 1418):     char 2a37 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a39 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service fee0
+I/flutter ( 1418):     char 2a2b props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000001-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000002-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000003-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a04 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000004-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000005-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000006-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000007-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000008-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000010-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000020-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 0000000e-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 0000000f-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000011-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000012-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000013-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000016-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000017-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service fee1
+I/flutter ( 1418):     char 00000009-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fedd props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fede props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fedf props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fed0 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fed1 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fed2 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+D/[FBP-Android]( 1418): [FBP] onMethodCall: setNotifyValue
+D/BluetoothGatt( 1418): setCharacteristicNotification() - uuid: 00000009-0000-3512-2118-0009af100700 enable: true
+D/BluetoothGatt( 1418): writeDescriptor() - uuid: 00002902-0000-1000-8000-00805f9b34fb
+D/BluetoothGatt( 1418): onDescriptorWrite() - Device=E7:AF:F3:**:**:** handle=106
+D/[FBP-Android]( 1418): [FBP] onDescriptorWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: 00000009-0000-3512-2118-0009af100700
+D/[FBP-Android]( 1418): [FBP]   desc: 2902
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/[FBP-Android]( 1418): [FBP] onMethodCall: setNotifyValue
+D/BluetoothGatt( 1418): setCharacteristicNotification() - uuid: 00002a37-0000-1000-8000-00805f9b34fb enable: true
+D/BluetoothGatt( 1418): writeDescriptor() - uuid: 00002902-0000-1000-8000-00805f9b34fb
+D/BluetoothGatt( 1418): onDescriptorWrite() - Device=E7:AF:F3:**:**:** handle=42
+E/[FBP-Android]( 1418): [FBP] onDescriptorWrite:
+E/[FBP-Android]( 1418): [FBP]   chr: 2a37
+E/[FBP-Android]( 1418): [FBP]   desc: 2902
+E/[FBP-Android]( 1418): [FBP]   status: GATT_WRITE_NOT_PERMITTED (3)
+I/flutter ( 1418):     char fed3 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 0000fec1-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 180f
+I/flutter ( 1418):     char 2a19 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1812
+I/flutter ( 1418):     char 2a4e props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4b props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4a props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4c props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4d props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4d props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a22 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a32 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 3802
+I/flutter ( 1418):     char 4a02 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418): MiBand6Auth: found auth char at 00000009-0000-3512-2118-0009af100700
+I/flutter ( 1418): MiBand6Auth: send step1 (register key).
+I/flutter ( 1418): MiBand6Auth: private handshake failed -> PlatformException(writeCharacteristic, The WRITE property is not supported by this BLE characteristic, null, null)
+I/flutter ( 1418): MiBand6Auth: subscribe heart rate failed -> FlutterBluePlusException | setNotifyValue | android-code: 3 | GATT_WRITE_NOT_PERMITTED
+I/Hwaps   ( 1418): APS: EventAnalyzed: initAPS: version is 11.0.0.4
+D/Hwaps   ( 1418): Fpsrequest create,type:EXACTLY_IDENTIFY
+D/Hwaps   ( 1418): Fpsrequest create,type:EXACTLY_IDENTIFY
+D/Hwaps   ( 1418): Fpsrequest create,type:OPENGL_SETTING
+D/Hwaps   ( 1418): FpsController create
+D/Hwaps   ( 1418): APS: EventAnalyzed: reInitFpsPara :mBaseFps = 90; mMaxFps = 90
+W/Settings( 1418): Setting device_provisioned has moved from android.provider.Settings.Secure to android.provider.Settings.Global.
+V/HiTouch_HiTouchSensor( 1418): User setup is finished.
+W/HwApsManager( 1418): HwApsManagerService, registerCallback, start !
+D/Hwaps   ( 1418): APS: EventAnalyzed: registerCallbackInApsManagerService, mPkgName:com.example.adhd_monitor; result = true
+V/AudioManager( 1418): querySoundEffectsEnabled...
+V/AudioManager( 1418): querySoundEffectsEnabled...
+I/DecorView[]( 1418): pkgName:com.example.adhd_monitor old windowMode:1 new windoMode:1, isFixedSize:false
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+W/InputMethodManager( 1418): startInputReason = 4
+W/HwRemoteInputMethodManager( 1418): isCasting false because IHwDistributedWindowManager is invalid.
+I/InputMethodManager( 1418): showSoftInput
+I/HwViewRootImpl( 1418): removeInvalidNode all the node in jank list is out of time
+I/AssistStructure( 1418): Flattened final assist data: 528 bytes, containing 1 windows, 3 views
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+W/le.adhd_monito( 1418): Accessing hidden method Landroid/view/View;->getViewRootImpl()Landroid/view/ViewRootImpl; (greylist, reflection, allowed)
+W/le.adhd_monito( 1418): Accessing hidden field Landroid/view/View$AttachInfo;->mVisibleInsets:Landroid/graphics/Rect; (greylist, reflection, allowed)
+W/le.adhd_monito( 1418): Accessing hidden field Landroid/view/ViewRootImpl;->mAttachInfo:Landroid/view/View$AttachInfo; (greylist, reflection, allowed)
+W/InputMethodManager( 1418): startInputReason = 3
+W/HwRemoteInputMethodManager( 1418): isCasting false because IHwDistributedWindowManager is invalid.
+I/InputMethodManager( 1418): showSoftInput
+I/AssistStructure( 1418): Flattened final assist data: 456 bytes, containing 1 windows, 3 views
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+W/InputMethodManager( 1418): startInputReason = 5
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+V/AudioManager( 1418): querySoundEffectsEnabled...
+D/[FBP-Android]( 1418): [FBP] onMethodCall: startScan
+I/BluetoothAdapter( 1418): isLeEnabled(): ON
+D/BluetoothLeScanner( 1418): onScannerRegistered() - status=0 scannerId=16 mScannerId=0
+D/FlutterJNI( 1418): Sending viewport metrics to the engine.
+I/HwViewRootImpl( 1418): removeInvalidNode all the node in jank list is out of time
+D/[FBP-Android]( 1418): [FBP] onMethodCall: stopScan
+I/BluetoothAdapter( 1418): isLeEnabled(): ON
+I/flutter ( 1418): [FBP] stopScan: already stopped
+V/AudioManager( 1418): querySoundEffectsEnabled...
+D/[FBP-Android]( 1418): [FBP] onMethodCall: disconnect
+D/BluetoothGatt( 1418): cancelOpen() - device: E7:AF:F3:**:**:**
+D/BluetoothGatt( 1418): onClientConnectionState() - status=0 clientIf=15 device=E7:AF:F3:**:**:**
+D/[FBP-Android]( 1418): [FBP] onConnectionStateChange:disconnected
+D/[FBP-Android]( 1418): [FBP]   status: SUCCESS
+D/BluetoothGatt( 1418): close()
+D/BluetoothGatt( 1418): unregisterApp() - mClientIf=15
+I/flutter ( 1418): MiBand6Auth: device disconnected unexpectedly.
+I/flutter ( 1418): MiBand6Auth: schedule auto-reconnect in 5s (attempt 1).
+D/[FBP-Android]( 1418): [FBP] onMethodCall: connect
+D/BluetoothGatt( 1418): connect() - device: 98:88:E0:**:**:**, auto: false
+D/BluetoothGatt( 1418): registerApp()
+D/BluetoothGatt( 1418): registerApp() - UUID=f5e62bbe-e454-4549-bcff-9c25247d381a
+D/BluetoothGatt( 1418): onClientRegistered() - status=0 clientIf=15
+D/BluetoothGatt( 1418): onClientConnectionState() - status=0 clientIf=15 device=98:88:E0:**:**:**
+D/[FBP-Android]( 1418): [FBP] onConnectionStateChange:connected
+D/[FBP-Android]( 1418): [FBP]   status: SUCCESS
+D/[FBP-Android]( 1418): [FBP] onMethodCall: requestMtu
+D/BluetoothGatt( 1418): configureMTU() - device: 98:88:E0:**:**:** mtu: 512
+D/BluetoothGatt( 1418): onConnectionUpdated() - Device=98:88:E0:**:**:** interval=6 latency=0 timeout=500 status=0
+D/BluetoothGatt( 1418): onConfigureMTU() - Device=98:88:E0:**:**:** mtu=500 status=0
+D/[FBP-Android]( 1418): [FBP] onMtuChanged:
+D/[FBP-Android]( 1418): [FBP]   mtu: 500
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/BluetoothGatt( 1418): onConnectionUpdated() - Device=98:88:E0:**:**:** interval=24 latency=0 timeout=400 status=0
+D/[FBP-Android]( 1418): [FBP] onMethodCall: requestMtu
+D/BluetoothGatt( 1418): configureMTU() - device: 98:88:E0:**:**:** mtu: 256
+D/BluetoothGatt( 1418): onConfigureMTU() - Device=98:88:E0:**:**:** mtu=256 status=0
+D/[FBP-Android]( 1418): [FBP] onMtuChanged:
+D/[FBP-Android]( 1418): [FBP]   mtu: 256
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: discoverServices
+D/BluetoothGatt( 1418): discoverServices() - device: 98:88:E0:**:**:**
+D/BluetoothGatt( 1418): onSearchComplete() = Device=98:88:E0:**:**:** Status=0
+D/[FBP-Android]( 1418): [FBP] onServicesDiscovered:
+D/[FBP-Android]( 1418): [FBP]   count: 3
+D/[FBP-Android]( 1418): [FBP]   status: 0GATT_SUCCESS
+D/[FBP-Android]( 1418): [FBP] onMethodCall: setNotifyValue
+D/BluetoothGatt( 1418): setCharacteristicNotification() - uuid: 00002a05-0000-1000-8000-00805f9b34fb enable: true
+D/BluetoothGatt( 1418): writeDescriptor() - uuid: 00002902-0000-1000-8000-00805f9b34fb
+D/BluetoothGatt( 1418): onDescriptorWrite() - Device=98:88:E0:**:**:** handle=4
+D/[FBP-Android]( 1418): [FBP] onDescriptorWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: 2a05
+D/[FBP-Android]( 1418): [FBP]   desc: 2902
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff51-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=48 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff51-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: readCharacteristic
+D/BluetoothGatt( 1418): readCharacteristic() - uuid: ad48ff51-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicRead() - Device=98:88:E0:**:**:** handle=48 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicRead:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff51-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP]   instanceId: 0
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: readCharacteristic
+D/BluetoothGatt( 1418): readCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicRead() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicRead:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP]   instanceId: 0
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: readCharacteristic
+D/BluetoothGatt( 1418): readCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicRead() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicRead:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP]   instanceId: 0
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: readCharacteristic
+D/BluetoothGatt( 1418): readCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicRead() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicRead:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP]   instanceId: 0
+I/flutter ( 1418): EspProv poll #1: state=1 reason=null elapsed=0s raw=6B
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: readCharacteristic
+D/BluetoothGatt( 1418): readCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicRead() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicRead:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP]   instanceId: 0
+I/flutter ( 1418): EspProv poll #2: state=1 reason=null elapsed=1s raw=6B
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: readCharacteristic
+D/BluetoothGatt( 1418): readCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicRead() - Device=98:88:E0:**:**:** handle=51 Status=0
+D/[FBP-Android]( 1418): [FBP] onCharacteristicRead:
+D/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP]   instanceId: 0
+I/flutter ( 1418): EspProv poll #3: state=1 reason=null elapsed=1s raw=6B
+I/flutter ( 1418): MiBand6Auth: auto-reconnect attempt…
+D/[FBP-Android]( 1418): [FBP] onMethodCall: connect
+D/BluetoothGatt( 1418): connect() - device: E7:AF:F3:**:**:**, auto: false
+D/BluetoothGatt( 1418): registerApp()
+D/BluetoothGatt( 1418): registerApp() - UUID=2c614267-3453-4b93-9d84-56cdd1e6ddac
+D/BluetoothGatt( 1418): onClientRegistered() - status=0 clientIf=16
+D/BluetoothGatt( 1418): onClientConnectionState() - status=0 clientIf=16 device=E7:AF:F3:**:**:**
+D/[FBP-Android]( 1418): [FBP] onConnectionStateChange:connected
+D/[FBP-Android]( 1418): [FBP]   status: SUCCESS
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/BluetoothGatt( 1418): writeCharacteristic() - uuid: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+D/BluetoothGatt( 1418): onCharacteristicWrite() - Device=98:88:E0:**:**:** handle=51 Status=133
+E/[FBP-Android]( 1418): [FBP] onCharacteristicWrite:
+E/[FBP-Android]( 1418): [FBP]   chr: ad48ff52-7f86-46ad-a02e-3ca5849da5b6
+E/[FBP-Android]( 1418): [FBP]   status: GATT_ERROR (133)
+D/BluetoothGatt( 1418): onClientConnectionState() - status=8 clientIf=15 device=98:88:E0:**:**:**
+D/[FBP-Android]( 1418): [FBP] onConnectionStateChange:disconnected
+D/[FBP-Android]( 1418): [FBP]   status: LINK_SUPERVISION_TIMEOUT
+D/BluetoothGatt( 1418): close()
+D/BluetoothGatt( 1418): unregisterApp() - mClientIf=15
+I/flutter ( 1418): EspProvisionService.provision error: FlutterBluePlusException | writeCharacteristic | android-code: 133 | GATT_ERROR
+D/BluetoothGatt( 1418): onConnectionUpdated() - Device=E7:AF:F3:**:**:** interval=6 latency=0 timeout=500 status=0
+D/[FBP-Android]( 1418): [FBP] onMethodCall: requestMtu
+D/BluetoothGatt( 1418): configureMTU() - device: E7:AF:F3:**:**:** mtu: 512
+D/BluetoothGatt( 1418): onConfigureMTU() - Device=E7:AF:F3:**:**:** mtu=247 status=0
+D/[FBP-Android]( 1418): [FBP] onMtuChanged:
+D/[FBP-Android]( 1418): [FBP]   mtu: 247
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: disconnect
+D/[FBP-Android]( 1418): [FBP] already disconnected
+D/[FBP-Android]( 1418): [FBP] onMethodCall: discoverServices
+D/BluetoothGatt( 1418): discoverServices() - device: E7:AF:F3:**:**:**
+D/BluetoothGatt( 1418): onSearchComplete() = Device=E7:AF:F3:**:**:** Status=0
+D/[FBP-Android]( 1418): [FBP] onServicesDiscovered:
+D/[FBP-Android]( 1418): [FBP]   count: 12
+D/[FBP-Android]( 1418): [FBP]   status: 0GATT_SUCCESS
+I/flutter ( 1418): MiBand6Auth: discovered 12 GATT services:
+I/flutter ( 1418):   service 1800
+I/flutter ( 1418):     char 2a00 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a01 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a04 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1801
+I/flutter ( 1418):   service 180a
+I/flutter ( 1418):     char 2a25 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a27 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a28 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a23 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a50 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000014-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 00001530-0000-3512-2118-0009af100700
+I/flutter ( 1418):     char 00001531-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00001532-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1811
+I/flutter ( 1418):     char 2a46 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a44 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1802
+I/flutter ( 1418):     char 2a06 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 180d
+I/flutter ( 1418):     char 2a37 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a39 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service fee0
+I/flutter ( 1418):     char 2a2b props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000001-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000002-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000003-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a04 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000004-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000005-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000006-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000007-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+D/BluetoothGatt( 1418): onConnectionUpdated() - Device=E7:AF:F3:**:**:** interval=39 latency=0 timeout=500 status=0
+I/flutter ( 1418):     char 00000008-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000010-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000020-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 0000000e-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 0000000f-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000011-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000012-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000013-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000016-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 00000017-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service fee1
+I/flutter ( 1418):     char 00000009-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fedd props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fede props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fedf props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fed0 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fed1 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char fed2 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+D/[FBP-Android]( 1418): [FBP] onMethodCall: setNotifyValue
+D/BluetoothGatt( 1418): setCharacteristicNotification() - uuid: 00000009-0000-3512-2118-0009af100700 enable: true
+D/BluetoothGatt( 1418): writeDescriptor() - uuid: 00002902-0000-1000-8000-00805f9b34fb
+D/BluetoothGatt( 1418): onDescriptorWrite() - Device=E7:AF:F3:**:**:** handle=106
+D/[FBP-Android]( 1418): [FBP] onDescriptorWrite:
+D/[FBP-Android]( 1418): [FBP]   chr: 00000009-0000-3512-2118-0009af100700
+D/[FBP-Android]( 1418): [FBP]   desc: 2902
+D/[FBP-Android]( 1418): [FBP]   status: GATT_SUCCESS (0)
+D/[FBP-Android]( 1418): [FBP] onMethodCall: writeCharacteristic
+D/[FBP-Android]( 1418): [FBP] onMethodCall: setNotifyValue
+D/BluetoothGatt( 1418): setCharacteristicNotification() - uuid: 00002a37-0000-1000-8000-00805f9b34fb enable: true
+D/BluetoothGatt( 1418): writeDescriptor() - uuid: 00002902-0000-1000-8000-00805f9b34fb
+D/BluetoothGatt( 1418): onDescriptorWrite() - Device=E7:AF:F3:**:**:** handle=42
+E/[FBP-Android]( 1418): [FBP] onDescriptorWrite:
+E/[FBP-Android]( 1418): [FBP]   chr: 2a37
+E/[FBP-Android]( 1418): [FBP]   desc: 2902
+E/[FBP-Android]( 1418): [FBP]   status: GATT_WRITE_NOT_PERMITTED (3)
+I/flutter ( 1418):     char fed3 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 0000fec1-0000-3512-2118-0009af100700 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 180f
+I/flutter ( 1418):     char 2a19 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 1812
+I/flutter ( 1418):     char 2a4e props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4b props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4a props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4c props=CharacteristicProperties{broadcast: false, read: false, writeWithoutResponse: true, write: false, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4d props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a4d props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a22 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: false, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):     char 2a32 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: true, write: true, notify: false, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418):   service 3802
+I/flutter ( 1418):     char 4a02 props=CharacteristicProperties{broadcast: false, read: true, writeWithoutResponse: false, write: true, notify: true, indicate: false, authenticatedSignedWrites: false, extendedProperties: false, notifyEncryptionRequired: false, indicateEncryptionRequired: false}
+I/flutter ( 1418): MiBand6Auth: found auth char at 00000009-0000-3512-2118-0009af100700
+I/flutter ( 1418): MiBand6Auth: send step1 (register key).
+I/flutter ( 1418): MiBand6Auth: private handshake failed -> PlatformException(writeCharacteristic, The WRITE property is not supported by this BLE characteristic, null, null)
+I/flutter ( 1418): MiBand6Auth: subscribe heart rate failed -> FlutterBluePlusException | setNotifyValue | android-code: 3 | GATT_WRITE_NOT_PERMITTED
