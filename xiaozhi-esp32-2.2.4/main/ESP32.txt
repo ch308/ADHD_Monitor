@@ -1,0 +1,333 @@
+============================================
+ESP-IDF Monitor Script
+IDF_PATH = C:\esp\v6.0.1\esp-idf
+Port = COM5
+============================================
+Setting up ESP-IDF environment...
+Activating ESP-IDF 6.0
+Setting IDF_PATH to 'C:\esp\v6.0.1\esp-idf'.
+* Checking python version ... 3.13.13
+* Checking python dependencies ... OK
+* Deactivating the current ESP-IDF environment (if any) ... OK
+* Establishing a new ESP-IDF environment ... OK
+* Identifying shell ... cmd.exe
+* Detecting outdated tools in system ... Found tools that are not used by active ESP-IDF version.
+For removing old versions of components, python use command 'python.exe C:\esp\v6.0.1\esp-idf\tools\idf_tools.py uninstall'
+To free up even more space, remove installation packages of those tools.
+Use option python.exe C:\esp\v6.0.1\esp-idf\tools\idf_tools.py uninstall --remove-archives.
+
+Done You can now compile ESP-IDF projects.
+Go to the project directory and run:
+
+  idf.py build
+
+
+Starting serial monitor on COM5...
+Press Ctrl+] to exit.
+
+Executing action: monitor
+Running idf_monitor in directory C:\adhd_monitor\adhd_monitor\xiaozhi-esp32-2.2.4
+Executing "C:\Espressif\python_env\idf6.0_py3.13_env\Scripts\python.exe C:\esp\v6.0.1\esp-idf\tools/idf_monitor.py -p COM5 -b 115200 --toolchain-prefix xtensa-esp32s3-elf- --target esp32s3 --revision 0 C:\adhd_monitor\adhd_monitor\xiaozhi-esp32-2.2.4\build\xiaozhi.elf C:\adhd_monitor\adhd_monitor\xiaozhi-esp32-2.2.4\build\bootloader\bootloader.elf --force-color -m 'C:\Espressif\python_env\idf6.0_py3.13_env\Scripts\python.exe' 'C:\esp\v6.0.1\esp-idf\tools\idf.py' '-p' 'COM5'"...
+--- Warning: GDB cannot open serial ports accessed as COMx
+--- Using \\.\COM5 instead...
+--- esp-idf-monitor 1.9.0 on \\.\COM5 115200
+--- Quit: Ctrl+] | Menu: Ctrl+T | Help: Ctrl+T followed by Ctrl+H
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0x15 (USB_UART_CHIP_RESET),boot:0x2b (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40387e82
+--- 0x40387e82: esp_cpu_wait_for_intr at C:/esp/v6.0.1/esp-idf/components/esp_hw_support/cpu.c:64
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x544
+load:0x403c8700,len:0xcc8
+--- 0x403c8700: _stext at ??:?
+load:0x403cb700,len:0x2ea0
+entry 0x403c88f4
+--- 0x403c88f4: call_start_cpu0 at C:/esp/v6.0.1/esp-idf/components/bootloader/subproject/main/bootloader_start.c:27
+I (35) octal_psram: vendor id    : 0x0d (AP)
+I (36) octal_psram: dev id       : 0x02 (generation 3)
+I (36) octal_psram: density      : 0x03 (64 Mbit)
+I (37) octal_psram: good-die     : 0x01 (Pass)
+I (42) octal_psram: Latency      : 0x01 (Fixed)
+I (46) octal_psram: VCC          : 0x01 (3V)
+I (50) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (55) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (60) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (64) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (69) octal_psram: DriveStrength: 0x00 (1/1)
+I (73) MSPI Timing: Enter psram timing tuning
+I (78) esp_psram: Found 8MB PSRAM device
+I (81) esp_psram: Speed: 80MHz
+I (84) cpu_start: Multicore app
+I (98) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (98) cpu_start: Pro cpu start user code
+I (98) cpu_start: cpu freq: 240000000 Hz
+I (100) app_init: Application information:
+I (104) app_init: Project name:     xiaozhi
+I (108) app_init: App version:      2.2.4
+I (111) app_init: Compile time:     May 22 2026 13:10:34
+I (116) app_init: ELF file SHA256:  28a91e1c4...
+I (121) app_init: ESP-IDF:          v6.0.1
+I (125) efuse_init: Min chip rev:     v0.0
+I (128) efuse_init: Max chip rev:     v0.99 
+I (132) efuse_init: Chip rev:         v0.2
+I (136) heap_init: Initializing. RAM available for dynamic allocation:
+I (143) heap_init: At 3FCB23D0 len 00037340 (220 KiB): RAM
+I (148) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (153) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (158) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (163) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (170) spi_flash: detected chip: winbond
+I (174) spi_flash: flash io: qio
+I (177) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (183) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (198) main_task: Started on CPU0
+I (208) esp_psram: Reserving pool of 96K of internal memory for DMA/internal allocations
+I (208) main_task: Calling app_main()
+I (238) Board: UUID=996a3e1e-45e5-4987-a3d7-4bbb52fb91e3 SKU=bread-compact-wifi
+I (238) button: IoT Button Version: 4.1.6
+W (248) CompactWifiBoard: OLED not ACK at 0x3C or 0x3D; continuing init (check wiring / pull-ups)
+I (248) CompactWifiBoard: Install SSD1306 driver
+I (248) CompactWifiBoard: SSD1306 driver installed
+E (258) lcd_panel.io.i2c: panel_io_i2c_tx_buffer(193): i2c transaction failed
+E (258) lcd_panel.ssd1306: panel_ssd1306_init(151): io tx param SSD1306_CMD_SET_MULTIPLEX failed
+E (268) CompactWifiBoard: Failed to initialize display
+I (278) MCP: Add tool: self.lamp.get_state
+I (278) MCP: Add tool: self.lamp.turn_on
+I (288) MCP: Add tool: self.lamp.turn_off
+I (288) StateMachine: State: unknown -> starting
+W (288) Display: Role:system
+W (298) Display:      bread-compact-wifi/2.2.4
+I (298) NoAudioCodec: Simplex channels created
+W (298) AudioCodec: Output volume value (0) is too small, setting to default (10)
+I (308) AudioCodec: Audio codec started
+I (318) MCP: Add tool: self.get_device_status
+I (318) MCP: Add tool: self.audio_speaker.set_volume
+I (318) MCP: Add tool: self.get_system_info [user]
+I (328) MCP: Add tool: self.reboot [user]
+I (328) MCP: Add tool: self.upgrade_firmware [user]
+I (338) Assets: The storage free size is 21824 KB
+I (338) Assets: The partition size is 8192 KB
+I (378) Assets: The checksum calculation time is 32 ms
+I (378) MCP: Add tool: self.assets.set_download_url [user]
+I (378) WifiManager: Initializing...
+I (378) pp: pp rom version: e7ae62f
+I (378) net80211: net80211 rom version: e7ae62f
+I (398) wifi:wifi driver task: 3fcde8bc, prio:23, stack:6656, core=0
+I (398) wifi:wifi firmware version: b37c951
+I (398) wifi:wifi certification version: v7.0
+I (398) wifi:config NVS flash: disabled
+I (408) wifi:config nano formatting: disabled
+I (408) wifi:Init data frame dynamic rx buffer num: 6
+I (408) wifi:Init dynamic rx mgmt buffer num: 5
+I (418) wifi:Init management short buffer num: 32
+I (418) wifi:Init dynamic tx buffer num: 32
+I (428) wifi:Init static tx FG buffer num: 2
+I (428) wifi:Init static rx buffer size: 1600
+I (438) wifi:Init static rx buffer num: 3
+I (438) wifi:Init dynamic rx buffer num: 6
+I (438) wifi_init: rx ba win: 3
+I (448) wifi_init: accept mbox: 6
+I (448) wifi_init: tcpip mbox: 16
+I (448) wifi_init: udp mbox: 6
+I (448) wifi_init: tcp mbox: 6
+I (458) wifi_init: tcp tx win: 5760
+I (458) wifi_init: tcp rx win: 5760
+I (458) wifi_init: tcp mss: 1440
+I (468) WifiManager: Initialized
+I (468) WifiBoard: Starting WiFi connection attempt
+I (468) WifiManager: Starting station
+I (478) phy_init: phy_version 711,97bcf0a2,Aug 25 2025,19:04:10
+I (508) wifi:mode : sta (98:88:e0:16:05:60)
+I (508) wifi:enable tsf
+I (518) WifiBoard: WiFi scanning
+W (518) Display: ShowNotification: 扫描 Wi-Fi...
+I (2918) WifiStation: No AP found, next scan in 10 seconds
+--- Error: ClearCommError failed (PermissionError(13, '设备不识别此命令。', None, 22))
+--- Waiting for the device to reconnect.
+W (248) CompactWifiBoard: OLED not ACK at 0x3C or 0x3D; continuiI (1038) WifiBoard: EnterWifiConfigMode called
+W (1038) Display: ShowNotification: 进入配网模式...
+I (1038) WifiManager: Stopping station
+I (1038) WifiStation: Stopping WiFi station
+I (1038) wifi:flush txq
+I (1038) wifi:stop sw txq
+I (1048) wifi:lmac stop hw txq
+I (1048) WifiManager: Station stopped
+W (1048) WifiBoard: WiFi disconnected
+I (1058) StateMachine: State: starting -> wifi_configuring
+I (1058) wifi:mode : sta (98:88:e0:16:05:60)
+I (1068) wifi:enable tsf
+I (1068) BLE_INIT: BT controller compile version [b7de11e]
+I (1068) BLE_INIT: Using main XTAL as clock source
+I (1078) BLE_INIT: Feature Config, ADV:1, BLE_50:1, DTM:1, SCAN:1, CCA:0, SMP:1, CONNECT:1
+I (1088) BLE_INIT: Bluetooth MAC: 98:88:e0:16:05:62
+I (1098) network_prov_mgr: Provisioning started with service name : XIAOZHI_E0160560 
+I (1108) adhd_prov_ble: BLE provisioning started, name=XIAOZHI_E0160560
+W (1108) Application: Alert [gear] 配网模式: ADHD_Monitor BLE 配网中…
+W (1108) Display: SetStatus: 配网模式
+W (1118) Display: SetEmotion: gear
+W (1118) Display: Role:system
+W (1118) Display:      ADHD_Monitor BLE 配网中…
+I (1128) AudioCodec: Set output enable to true
+I (1138) AudioService: Resampling audio from 16000 to 24000
+W (60348) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (60348) adhd_prov_ble: got creds, SSID=Cphone
+I (60348) SsidManager: compare [Cphone:6] [Cphone:6]
+W (60358) SsidManager: SSID Cphone already exists, overwrite it
+I (60358) adhd_prov_ble: creds saved to SsidManager, will reboot to join AP
+W (63508) adhd_prov_ble: reboot deadline reached, rebooting now
+W (63508) adhd_prov_ble: rebooting to let WifiManager pick up new credentials
+ESP-ROM:esp32s3-20210327
+Build:Mar 27 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0x2b (SPI_FAST_FLASH_BOOT)
+Saved PC:0x4038a98e
+--- 0x4038a98e: esp_restart_noos at C:/esp/v6.0.1/esp-idf/components/esp_system/port/soc/esp32s3/system_internal.c:165
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fce2820,len:0x544
+load:0x403c8700,len:0xcc8
+--- 0x403c8700: _stext at ??:?
+load:0x403cb700,len:0x2ea0
+entry 0x403c88f4
+--- 0x403c88f4: call_start_cpu0 at C:/esp/v6.0.1/esp-idf/components/bootloader/subproject/main/bootloader_start.c:27
+I (35) octal_psram: vendor id    : 0x0d (AP)
+I (35) octal_psram: dev id       : 0x02 (generation 3)
+I (35) octal_psram: density      : 0x03 (64 Mbit)
+I (37) octal_psram: good-die     : 0x01 (Pass)
+I (41) octal_psram: Latency      : 0x01 (Fixed)
+I (45) octal_psram: VCC          : 0x01 (3V)
+I (49) octal_psram: SRF          : 0x01 (Fast Refresh)
+I (54) octal_psram: BurstType    : 0x01 (Hybrid Wrap)
+I (59) octal_psram: BurstLen     : 0x01 (32 Byte)
+I (63) octal_psram: Readlatency  : 0x02 (10 cycles@Fixed)
+I (69) octal_psram: DriveStrength: 0x00 (1/1)
+I (73) MSPI Timing: Enter psram timing tuning
+I (77) esp_psram: Found 8MB PSRAM device
+I (80) esp_psram: Speed: 80MHz
+I (83) cpu_start: Multicore app
+I (97) cpu_start: GPIO 44 and 43 are used as console UART I/O pins
+I (98) cpu_start: Pro cpu start user code
+I (98) cpu_start: cpu freq: 240000000 Hz
+I (99) app_init: Application information:
+I (103) app_init: Project name:     xiaozhi
+I (107) app_init: App version:      2.2.4
+I (111) app_init: Compile time:     May 22 2026 13:10:34
+I (116) app_init: ELF file SHA256:  28a91e1c4...
+I (120) app_init: ESP-IDF:          v6.0.1
+I (124) efuse_init: Min chip rev:     v0.0
+I (128) efuse_init: Max chip rev:     v0.99 
+I (132) efuse_init: Chip rev:         v0.2
+I (136) heap_init: Initializing. RAM available for dynamic allocation:
+I (142) heap_init: At 3FCB23D0 len 00037340 (220 KiB): RAM
+I (147) heap_init: At 3FCE9710 len 00005724 (21 KiB): RAM
+I (152) heap_init: At 3FCF0000 len 00008000 (32 KiB): DRAM
+I (157) heap_init: At 600FE000 len 00001FD8 (7 KiB): RTCRAM
+I (163) esp_psram: Adding pool of 8192K of PSRAM memory to heap allocator
+I (170) spi_flash: detected chip: winbond
+I (173) spi_flash: flash io: qio
+I (177) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (182) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (197) main_task: Started on CPU0
+I (207) esp_psram: Reserving pool of 96K of internal memory for DMA/internal allocations
+I (207) main_task: Calling app_main()
+I (237) Board: UUID=996a3e1e-45e5-4987-a3d7-4bbb52fb91e3 SKU=bread-compact-wifi
+I (237) button: IoT Button Version: 4.1.6
+W (247) CompactWifiBoard: OLED not ACK at 0x3C or 0x3D; continuing init (check wiring / pull-ups)
+I (247) CompactWifiBoard: Install SSD1306 driver
+I (247) CompactWifiBoard: SSD1306 driver installed
+E (257) lcd_panel.io.i2c: panel_io_i2c_tx_buffer(193): i2c transaction failed
+E (257) lcd_panel.ssd1306: panel_ssd1306_init(151): io tx param SSD1306_CMD_SET_MULTIPLEX failed
+E (267) CompactWifiBoard: Failed to initialize display
+I (277) MCP: Add tool: self.lamp.get_state
+I (277) MCP: Add tool: self.lamp.turn_on
+I (287) MCP: Add tool: self.lamp.turn_off
+I (287) StateMachine: State: unknown -> starting
+W (287) Display: Role:system
+W (297) Display:      bread-compact-wifi/2.2.4
+I (297) NoAudioCodec: Simplex channels created
+W (297) AudioCodec: Output volume value (0) is too small, setting to default (10)
+I (307) AudioCodec: Audio codec started
+I (317) MCP: Add tool: self.get_device_status
+I (317) MCP: Add tool: self.audio_speaker.set_volume
+I (317) MCP: Add tool: self.get_system_info [user]
+I (327) MCP: Add tool: self.reboot [user]
+I (327) MCP: Add tool: self.upgrade_firmware [user]
+I (337) Assets: The storage free size is 21824 KB
+I (337) Assets: The partition size is 8192 KB
+I (377) Assets: The checksum calculation time is 32 ms
+I (377) MCP: Add tool: self.assets.set_download_url [user]
+I (377) WifiManager: Initializing...
+I (377) pp: pp rom version: e7ae62f
+I (377) net80211: net80211 rom version: e7ae62f
+I (397) wifi:wifi driver task: 3fcde8bc, prio:23, stack:6656, core=0
+I (397) wifi:wifi firmware version: b37c951
+I (397) wifi:wifi certification version: v7.0
+I (397) wifi:config NVS flash: disabled
+I (407) wifi:config nano formatting: disabled
+I (407) wifi:Init data frame dynamic rx buffer num: 6
+I (407) wifi:Init dynamic rx mgmt buffer num: 5
+I (417) wifi:Init management short buffer num: 32
+I (417) wifi:Init dynamic tx buffer num: 32
+I (427) wifi:Init static tx FG buffer num: 2
+I (427) wifi:Init static rx buffer size: 1600
+I (437) wifi:Init static rx buffer num: 3
+I (437) wifi:Init dynamic rx buffer num: 6
+I (437) wifi_init: rx ba win: 3
+I (447) wifi_init: accept mbox: 6
+I (447) wifi_init: tcpip mbox: 16
+I (447) wifi_init: udp mbox: 6
+I (447) wifi_init: tcp mbox: 6
+I (457) wifi_init: tcp tx win: 5760
+I (457) wifi_init: tcp rx win: 5760
+I (457) wifi_init: tcp mss: 1440
+I (467) WifiManager: Initialized
+I (467) WifiBoard: Starting WiFi connection attempt
+I (467) WifiManager: Starting station
+I (477) phy_init: phy_version 711,97bcf0a2,Aug 25 2025,19:04:10
+I (507) wifi:mode : sta (98:88:e0:16:05:60)
+I (507) wifi:enable tsf
+I (517) WifiBoard: WiFi scanning
+W (517) Display: ShowNotification: 扫描 Wi-Fi...
+I (2917) WifiStation: Found AP: Cphone, BSSID: 9a:18:f2:f7:17:fa, RSSI: -55, Channel: 6, Authmode: 3
+I (2917) WifiBoard: WiFi connecting to Cphone
+W (2917) Display: ShowNotification: 连接 Cphone...
+W (2927) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (3607) wifi:new:<6,0>, old:<1,0>, ap:<255,255>, sta:<6,0>, prof:1, snd_ch_cfg:0x0
+I (3607) wifi:state: init -> auth (0xb0)
+I (3607) wifi:state: auth -> assoc (0x0)
+I (3617) wifi:state: assoc -> run (0x10)
+I (3667) wifi:connected with Cphone, aid = 1, channel 6, BW20, bssid = 9a:18:f2:f7:17:fa
+I (3667) wifi:security: WPA2-PSK, phy: bgn, rssi: -56, cipher(pairwise:0x3, group:0x3), pmf:0
+I (3677) wifi:pm start, type: 1
+
+I (3677) wifi:dp: 1, bi: 102400, li: 10, scale listen interval from 1024000 us to 1024000 us
+I (3687) wifi:set rx beacon pti, rx_bcn_pti: 14, bcn_timeout: 25000, mt_pti: 14, mt_time: 10000
+I (3707) wifi:AP's beacon interval = 102400 us, DTIM period = 1
+I (5027) esp_netif_handlers: sta ip: 172.20.10.14, mask: 255.255.255.240, gw: 172.20.10.1
+I (5027) WifiStation: Got IP: 172.20.10.14
+I (5027) WifiBoard: Connected to WiFi: Cphone
+W (5027) Display: ShowNotification: 已连接 Cphone
+I (5027) Application: Network connected
+I (5037) StateMachine: State: starting -> activating
+I (5037) Application: ADHD bypass OTA: seeding websocket NVS from Kconfig
+W (5047) Display: SetStatus: 登录服务器...
+I (5047) Application: ADHD bypass OTA: forcing WebsocketProtocol
+I (5057) Application: Activation done
+I (5057) SystemInfo: free sram: 167679 minimal sram: 159351
+I (5067) StateMachine: State: activating -> idle
+W (5067) Display: ShowNotification: 云端已连接
+Cphone
+版本 
+W (5077) Display: Role:system
+W (5077) Display:      
+I (5077) Application: Cloud ready, ssid=Cphone, version=
+I (5087) WifiStation: Setting WiFi power save level: LOW_POWER (MAX_MODEM)
+I (5097) wifi:Set ps type: 2, coexist: 0
+
+W (5097) Display: SetStatus: 待命
+W (5097) Display: SetEmotion: neutral
+I (5107) AudioCodec: Set output enable to true
+I (5107) AudioService: Resampling audio from 16000 to 24000
+I (14317) SystemInfo: free sram: 167419 minimal sram: 159351
+I (22107) AudioCodec: Set output enable to false

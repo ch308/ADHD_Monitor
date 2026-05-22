@@ -15,6 +15,9 @@
 #include <esp_log.h>
 #include <driver/gpio.h>
 #include <driver/i2c_master.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 
@@ -60,7 +63,9 @@ private:
             rtc_gpio_set_level(GPIO_NUM_21, 0);
             // 启用保持功能，确保睡眠期间电平不变
             rtc_gpio_hold_en(GPIO_NUM_21);
-            esp_lcd_panel_disp_on_off(panel_, false); //关闭显示
+            if (panel_) {
+                esp_lcd_panel_disp_on_off(panel_, false); // 关闭显示
+            }
             esp_deep_sleep_start();
         });
         power_save_timer_->SetEnabled(true);
@@ -80,12 +85,27 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &display_i2c_bus_));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     void InitializeSsd1306Display() {
+        uint32_t oled_addr = 0x3C;
+        bool found = (i2c_master_probe(display_i2c_bus_, oled_addr, 800) == ESP_OK);
+        if (!found && (i2c_master_probe(display_i2c_bus_, 0x3D, 800) == ESP_OK)) {
+            oled_addr = 0x3D;
+            found = true;
+            ESP_LOGI(TAG, "OLED found at I2C address 0x3D (SA0 high)");
+        }
+        if (!found) {
+            ESP_LOGW(TAG, "No OLED on I2C (0x3C/0x3D no ACK). Headless mode: audio/LED/UART OK. "
+                          "Check or replace panel; bus SDA=GPIO%d SCL=GPIO%d.",
+                     (int)DISPLAY_SDA_PIN, (int)DISPLAY_SCL_PIN);
+            display_ = new NoDisplay();
+            return;
+        }
         // SSD1306 config
         esp_lcd_panel_io_i2c_config_t io_config = {
-            .dev_addr = 0x3C,
+            .dev_addr = oled_addr,
             .scl_speed_hz = 400 * 1000,
             .control_phase_bytes = 1,
             .dc_bit_offset = 6,
@@ -117,7 +137,11 @@ private:
         // Reset the display
         ESP_ERROR_CHECK(esp_lcd_panel_reset(panel_));
         if (esp_lcd_panel_init(panel_) != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to initialize display");
+            ESP_LOGE(TAG, "SSD1306 panel_init failed; releasing driver, using NoDisplay.");
+            esp_lcd_panel_del(panel_);
+            panel_ = nullptr;
+            esp_lcd_panel_io_del(panel_io_);
+            panel_io_ = nullptr;
             display_ = new NoDisplay();
             return;
         }

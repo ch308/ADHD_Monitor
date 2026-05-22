@@ -117,22 +117,28 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
 #endif
             in_config_mode_ = false;
             ESP_LOGI(TAG, "Connected to WiFi: %s", data.c_str());
+            ESP_LOGW(TAG, "======== WiFi 已连接 / CONNECTED ======== SSID: %s", data.c_str());
+            ESP_LOGW(TAG, "(无 OLED 时看本行；WS2812 指示灯将进入「激活」慢闪)");
             break;
         case NetworkEvent::Scanning:
             ESP_LOGI(TAG, "WiFi scanning");
             break;
         case NetworkEvent::Connecting:
             ESP_LOGI(TAG, "WiFi connecting to %s", data.c_str());
+            ESP_LOGW(TAG, "-------- WiFi 正在连接 / CONNECTING -------- %s", data.c_str());
             break;
         case NetworkEvent::Disconnected:
             ESP_LOGW(TAG, "WiFi disconnected");
+            ESP_LOGW(TAG, "!!!! WiFi 已断开 / DISCONNECTED !!!!");
             break;
         case NetworkEvent::WifiConfigModeEnter:
             ESP_LOGI(TAG, "WiFi config mode entered");
+            ESP_LOGW(TAG, "~~~~~~~~ 已进入配网模式 / WIFI CONFIG MODE ~~~~~~~~");
             in_config_mode_ = true;
             break;
         case NetworkEvent::WifiConfigModeExit:
             ESP_LOGI(TAG, "WiFi config mode exited");
+            ESP_LOGW(TAG, "~~~~~~~~ 已退出配网模式 / CONFIG MODE EXIT ~~~~~~~~");
             in_config_mode_ = false;
             // Try to connect with the new credentials
             TryWifiConnect();

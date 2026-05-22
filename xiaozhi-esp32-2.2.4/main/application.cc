@@ -123,9 +123,11 @@ void Application::Initialize() {
             }
             case NetworkEvent::Connected: {
                 last_connected_network_ = data;
+                ESP_LOGW(TAG, "==== Application: WiFi 已连上 SSID: %s ====", data.c_str());
                 std::string msg = Lang::Strings::CONNECTED_TO;
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
+                audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
                 break;
             }

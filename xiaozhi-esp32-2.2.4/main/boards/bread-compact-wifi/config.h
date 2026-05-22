@@ -34,6 +34,8 @@
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_40
 #define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_39
 
+// OLED I2C — must match your wiring. If serial shows "OLED not ACK", check VCC/GND,
+// SDA/SCL swap, and add ~4.7k pull-ups to 3V3 if the module has none.
 #define DISPLAY_SDA_PIN GPIO_NUM_41
 #define DISPLAY_SCL_PIN GPIO_NUM_42
 #define DISPLAY_WIDTH   128

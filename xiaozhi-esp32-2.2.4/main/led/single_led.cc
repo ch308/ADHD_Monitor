@@ -154,7 +154,9 @@ void SingleLed::OnStateChanged() {
             break;
         case kDeviceStateActivating:
             SetColor(0, DEFAULT_BRIGHTNESS, 0);
-            StartContinuousBlink(500);
+            /* Solid on (not 500ms blink) so it is visually distinct from WiFi 配网模式
+             * which also blinks at 500ms — helps when there is no OLED. */
+            TurnOn();
             break;
         default:
             ESP_LOGW(TAG, "Unknown led strip event: %d", device_state);
