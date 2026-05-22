@@ -1606,20 +1606,59 @@ def _get_esp32_device(device_id: str):
 
 
 def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
+    """挑出该孩子绑定的 xiaozhi 星星机器人 device_id 列表。
+
+    选择策略：
+      1) 优先：`kind` 字段含 `xiaozhi`（Flutter 端 bindEsp32(kind='xiaozhi') 或固件
+         announce 时 kind='xiaozhi' 会写入这一行）。
+      2) 回退：如果策略 1 命中 0 行（部分老设备 bind 时未带 kind，或固件 announce
+         覆盖了 kind=None），就退而取该孩子名下 **所有** kind 为空或不含 'plush' 的
+         设备——避免出现"星星机器人确实绑了，但因为 kind 没写 'xiaozhi' 就静默
+         丢失行为推送"这种排查极困难的情况（用户线上已经遇到过：长轮询每次返回
+         204、enqueue 这条 INFO 根本没出，唯一的解释就是 ids=[]）。
+      3) 仍空 → 返回 []，调用方会打 WARNING 让我们立刻看到。
+    """
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     cursor.execute(
         """
-        SELECT device_id FROM esp32_devices
+        SELECT device_id, kind FROM esp32_devices
         WHERE child_id = ?
-          AND kind IS NOT NULL
-          AND LOWER(kind) LIKE '%xiaozhi%'
+        ORDER BY last_seen_at DESC
         """,
         (child_id,),
     )
-    rows = [r[0] for r in cursor.fetchall()]
+    rows = cursor.fetchall()
     conn.close()
-    return rows
+
+    if not rows:
+        app.logger.warning(
+            "xiaozhi target lookup: no esp32_devices rows for child_id=%s "
+            "(check Flutter bindEsp32 + DB esp32_devices.child_id)",
+            child_id,
+        )
+        return []
+
+    strict = [
+        r[0] for r in rows
+        if r[1] and "xiaozhi" in str(r[1]).lower()
+    ]
+    if strict:
+        return strict
+
+    relaxed = [
+        r[0] for r in rows
+        if not r[1] or "plush" not in str(r[1]).lower()
+    ]
+    if relaxed:
+        app.logger.warning(
+            "xiaozhi target lookup: no strict kind=xiaozhi match for child_id=%s; "
+            "falling back to %d device(s) with empty/non-plush kind: %s "
+            "(rows=%s). Re-run BLE provisioning so the bind row gets kind='xiaozhi'.",
+            child_id, len(relaxed), relaxed,
+            [(r[0], r[1]) for r in rows],
+        )
+    return relaxed
 
 
 def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str, condition_type: str = "") -> None:
@@ -1641,6 +1680,11 @@ def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str, con
     """
     ids = _xiaozhi_device_ids_for_child(child_id)
     if not ids:
+        app.logger.warning(
+            "xiaozhi enqueue SKIPPED: child_id=%s has no bound xiaozhi devices. "
+            "Use Flutter '星星机器人配网' to bind, or check /diag/xiaozhi/%s.",
+            child_id, child_id,
+        )
         return
     from xiaozhi_bridge import stash_xinvoke_hint
 
@@ -1723,6 +1767,53 @@ def esp32_announce():
             "esp32 announce %s dropped %d stale cmd(s)", device_id, len(dropped)
         )
     return jsonify({"status": "ok", "device_id": device_id}), 200
+
+
+@app.route("/diag/xiaozhi/<int:child_id>", methods=["GET"])
+def diag_xiaozhi(child_id: int):
+    """免登诊断接口：浏览器直接打开 http://<server>:11760/diag/xiaozhi/1 即可看到
+
+    - 当前 child_id 名下 esp32_devices 全部行（device_id / kind / 时间戳）
+    - `_xiaozhi_device_ids_for_child` 当前会返回的目标列表
+    - `_esp32_cmd_queue` 里每个 device 的待派命令数量
+
+    专门用于排查"submit_log 返回 200 但星星机器人没声音"。生产环境用完可以删，
+    但留着也无密钥风险——只暴露设备 id 与 kind，不暴露用户表。
+    """
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT device_id, kind, child_id, first_seen_at, last_seen_at "
+        "FROM esp32_devices WHERE child_id = ? ORDER BY last_seen_at DESC",
+        (child_id,),
+    )
+    rows = [
+        {
+            "device_id": r[0],
+            "kind": r[1],
+            "child_id": r[2],
+            "first_seen_at": r[3],
+            "last_seen_at": r[4],
+        }
+        for r in cursor.fetchall()
+    ]
+    cursor.execute(
+        "SELECT device_id, kind FROM esp32_devices "
+        "WHERE child_id IS NULL ORDER BY last_seen_at DESC LIMIT 20"
+    )
+    unbound = [{"device_id": r[0], "kind": r[1]} for r in cursor.fetchall()]
+    conn.close()
+
+    with _esp32_cmd_lock:
+        queues = {did: len(q) for did, q in _esp32_cmd_queue.items() if q}
+
+    return jsonify({
+        "child_id": child_id,
+        "bound_devices": rows,
+        "xiaozhi_targets": _xiaozhi_device_ids_for_child(child_id),
+        "pending_cmd_queues": queues,
+        "unbound_recent": unbound,
+    }), 200
 
 
 @app.route("/device/esp32/list", methods=["GET"])
