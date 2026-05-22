@@ -49,49 +49,33 @@ private:
     }
 
     void InitializeSsd1306Display() {
-        // 探测 OLED 在 I²C 总线上的实际地址。中文电商常见的 0.96" OLED 模块大多
-        // 走 0x3C，但也有不少（128×32 居多 / SH1106 跳线版 / ESP32-S3-LCD-1.47B
-        // 之外的板子）固定在 0x3D。原来硬编码 0x3C 时一旦地址不对，
-        // panel_init 就会因为 NACK 直接挂掉到 NoDisplay，屏幕完全不亮。
-        // 这里先用 i2c_master_probe 试两个地址，谁回 ACK 就用谁。
-        uint16_t dev_addr = 0;
-        for (uint16_t addr : {0x3C, 0x3D}) {
-            if (i2c_master_probe(display_i2c_bus_, addr, /*xfer_timeout_ms=*/100) == ESP_OK) {
-                dev_addr = addr;
-                ESP_LOGI(TAG, "OLED found at I2C addr 0x%02X", dev_addr);
-                break;
-            }
-        }
-        if (dev_addr == 0) {
-            ESP_LOGE(TAG,
-                     "No OLED ACKed on SDA=%d SCL=%d (tried 0x3C, 0x3D); "
-                     "screen will stay dark. Check wiring / power / address jumper.",
-                     DISPLAY_SDA_PIN, DISPLAY_SCL_PIN);
-            display_ = new NoDisplay();
-            return;
-        }
-
+        // 跟 reference c:\etc\ADHD_Monitor\xiaozhi 完全对齐：用 _v2 + 字段顺序
+        // 把 scl_speed_hz 放最后。IDF 6.0 把 esp_lcd_new_panel_io_i2c 标 deprecated，
+        // 旧版 v1 在 IDF 6 上即便编译通过，i2c 事务也发不出去，panel_init 会在
+        // SET_MULTIPLEX 处报 "i2c transaction failed" 然后掉到 NoDisplay。这正是
+        // 上一份 ESP32.txt 屏幕黑掉的根因。同时移除 i2c_master_probe — v1 panel_io
+        // 失败时 probe 也跟着失败，给出了"硬件没接"的误判，参考版本不需要 probe。
         // SSD1306 config
         esp_lcd_panel_io_i2c_config_t io_config = {
-            .dev_addr = dev_addr,
-            .scl_speed_hz = 400 * 1000,
+            .dev_addr = 0x3C,
+            .on_color_trans_done = nullptr,
+            .user_ctx = nullptr,
             .control_phase_bytes = 1,
             .dc_bit_offset = 6,
             .lcd_cmd_bits = 8,
             .lcd_param_bits = 8,
-            .on_color_trans_done = nullptr,
-            .user_ctx = nullptr,
             .flags = {
                 .dc_low_on_data = 0,
                 .disable_control_phase = 0,
             },
+            .scl_speed_hz = 400 * 1000,
         };
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(display_i2c_bus_, &io_config, &panel_io_));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(display_i2c_bus_, &io_config, &panel_io_));
 
         ESP_LOGI(TAG, "Install SSD1306 driver");
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = GPIO_NUM_NC;
+        panel_config.reset_gpio_num = -1;
         panel_config.bits_per_pixel = 1;
 
         esp_lcd_panel_ssd1306_config_t ssd1306_config = {
