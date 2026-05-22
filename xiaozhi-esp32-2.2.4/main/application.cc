@@ -23,6 +23,10 @@
 static constexpr int64_t kAutoStopIgnoreInitialVadMs = 1200;
 static constexpr int64_t kAutoStopMinSpeechMs = 600;
 static constexpr int64_t kAutoStopMinListenMs = 1800;
+// 孩子停顿多久算讲完一句 → 触发 listen stop / ASR / 回复。
+static constexpr int64_t kAutoStopSilenceMs = 3000;
+// 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
+static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
 
 
 Application::Application() {
@@ -245,16 +249,16 @@ void Application::Run() {
                     const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
                     if (voice_detected) {
                         if (listening_ms >= kAutoStopIgnoreInitialVadMs) {
+                            if (!auto_stop_voice_seen_) {
+                                auto_stop_voice_started_ms_ = now_ms;
+                            }
                             auto_stop_voice_seen_ = true;
-                            auto_stop_voice_started_ms_ = now_ms;
                         }
-                    } else if (auto_stop_voice_seen_) {
-                        const int64_t speech_ms = now_ms - auto_stop_voice_started_ms_;
-                        auto_stop_voice_seen_ = false;
-                        if (speech_ms >= kAutoStopMinSpeechMs && listening_ms >= kAutoStopMinListenMs) {
-                            protocol_->SendStopListening();
-                            SetDeviceState(kDeviceStateIdle);
-                        }
+                        // 还在说话，重置静音计时
+                        auto_stop_silence_started_ms_ = 0;
+                    } else if (auto_stop_voice_seen_ && auto_stop_silence_started_ms_ == 0) {
+                        // 第一次进入静音，开始数 kAutoStopSilenceMs 在 CLOCK_TICK 里判断
+                        auto_stop_silence_started_ms_ = now_ms;
                     }
                 }
                 auto led = Board::GetInstance().GetLed();
@@ -275,7 +279,34 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-        
+
+            // AutoStop：VAD 静音事件只触发一次，必须用周期轮询才能等满 N 秒静音。
+            if (GetDeviceState() == kDeviceStateListening &&
+                listening_mode_ == kListeningModeAutoStop && protocol_) {
+                const int64_t now_ms = esp_timer_get_time() / 1000;
+                const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
+                if (auto_stop_voice_seen_ && auto_stop_silence_started_ms_ != 0) {
+                    const int64_t silence_ms = now_ms - auto_stop_silence_started_ms_;
+                    const int64_t speech_ms = auto_stop_silence_started_ms_ - auto_stop_voice_started_ms_;
+                    if (silence_ms >= kAutoStopSilenceMs &&
+                        speech_ms >= kAutoStopMinSpeechMs &&
+                        listening_ms >= kAutoStopMinListenMs) {
+                        ESP_LOGI(TAG, "Auto-stop: silence=%lldms speech=%lldms",
+                                 silence_ms, speech_ms);
+                        auto_stop_voice_seen_ = false;
+                        auto_stop_silence_started_ms_ = 0;
+                        protocol_->SendStopListening();
+                        SetDeviceState(kDeviceStateIdle);
+                    }
+                } else if (!auto_stop_voice_seen_ &&
+                           listening_ms >= kAutoCloseIdleTimeoutMs &&
+                           protocol_->IsAudioChannelOpened()) {
+                    ESP_LOGI(TAG, "Auto-close: %lldms in Listening without voice",
+                             listening_ms);
+                    protocol_->CloseAudioChannel();
+                }
+            }
+
             // Print debug info every 10 seconds
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
@@ -966,6 +997,7 @@ void Application::HandleStateChangedEvent() {
             auto_stop_voice_seen_ = false;
             auto_stop_listen_started_ms_ = esp_timer_get_time() / 1000;
             auto_stop_voice_started_ms_ = 0;
+            auto_stop_silence_started_ms_ = 0;
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {

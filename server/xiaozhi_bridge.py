@@ -494,9 +494,9 @@ class XiaozhiConn:
                     "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考）：\n"
                     + self.hint_context
                 )
+            # 不再把 hint_opening 拼到回答前 —— 开场白只在第一次主动开场时讲过；
+            # 后续每轮孩子说话时再重复一遍会显得机器人在"自言自语"。
             reply = _kimi_reply(sys_prompt, user_text)
-            if self.hint_opening and len(reply) < 400:
-                reply = self.hint_opening + reply
 
         self.send_json(
             {"session_id": self.session_id, "type": "stt", "text": user_text}
