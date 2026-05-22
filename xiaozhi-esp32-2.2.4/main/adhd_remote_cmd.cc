@@ -101,19 +101,29 @@ static bool HttpPostJson(const std::string& url, const std::string& body) {
     return err == ESP_OK && status >= 200 && status < 300;
 }
 
-static void AnnounceOnce() {
+static void DoAnnounceOnce() {
     const std::string id = PathADeviceIdUpper();
     if (id.size() < 4) {
+        ESP_LOGW(TAG, "announce skipped: empty device id");
         return;
     }
     std::string body = std::string("{\"device_id\":\"") + id + "\",\"kind\":\"xiaozhi\"}";
     std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
                        std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/esp32/announce";
+    ESP_LOGI(TAG, "announce POST → %s", url.c_str());
     if (!HttpPostJson(url, body)) {
-        ESP_LOGW(TAG, "announce POST failed");
+        ESP_LOGW(TAG, "announce POST failed (device_id=%s)", id.c_str());
     } else {
         ESP_LOGI(TAG, "announce ok device_id=%s", id.c_str());
     }
+}
+
+void adhd_remote_cmd_announce_sync_once(void) {
+    if (strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
+        ESP_LOGW(TAG, "announce_sync: ADHD_MONITOR_CMD_HOST empty, skip");
+        return;
+    }
+    DoAnnounceOnce();
 }
 
 static void HandleOneCommand(cJSON* root) {
@@ -171,10 +181,9 @@ static void ProcessCmdPayload(const char* json) {
 }
 
 static void RemoteCmdTask(void* /*arg*/) {
-    // 尽快 POST announce，不要先空等 5s — Flutter 配网页在成功后 2s 就开始
-    // bindEsp32 轮询；若 announce 晚于 10s 才发出，用户会误以为「云端没收到」。
-    AnnounceOnce();
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    // announce 已在 Application::HandleActivationDoneEvent 里同步执行过，
+    // 这里只做长轮询，避免重复 POST 与「后台任务晚于 App 轮询」的竞态。
+    vTaskDelay(pdMS_TO_TICKS(500));
     const std::string id = PathADeviceIdUpper();
     if (id.size() < 4) {
         ESP_LOGE(TAG, "invalid mac id");
@@ -250,7 +259,7 @@ void adhd_remote_cmd_start(void) {
     // the build actually compiled the announce path. The previous build
     // silently no-op'd because CONFIG_ADHD_MONITOR_REMOTE_CMD was n in a
     // stale sdkconfig — that case now logs "(via BYPASS_OTA fallback)".
-    ESP_LOGI(TAG, "remote cmd task starting → http://%s:%d/device/esp32/announce",
+    ESP_LOGI(TAG, "remote cmd long-poll task → http://%s:%d/device/<id>/cmd",
              CONFIG_ADHD_MONITOR_CMD_HOST, CONFIG_ADHD_MONITOR_CMD_PORT);
     started = true;
     BaseType_t r = xTaskCreate(RemoteCmdTask, "adhd_remote_cmd", 8192, nullptr, 3, nullptr);
@@ -262,6 +271,7 @@ void adhd_remote_cmd_start(void) {
 
 #else
 
+void adhd_remote_cmd_announce_sync_once(void) {}
 void adhd_remote_cmd_start(void) {}
 
 #endif

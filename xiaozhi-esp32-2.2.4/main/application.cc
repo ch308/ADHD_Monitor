@@ -337,6 +337,11 @@ void Application::HandleActivationDoneEvent() {
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
 
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+    // 同步登记：避免仅依赖后台任务时序（或烧录了与 build 不一致的 elf）
+    // 导致 App 拉 esp32/list 时库里还没有 device 行。
+    adhd_remote_cmd_announce_sync_once();
+#endif
     adhd_remote_cmd_start();
 }
 
