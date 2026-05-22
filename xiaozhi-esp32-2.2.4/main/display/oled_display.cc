@@ -62,7 +62,9 @@ OledDisplay::OledDisplay(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handl
             .mirror_y = mirror_y,
         },
         .flags = {
-            .buff_dma = 1,
+            /* IDF 6 + esp_lvgl_port: DMA draw buffer is only required for larger RGB paths.
+             * Internal SRAM buffer avoids edge cases with DMA-capable allocation on I2C OLED. */
+            .buff_dma = 0,
             .buff_spiram = 0,
             .sw_rotate = 0,
             .full_refresh = 0,

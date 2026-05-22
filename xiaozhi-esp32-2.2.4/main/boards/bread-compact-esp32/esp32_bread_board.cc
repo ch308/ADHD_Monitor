@@ -10,7 +10,10 @@
 #include "display/oled_display.h"
 
 #include <esp_log.h>
+#include <driver/gpio.h>
 #include <driver/i2c_master.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <esp_lcd_panel_ops.h>
 #include <esp_lcd_panel_vendor.h>
 
@@ -41,33 +44,40 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&bus_config, &display_i2c_bus_));
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     void InitializeSsd1306Display() {
-        // 跟 reference c:\etc\ADHD_Monitor\xiaozhi 对齐：IDF 6.0 上必须用 _v2 + 字段顺序
-        // 把 scl_speed_hz 放最后，否则 panel_init 会在 SET_MULTIPLEX 处报
-        // "i2c transaction failed"，屏幕进入 NoDisplay 永远不亮。
-        // SSD1306 config
+        uint32_t oled_addr = 0x3C;
+        if (i2c_master_probe(display_i2c_bus_, oled_addr, pdMS_TO_TICKS(200)) != ESP_OK) {
+            if (i2c_master_probe(display_i2c_bus_, 0x3D, pdMS_TO_TICKS(200)) == ESP_OK) {
+                oled_addr = 0x3D;
+                ESP_LOGI(TAG, "OLED found at I2C address 0x3D (SA0 high)");
+            } else {
+                ESP_LOGW(TAG, "OLED not ACK at 0x3C or 0x3D; continuing init");
+            }
+        }
+        // SSD1306 config (ESP-IDF 6.x: io_config field order + esp_lcd_new_panel_io_i2c)
         esp_lcd_panel_io_i2c_config_t io_config = {
-            .dev_addr = 0x3C,
-            .on_color_trans_done = nullptr,
-            .user_ctx = nullptr,
+            .dev_addr = oled_addr,
+            .scl_speed_hz = 400 * 1000,
             .control_phase_bytes = 1,
             .dc_bit_offset = 6,
             .lcd_cmd_bits = 8,
             .lcd_param_bits = 8,
+            .on_color_trans_done = nullptr,
+            .user_ctx = nullptr,
             .flags = {
                 .dc_low_on_data = 0,
                 .disable_control_phase = 0,
             },
-            .scl_speed_hz = 400 * 1000,
         };
 
-        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c_v2(display_i2c_bus_, &io_config, &panel_io_));
+        ESP_ERROR_CHECK(esp_lcd_new_panel_io_i2c(display_i2c_bus_, &io_config, &panel_io_));
 
         ESP_LOGI(TAG, "Install SSD1306 driver");
         esp_lcd_panel_dev_config_t panel_config = {};
-        panel_config.reset_gpio_num = -1;
+        panel_config.reset_gpio_num = GPIO_NUM_NC;
         panel_config.bits_per_pixel = 1;
 
         esp_lcd_panel_ssd1306_config_t ssd1306_config = {
