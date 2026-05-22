@@ -381,6 +381,14 @@ class EspProvisionService {
       await Future<void>.delayed(const Duration(milliseconds: 800));
     }
     debugPrint('EspProv poll deadline; lastState=$lastState lastReason=$lastReason');
+    // 固件在 CRED_RECV 后约 3s 会 esp_restart()，BLE 往往撑不到 IDF 把 sta_state
+    // 切成 Connected；若安卓侧没抛 PlatformException 而只是一直 read 超时，
+    // 我们会在这里以 pollTimeout 结束，UI 误报「配网失败」。只要最后一次
+    // 仍停在 Connecting(1) 或 Disconnected(2) 且从未报 ConnectionFailed(3)，
+    // 按「凭据已送达 → 等云端」处理（与 bleDroppedAwaitCloud 同一 UX）。
+    if (lastState == 1 || lastState == 2) {
+      return const _PollOutcome(false, ProvFailReason.bleDroppedAwaitCloud);
+    }
     return const _PollOutcome(false, ProvFailReason.pollTimeout);
   }
 

@@ -20,13 +20,14 @@
 // cloud-wait silently fails 60 s out and the user thinks BLE provisioning
 // broke.
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
-#include <cctype>
+#include <cstdio>
 #include <cJSON.h>
 #include <esp_http_client.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <esp_mac.h>
+
 #include "application.h"
-#include "system_info.h"
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
 #include "adhd_prov_ble.h"
 #endif
@@ -37,17 +38,22 @@ static const char* TAG = "adhd_cmd";
 #endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
-static std::string MacNoColonUpper() {
-    std::string mac = SystemInfo::GetMacAddress();
-    std::string out;
-    out.reserve(12);
-    for (char c : mac) {
-        if (c == ':' || c == '-') {
-            continue;
-        }
-        out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+// Must match BLE name `XIAOZHI_<id>` / Flutter `EspProvDevice.deviceId` and the
+// plush-ball `ADHD_<id>` convention: last 4 bytes of STA MAC as 8 upper-hex
+// chars (see adhd_prov_ble::make_prov_name and ESP32-S3-LCD Wireless.c).
+// Do NOT use the full 12-char MAC here — the App binds `E0160560` while we
+// used to announce `9888E0160560`, so the DB row never matched and long-poll
+// hit the wrong URL.
+static std::string PathADeviceIdUpper() {
+    uint8_t mac[6] = {0};
+    esp_err_t e = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "esp_read_mac(ESP_MAC_WIFI_STA): %s", esp_err_to_name(e));
+        return std::string();
     }
-    return out;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%02X%02X%02X%02X", mac[2], mac[3], mac[4], mac[5]);
+    return std::string(buf);
 }
 #endif
 
@@ -96,7 +102,7 @@ static bool HttpPostJson(const std::string& url, const std::string& body) {
 }
 
 static void AnnounceOnce() {
-    const std::string id = MacNoColonUpper();
+    const std::string id = PathADeviceIdUpper();
     if (id.size() < 4) {
         return;
     }
@@ -165,9 +171,11 @@ static void ProcessCmdPayload(const char* json) {
 }
 
 static void RemoteCmdTask(void* /*arg*/) {
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    // 尽快 POST announce，不要先空等 5s — Flutter 配网页在成功后 2s 就开始
+    // bindEsp32 轮询；若 announce 晚于 10s 才发出，用户会误以为「云端没收到」。
     AnnounceOnce();
-    const std::string id = MacNoColonUpper();
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    const std::string id = PathADeviceIdUpper();
     if (id.size() < 4) {
         ESP_LOGE(TAG, "invalid mac id");
         vTaskDelete(nullptr);
