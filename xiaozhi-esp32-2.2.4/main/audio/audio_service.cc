@@ -539,6 +539,9 @@ const std::string& AudioService::GetLastWakeWord() const {
 }
 
 std::unique_ptr<AudioStreamPacket> AudioService::PopWakeWordPacket() {
+    if (!wake_word_) {
+        return nullptr;
+    }
     auto packet = std::make_unique<AudioStreamPacket>();
     if (wake_word_->GetWakeWordOpus(packet->payload)) {
         return packet;

@@ -145,6 +145,8 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    /** Source state for the transition that last fired MAIN_EVENT_STATE_CHANGED (see OnStateChanged). */
+    DeviceState last_state_transition_from_{kDeviceStateUnknown};
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 

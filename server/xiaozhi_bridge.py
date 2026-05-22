@@ -518,13 +518,13 @@ class XiaozhiConn:
             )
         for pkt in packets:
             self.ws.send(pkt)
+        if packets:
+            # Keep the device in Speaking long enough to drain locally queued
+            # audio before it reacts to tts stop / websocket close.
+            time.sleep(min(20.0, len(packets) * 0.06 + 0.45))
         self.send_json(
             {"session_id": self.session_id, "type": "tts", "state": "stop"}
         )
-        if packets:
-            # ESP32 may still be decoding / playing when the server closes WS;
-            # a short grace period reduces "only UI beeps, no speech" from truncation.
-            time.sleep(min(20.0, len(packets) * 0.06 + 0.45))
         try:
             self.ws.close()
         except Exception:

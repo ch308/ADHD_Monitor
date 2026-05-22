@@ -88,7 +88,7 @@ void Application::Initialize() {
 
     // Add state change listeners
     state_machine_.AddStateChangeListener([this](DeviceState old_state, DeviceState new_state) {
-        xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
+        OnStateChanged(old_state, new_state);
     });
 
     // Start the clock timer to update the status bar
@@ -587,6 +587,7 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
+                        audio_service_.WaitForPlaybackQueueEmpty();
                         if (listening_mode_ == kListeningModeManualStop) {
                             SetDeviceState(kDeviceStateIdle);
                         } else {
@@ -908,6 +909,12 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
 #endif
 }
 
+void Application::OnStateChanged(DeviceState old_state, DeviceState new_state) {
+    (void)new_state;
+    last_state_transition_from_ = old_state;
+    xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
+}
+
 void Application::HandleStateChangedEvent() {
     DeviceState new_state = state_machine_.GetState();
     clock_ticks_ = 0;
@@ -970,7 +977,13 @@ void Application::HandleStateChangedEvent() {
                 // Only AFE wake word can be detected in speaking mode
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
-            audio_service_.ResetDecoder();
+            // Downlink Opus can be queued while still Listening (WS thread vs Schedule delay
+            // before Speaking). Clearing here would drop the entire TTS → only UI sounds.
+            if (last_state_transition_from_ != kDeviceStateListening) {
+                audio_service_.ResetDecoder();
+            } else {
+                ESP_LOGI(TAG, "Speaking after Listening: skip ResetDecoder (preserve TTS queue)");
+            }
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
