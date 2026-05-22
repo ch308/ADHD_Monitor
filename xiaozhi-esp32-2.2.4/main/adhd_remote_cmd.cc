@@ -1,4 +1,9 @@
 #include "adhd_remote_cmd.h"
+// Must appear before any `#if CONFIG_*`: this .cc does not include other IDF
+// headers first, so without sdkconfig.h all CONFIG_ADHD_MONITOR_* macros are
+// undefined and GCC treats `#if UNDEFINED` as 0 — the entire Path A body is
+// stripped and announce/long-poll become empty stubs (no `adhd_cmd` logs).
+#include "sdkconfig.h"
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 #include <cstring>

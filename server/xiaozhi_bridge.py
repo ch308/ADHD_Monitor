@@ -278,15 +278,35 @@ def _opus_to_pcm(opus_packets: list[bytes], sample_rate: int = 16000) -> bytes:
     return bytes(pcm)
 
 
+def _ffmpeg_bin() -> str | None:
+    """Resolve ffmpeg for TTS decode (systemd / gunicorn often have a minimal PATH)."""
+    import shutil
+
+    env = (os.getenv("FFMPEG_PATH") or "").strip()
+    if env and os.path.isfile(env):
+        return env
+    w = shutil.which("ffmpeg")
+    if w:
+        return w
+    for cand in ("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/bin/ffmpeg"):
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+
 def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
     """edge-tts -> mp3 -> ffmpeg PCM -> opuslib packets (60ms)."""
-    import shutil
     import subprocess
 
     import edge_tts
 
-    if shutil.which("ffmpeg") is None:
-        log.error("ffmpeg not found; cannot build TTS opus")
+    ffmpeg_exe = _ffmpeg_bin()
+    if ffmpeg_exe is None:
+        log.error(
+            "ffmpeg not found (PATH=%r); set FFMPEG_PATH or install ffmpeg. "
+            "Cannot build TTS opus.",
+            os.environ.get("PATH", ""),
+        )
         return []
     fd_mp3, mp3 = tempfile.mkstemp(suffix=".mp3")
     fd_pcm, pcm_path = tempfile.mkstemp(suffix=".pcm")
@@ -305,7 +325,7 @@ def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
         asyncio.run(_run())
         subprocess.run(
             [
-                "ffmpeg",
+                ffmpeg_exe,
                 "-y",
                 "-i",
                 mp3,
@@ -501,6 +521,10 @@ class XiaozhiConn:
         self.send_json(
             {"session_id": self.session_id, "type": "tts", "state": "stop"}
         )
+        if packets:
+            # ESP32 may still be decoding / playing when the server closes WS;
+            # a short grace period reduces "only UI beeps, no speech" from truncation.
+            time.sleep(min(20.0, len(packets) * 0.06 + 0.45))
         try:
             self.ws.close()
         except Exception:
