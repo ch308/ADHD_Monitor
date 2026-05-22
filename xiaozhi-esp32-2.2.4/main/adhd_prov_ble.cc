@@ -4,6 +4,7 @@
 
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstring>
 
@@ -20,6 +21,7 @@
 #include "network_provisioning/manager.h"
 #include "network_provisioning/scheme_ble.h"
 
+#include "esp_timer.h"
 #include "wifi_manager.h"
 
 static const char* TAG = "adhd_prov_ble";
@@ -34,7 +36,9 @@ static uint8_t s_prov_service_uuid[16] = {
 
 static char s_prov_name[24] = {0};
 
-static volatile bool s_prov_done = false;
+static volatile bool  s_prov_done         = false;
+// Set (non-zero) when CRED_RECV fires; cleared by the watchdog after it acts.
+static volatile int64_t s_cred_recv_ms    = 0;
 
 static void make_prov_name() {
     if (s_prov_name[0] != 0) {
@@ -61,6 +65,7 @@ static void prov_event_handler(void* arg, esp_event_base_t base, int32_t id, voi
         case NETWORK_PROV_WIFI_CRED_RECV: {
             wifi_sta_config_t* cfg = (wifi_sta_config_t*)data;
             ESP_LOGI(TAG, "got creds, SSID=%s", (const char*)cfg->ssid);
+            s_cred_recv_ms = esp_timer_get_time() / 1000LL;
             break;
         }
         case NETWORK_PROV_WIFI_CRED_FAIL: {
@@ -130,10 +135,43 @@ void adhd_prov_ble_start_blocking(void) {
     // Block here until NETWORK_PROV_END (creds accepted + AP joined or final
     // failure). network_prov_mgr_wait() returns immediately if there's nothing
     // to wait for, so guard with a 5-min ceiling and the s_prov_done flag.
+    //
+    // Watchdog: if credentials were received but WiFi hasn't resolved within
+    // WATCHDOG_MS, stop and restart the provisioning manager.  This lets a
+    // second Flutter connection attempt succeed without requiring a device reset,
+    // even when the phone hotspot / AP is slow to respond.
+    //
+    // The 45 s threshold intentionally matches Flutter's poll deadline so the
+    // manager is already in a fresh state by the time the user retries.
+    static const int64_t WATCHDOG_MS = 45000;
+
     const TickType_t poll = pdMS_TO_TICKS(500);
     const int max_iters = (5 * 60 * 1000) / 500;
     for (int i = 0; i < max_iters && !s_prov_done; ++i) {
         vTaskDelay(poll);
+
+        int64_t recv_ms = s_cred_recv_ms;
+        if (recv_ms > 0) {
+            int64_t elapsed = esp_timer_get_time() / 1000LL - recv_ms;
+            if (elapsed > WATCHDOG_MS) {
+                ESP_LOGW(TAG,
+                         "WiFi unresolved for %" PRId64 " ms, restarting prov manager",
+                         elapsed);
+                s_cred_recv_ms = 0;  // disarm watchdog before restart
+
+                network_prov_mgr_stop_provisioning();
+                vTaskDelay(pdMS_TO_TICKS(1500));  // let BLE stack drain
+
+                esp_err_t re = network_prov_mgr_start_provisioning(
+                    NETWORK_PROV_SECURITY_0, NULL, s_prov_name, NULL);
+                if (re != ESP_OK) {
+                    ESP_LOGE(TAG, "restart_provisioning: %s — rebooting",
+                             esp_err_to_name(re));
+                    esp_restart();
+                }
+                ESP_LOGI(TAG, "prov manager restarted, re-advertising %s", s_prov_name);
+            }
+        }
     }
 
     ESP_LOGW(TAG, "rebooting to let WifiManager pick up new credentials");

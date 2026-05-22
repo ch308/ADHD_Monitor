@@ -249,7 +249,12 @@ class EspProvisionService {
       final setReq = _encodeCmdSetConfig(ssid: ssid, passphrase: password);
       final setResp = await _writeRead(cfg, setReq);
       if (!_isRespOk(setResp)) {
-        return ProvResult.fail(target.deviceId, 'SetConfig 被拒');
+        return ProvResult.fail(
+          target.deviceId,
+          '发送 WiFi 凭据失败（SetConfig 被拒）。'
+          '设备可能仍在处理上次的 WiFi 连接请求，请稍等 5–10 秒后重试；'
+          '若反复出现，长按板子 BOOT 键 5 秒重置。',
+        );
       }
 
       // ── 3. ApplyConfig ─────────────────────────────────────────────────
@@ -257,7 +262,13 @@ class EspProvisionService {
       final applyReq = _encodeCmdApplyConfig();
       final applyResp = await _writeRead(cfg, applyReq);
       if (!_isRespOk(applyResp)) {
-        return ProvResult.fail(target.deviceId, 'ApplyConfig 被拒');
+        return ProvResult.fail(
+          target.deviceId,
+          '应用配置失败（ApplyConfig 被拒）。'
+          '设备正在处理上一次的 WiFi 连接请求——固件会在约 45 秒后自动重置，'
+          '届时直接再次点击设备发起配网即可，无需按 BOOT 键。'
+          '若长按 BOOT 键 5 秒也可立即重置。',
+        );
       }
 
       // ── 4. 轮询 GetStatus 直到 ESP32 报告 Connected ────────────────────
@@ -345,7 +356,10 @@ class EspProvisionService {
       case ProvFailReason.apNotFound:
         return '找不到这个 WiFi（SSID 拼写？ESP32-S3 只支持 2.4GHz，5GHz SSID 看不到）';
       case ProvFailReason.pollTimeout:
-        return '等待 ESP32 连接 WiFi 超时；常见原因：SSID 是 5GHz 频段、密码错、信号太弱';
+        return 'ESP32 在 45 秒内未完成 WiFi 连接。\n'
+            '固件已在后台自动重置，约 5 秒后即可直接再次点击设备重试（无需按 BOOT 键）。\n'
+            '若多次超时，请检查：① SSID 是否为 2.4GHz 频段（ESP32-S3 不支持 5GHz）'
+            '② 手机热点或路由器已开启并在附近 ③ 密码无误。';
       case ProvFailReason.unknown:
         return 'ESP32 未能连上 WiFi（检查 SSID/密码）';
     }
