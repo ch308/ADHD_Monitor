@@ -191,7 +191,26 @@ class EspProvisionService {
 
     try {
       emit(ProvStatus.connecting);
-      await dev.connect(timeout: const Duration(seconds: 12), autoConnect: false);
+
+      // 释放 BLE host 栈：米带 6 在主页活着时会保持 1Hz HR notify，第二条
+      // GATT 连接常被挤到 12s connect timeout（fbp-code: 1）。先断开其它外设；
+      // 米带 watcher 会在用户离开配网页后自动重连。
+      for (final other in FlutterBluePlus.connectedDevices) {
+        if (other.remoteId == dev.remoteId) continue;
+        try {
+          await other.disconnect();
+        } catch (_) { /* 释放失败不致命，下面 connect 仍会重试一次 */ }
+      }
+
+      // 两段超时：先按原行为 12s（健康场景下足够），失败立刻清理一次
+      // GATT 资源再用 25s 重试一次，覆盖 host 栈饱和 / RSSI 弱的边缘场景。
+      try {
+        await dev.connect(timeout: const Duration(seconds: 12), autoConnect: false);
+      } on Exception catch (e) {
+        debugPrint('EspProv first connect failed ($e), retrying 25s.');
+        try { await dev.disconnect(); } catch (_) {}
+        await dev.connect(timeout: const Duration(seconds: 25), autoConnect: false);
+      }
       try {
         await dev.requestMtu(256);
       } catch (_) {
