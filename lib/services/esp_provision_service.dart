@@ -397,6 +397,11 @@ class EspProvisionService {
             '② 手机热点或路由器已开启并在附近 ③ 密码无误。';
       case ProvFailReason.unknown:
         return 'ESP32 未能连上 WiFi（检查 SSID/密码）';
+      case ProvFailReason.bleDroppedAwaitCloud:
+        // 这一档由 provision() 在调用 _failMessage 之前拦截并转成成功路径
+        // （进入云端等待）。如果真的走到了这里，说明上层逻辑漏了分支，
+        // 给个能看的兜底文案。
+        return 'BLE 链路在轮询途中断开，请在"扫描设备"里重试。';
     }
   }
 
