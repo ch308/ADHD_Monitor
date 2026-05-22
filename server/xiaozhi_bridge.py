@@ -26,7 +26,23 @@ _xinvoke_hints: dict[str, tuple[float, dict[str, str]]] = {}
 
 
 def _norm_dev_header(mac: str) -> str:
-    return (mac or "").replace(":", "").replace("-", "").strip().upper()
+    """归一化 Device-Id 头到与 `esp32_devices.device_id` / `_esp32_cmd_queue` 一致的 8-hex 形式。
+
+    - 固件通过 WebSocket 上送 `Device-Id: 98:88:e0:16:05:60` 这种完整 STA MAC；
+      `app.py:_normalize_device_id` 只去掉冒号，保留 12 个字符（"9888E0160560"）。
+    - 但 `_enqueue_xiaozhi_for_child` 调 `stash_xinvoke_hint(did, …)` 时拿到的
+      `did` 来自 `esp32_devices.device_id`，那里的值是固件 announce 时上送的
+      `PathADeviceIdUpper()` —— MAC 最后 4 字节的 8-hex（"E0160560"）。
+    - 不归一化的话，stash key 是 "E0160560"、pop 用 "9888E0160560" 永远取不到，
+      家长一记录观察就算云端把 hint 推下来，xiaozhi WebSocket 这边也是空 context，
+      Kimi 只会念一句通用问候——这就是为什么"家长记录后机器人没说出具体行为"。
+    - 统一截到最后 8 个 hex 后，HTTP 长轮询通道（8-hex）和 WS 通道（截尾 8-hex）
+      会落到同一个 key 上。
+    """
+    s = (mac or "").replace(":", "").replace("-", "").strip().upper()
+    if len(s) >= 8:
+        return s[-8:]
+    return s
 
 
 def stash_xinvoke_hint(device_id: str, opening_line: str, context: str) -> None:
@@ -402,18 +418,38 @@ class XiaozhiConn:
         if self._session_ended:
             return
         self._session_ended = True
-        sys_prompt = (
-            "你是陪伴孩子成长的口语伙伴，语气温暖简短，适合外放给孩子听。"
-            "回答控制在 2～4 句中文。"
+
+        # ── 主动开场：家长记录行为 → app.py:_enqueue_xiaozhi_for_child 把 Kimi
+        # 生成的 child_script 塞进 hint["opening"]，然后通过 _esp32_cmd_queue
+        # 推 `xiaozhi_invoke_chat`，固件长轮询拿到后调 WakeWordInvoke(child_script)，
+        # 走到 SendWakeWordDetected → 服务器这边收到 `listen state=detect text=<child_script>`。
+        # 此时 user_text 就等于 hint_opening：不能再当作"孩子说的话"喂给 Kimi，
+        # 否则会出现机器人回应自己刚说出口的开场白这种诡异行为。
+        # 直接把 child_script 当对孩子说的话 TTS 播一遍即可——这条线就是
+        # "Flutter 上报行为 → 云端 Kimi 写出针对该行为的开场白 → 百度 / edge-tts
+        # 合成音 → 星星机器人对孩子说"那条链路最后落地的一步。
+        is_proactive_opening = (
+            bool(self.hint_opening)
+            and user_text.strip() == self.hint_opening.strip()
         )
-        if self.hint_context:
-            sys_prompt += (
-                "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考）：\n"
-                + self.hint_context
+        if is_proactive_opening:
+            reply = self.hint_opening
+            log.info(
+                "xiaozhi proactive opening (parent-triggered), len=%d", len(reply)
             )
-        reply = _kimi_reply(sys_prompt, user_text)
-        if self.hint_opening and len(reply) < 400:
-            reply = self.hint_opening + reply
+        else:
+            sys_prompt = (
+                "你是陪伴孩子成长的口语伙伴，语气温暖简短，适合外放给孩子听。"
+                "回答控制在 2～4 句中文。"
+            )
+            if self.hint_context:
+                sys_prompt += (
+                    "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考）：\n"
+                    + self.hint_context
+                )
+            reply = _kimi_reply(sys_prompt, user_text)
+            if self.hint_opening and len(reply) < 400:
+                reply = self.hint_opening + reply
 
         self.send_json(
             {"session_id": self.session_id, "type": "stt", "text": user_text}

@@ -492,6 +492,84 @@ def fetch_kimi_advice(bpm, observation, condition_type):
             return "建议家长先放慢节奏，降低环境刺激，用简短句子陪伴，观察孩子是否需要安静或感官安抚。"
         return "建议家长先帮孩子把任务拆小、降低干扰，温和引导深呼吸或短暂休息，再一起继续。"
 
+
+def fetch_kimi_child_script(observation, advice, condition_type):
+    """生成"星星机器人对孩子说的话"。
+
+    `fetch_kimi_advice` 是给家长看的 50 字干预提示；这里是给 ESP32 星星机器人
+    放给孩子听的开场白：以"我"称呼自己（机器人），第二人称称呼孩子，
+    针对家长刚刚记录的那条具体行为切入，引导孩子说出感受。
+
+    返回 80～140 字之间的口语化中文（2～3 句），方便 edge-tts 一次合成、
+    不会因为太长而让 BLE/WS 链路超时。失败时返回基于行为关键词的兜底文案，
+    保证一定有内容播给孩子。
+    """
+    if condition_type == "autism":
+        system = (
+            "你是星星机器人——一个陪伴自闭症谱系孩子的口语伙伴。语气安静、平稳、可预期，"
+            "句子短而具体，避免比喻和情绪词；你正在跟一个小朋友直接对话（外放给孩子听）。"
+        )
+    else:
+        system = (
+            "你是星星机器人——一个陪伴 ADHD（多动症）孩子的口语伙伴。语气温暖、轻松、"
+            "不评判，会用具体动作而不是抽象命令；你正在跟一个小朋友直接对话（外放给孩子听）。"
+        )
+    prompt = (
+        f"家长刚刚记录了这条观察：「{observation}」。"
+        f"Kimi 给家长的现场建议是：「{advice}」（只供你参考，不要在跟孩子说话时复述）。"
+        "\n请你（星星机器人）直接对孩子说话，开启一段关于这个具体行为的对话："
+        "\n1) 用第一句温柔地点出你注意到了什么（用孩子能听懂的具体说法，不要说'家长告诉我'）；"
+        "\n2) 用第二句邀请孩子说说当时的感受或想法，给一个明确的提问；"
+        "\n3) 可选第三句给一个孩子能立刻做的小动作（深呼吸、喝口水、抱一下自己等），降低紧张。"
+        "\n要求："
+        "\n- 全文 80～140 字，2～3 句中文口语；"
+        "\n- 不要说'家长'、'记录'、'报告'、'多动症'、'自闭症'等家长视角词；"
+        "\n- 不要医疗建议、不要免责声明、不要 emoji；"
+        "\n- 直接输出对孩子说的那段话，不要前缀。"
+    )
+    try:
+        response = client.chat.completions.create(
+            model="moonshot-v1-8k",
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.8,
+            max_tokens=300,
+        )
+        text = (response.choices[0].message.content or "").strip()
+        # 去掉 Kimi 偶尔会带的开场引号或 markdown 标记
+        text = text.strip("「」\"' \n")
+        # 固件 `Protocol::SendWakeWordDetected` 是裸字符串拼 JSON，没做转义；
+        # 给孩子听的开场白只要包含 ASCII " / \ / 换行，就会把发上去的 JSON 弄崩。
+        # 这里把这几类字符全部替换成中文等价或空格，TTS 听起来不变。
+        text = (
+            text.replace("\\", "")
+                .replace('"', "")
+                .replace("\r", " ")
+                .replace("\n", " ")
+        )
+        # 折叠重复空格，避免多个换行变成一串空格
+        while "  " in text:
+            text = text.replace("  ", " ")
+        if text:
+            return text[:400]
+    except Exception as e:
+        print(f"Kimi 子脚本生成错误: {e}")
+    # 兜底：拼一条与具体观察挂钩的开场，至少让孩子听到是关于刚才那件事。
+    snippet = (observation or "").strip().replace("\n", " ")
+    if len(snippet) > 40:
+        snippet = snippet[:40] + "…"
+    if condition_type == "autism":
+        return (
+            f"我刚才注意到了一件事——{snippet}。可以告诉我那时候你心里是什么感觉吗？"
+            "我们也可以一起慢慢做三次深呼吸，等你准备好再说话。"
+        )
+    return (
+        f"我刚才看到了——{snippet}。是不是有什么让你不太舒服的地方？"
+        "如果愿意，我们一起做三次深呼吸，再慢慢告诉我刚才发生了什么。"
+    )
+
 @app.route('/webhook', methods=['POST', 'GET'])
 def handle_webhook():
     global latest_child_status
@@ -591,7 +669,7 @@ def submit_log():
         return jsonify({"status": "error", "message": str(e)}), 500
 
     try:
-        _enqueue_xiaozhi_for_child(child_id, observation, advice)
+        _enqueue_xiaozhi_for_child(child_id, observation, advice, condition_type)
     except Exception as e:
         app.logger.warning("xiaozhi enqueue after submit_log: %s", e)
 
@@ -1528,28 +1606,85 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
     return rows
 
 
-def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str) -> None:
+def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str, condition_type: str = "") -> None:
+    """家长记录一条行为 → 触发星星机器人主动跟孩子开口讲这件事。
+
+    完整链路：
+      1. 这里调 `fetch_kimi_child_script` 让 Kimi 写出针对该具体行为的开场白
+         （第一人称，第二人称，80–140 字中文口语，专门给孩子听）。
+      2. 把开场白 stash 进 `_xinvoke_hints[device_id]`，同时往
+         `_esp32_cmd_queue[device_id]` 推一条 `xiaozhi_invoke_chat`。
+      3. ESP32 长轮询拿到命令 → `WakeWordInvoke(opening_line)` → 打开 WS →
+         发 `listen state=detect text=<opening_line>` 给服务器。
+      4. 服务器 `XiaozhiConn._reply_turn` 识别"主动开场"那一轮（user_text 与
+         hint_opening 完全一致），跳过 Kimi，直接 edge-tts 合成 opus 推回去。
+      5. 星星机器人外放，孩子听到一段针对自己刚才行为的话。
+
+    家长连记多条 → 我们覆盖前一条 hint 并清空旧 cmd queue：让机器人始终讲
+    最新一次记录，避免堆积成"讲完上条再讲这条"的连环开场，对孩子很奇怪。
+    """
     ids = _xiaozhi_device_ids_for_child(child_id)
     if not ids:
         return
     from xiaozhi_bridge import stash_xinvoke_hint
 
+    # 1) Kimi 生成针对该行为的"对孩子说的话"。env override 仅用于离线 / 调试，
+    #    线上正常路径走 Kimi。
+    override = (os.getenv("XIAOZHI_DEFAULT_OPENING") or "").strip()
+    if override:
+        opening = override
+    else:
+        try:
+            opening = fetch_kimi_child_script(observation, advice, condition_type or "")
+        except Exception as e:
+            app.logger.warning("fetch_kimi_child_script failed: %s", e)
+            opening = (
+                "我刚才注意到了一件让你有点不舒服的事。"
+                "你愿意跟我说说当时心里是什么感觉吗？"
+            )
+    opening = (opening or "").strip()[:500]
+    # 防御性清洗：固件 `Protocol::SendWakeWordDetected` 把 opening 裸拼进
+    # listen state=detect JSON，没做转义；env 覆盖路径里如果有 " / \ / 换行
+    # 也会直接把 WS 帧弄成无效 JSON 让服务器断开。这一步对 Kimi 输出和 env
+    # 输入一视同仁。
     opening = (
-        os.getenv("XIAOZHI_DEFAULT_OPENING", "").strip()
-        or "嗨，我注意到家长刚记了一条关心你的记录，想跟你轻声说几句。"
+        opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
     )
-    ctx = f"家长观察记录：\n{observation}\n\nKimi 给家长的建议摘要：\n{advice}"
+    while "  " in opening:
+        opening = opening.replace("  ", " ")
+
+    # 2) hint_context 给 Kimi 在后续 turn（孩子真的开口回应时）用作背景。
+    #    这一轮主动开场跳过 Kimi，所以 context 主要给"孩子说话→机器人答"使用。
+    ctx_lines = [f"家长观察记录：{observation}"]
+    if advice:
+        ctx_lines.append(f"Kimi 给家长的建议摘要：{advice}")
+    if condition_type:
+        label = "自闭症谱系" if condition_type == "autism" else "ADHD（多动症）"
+        ctx_lines.append(f"孩子主要表现倾向：{label}（来源：家长本次记录的 condition_type）。")
+    ctx = "\n".join(ctx_lines)
+
     cmd_obj = {
         "action": "xiaozhi_invoke_chat",
-        "opening_line": opening[:500],
+        "opening_line": opening,
         "context": ctx[:8000],
     }
     with _esp32_cmd_lock:
         for did in ids:
             stash_xinvoke_hint(did, cmd_obj["opening_line"], cmd_obj["context"])
             q = _esp32_cmd_queue.setdefault(did, deque())
+            # 清空该设备此前还没被消费的旧主动命令——只保留这次最新的。
+            for _ in range(len(q)):
+                old = q[0]
+                if isinstance(old, dict) and old.get("action") == "xiaozhi_invoke_chat":
+                    q.popleft()
+                else:
+                    q.rotate(-1)
             q.append(dict(cmd_obj))
         _esp32_cmd_lock.notify_all()
+    app.logger.info(
+        "xiaozhi enqueue: child=%s targets=%s opening_len=%d ctx_len=%d",
+        child_id, ids, len(opening), len(ctx),
+    )
 
 
 @app.route("/device/esp32/announce", methods=["POST"])
