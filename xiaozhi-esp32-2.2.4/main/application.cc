@@ -122,6 +122,7 @@ void Application::Initialize() {
                 break;
             }
             case NetworkEvent::Connected: {
+                last_connected_network_ = data;
                 std::string msg = Lang::Strings::CONNECTED_TO;
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
@@ -306,9 +307,23 @@ void Application::HandleActivationDoneEvent() {
     has_server_time_ = ota_->HasServerTime();
 
     auto display = Board::GetInstance().GetDisplay();
-    std::string message = std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
-    display->ShowNotification(message.c_str());
+    // 屏幕上显式打出"已连接到云端 + 当前 AP 名 + 固件版本"，6 秒。
+    // 之前这里只显示 "版本 2.2.4" 一条，没有云端就绪的反馈，
+    // 也没有把 AP 名留在屏幕上。把 SSID 一并打出来，可以一眼看出
+    // 板子是不是真的接到了配网时填的那个热点（防止串号 / 邻居热点
+    // 把 BSSID 抢走的小概率坑）。
+    std::string message;
+    if (!last_connected_network_.empty()) {
+        message += "云端已连接\n";
+        message += last_connected_network_;
+        message += "\n";
+    }
+    message += std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
+    display->ShowNotification(message.c_str(), 6000);
     display->SetChatMessage("system", "");
+    ESP_LOGI(TAG, "Cloud ready, ssid=%s, version=%s",
+             last_connected_network_.c_str(),
+             ota_->GetCurrentVersion().c_str());
 
     // Release OTA object after activation is complete
     ota_.reset();

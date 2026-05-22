@@ -133,6 +133,11 @@ private:
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
+    // Last network name reported via NetworkEvent::Connected (WiFi SSID or
+    // cellular APN/carrier label). Used by HandleActivationDoneEvent to put
+    // the AP name onto the OLED so the user can tell at a glance which
+    // network the board joined and that the cloud handshake succeeded.
+    std::string last_connected_network_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
 

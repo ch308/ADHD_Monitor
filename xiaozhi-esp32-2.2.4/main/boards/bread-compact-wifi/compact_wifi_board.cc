@@ -49,9 +49,31 @@ private:
     }
 
     void InitializeSsd1306Display() {
+        // 探测 OLED 在 I²C 总线上的实际地址。中文电商常见的 0.96" OLED 模块大多
+        // 走 0x3C，但也有不少（128×32 居多 / SH1106 跳线版 / ESP32-S3-LCD-1.47B
+        // 之外的板子）固定在 0x3D。原来硬编码 0x3C 时一旦地址不对，
+        // panel_init 就会因为 NACK 直接挂掉到 NoDisplay，屏幕完全不亮。
+        // 这里先用 i2c_master_probe 试两个地址，谁回 ACK 就用谁。
+        uint16_t dev_addr = 0;
+        for (uint16_t addr : {0x3C, 0x3D}) {
+            if (i2c_master_probe(display_i2c_bus_, addr, /*xfer_timeout_ms=*/100) == ESP_OK) {
+                dev_addr = addr;
+                ESP_LOGI(TAG, "OLED found at I2C addr 0x%02X", dev_addr);
+                break;
+            }
+        }
+        if (dev_addr == 0) {
+            ESP_LOGE(TAG,
+                     "No OLED ACKed on SDA=%d SCL=%d (tried 0x3C, 0x3D); "
+                     "screen will stay dark. Check wiring / power / address jumper.",
+                     DISPLAY_SDA_PIN, DISPLAY_SCL_PIN);
+            display_ = new NoDisplay();
+            return;
+        }
+
         // SSD1306 config
         esp_lcd_panel_io_i2c_config_t io_config = {
-            .dev_addr = 0x3C,
+            .dev_addr = dev_addr,
             .scl_speed_hz = 400 * 1000,
             .control_phase_bytes = 1,
             .dc_bit_offset = 6,
