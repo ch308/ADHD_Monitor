@@ -235,6 +235,16 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_VAD_CHANGE) {
             if (GetDeviceState() == kDeviceStateListening) {
+                const bool voice_detected = IsVoiceDetected();
+                if (listening_mode_ == kListeningModeAutoStop) {
+                    if (voice_detected) {
+                        auto_stop_voice_seen_ = true;
+                    } else if (auto_stop_voice_seen_) {
+                        auto_stop_voice_seen_ = false;
+                        protocol_->SendStopListening();
+                        SetDeviceState(kDeviceStateIdle);
+                    }
+                }
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
             }
@@ -552,7 +562,7 @@ void Application::InitializeProtocol() {
         const bool ch_open = protocol_->IsAudioChannelOpened();
         if (st == kDeviceStateSpeaking) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
-        } else if (ch_open && (st == kDeviceStateConnecting || st == kDeviceStateListening)) {
+        } else if (ch_open && (st == kDeviceStateConnecting || st == kDeviceStateListening || st == kDeviceStateIdle)) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
@@ -941,6 +951,7 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            auto_stop_voice_seen_ = false;
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {

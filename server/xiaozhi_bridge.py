@@ -525,10 +525,8 @@ class XiaozhiConn:
         self.send_json(
             {"session_id": self.session_id, "type": "tts", "state": "stop"}
         )
-        try:
-            self.ws.close()
-        except Exception:
-            pass
+        # Keep the websocket open for the next child turn. The device will send
+        # listen/start after playback, then listen/stop when VAD detects silence.
 
 
 def register_xiaozhi(app, sock) -> None:
