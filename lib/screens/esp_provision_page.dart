@@ -182,10 +182,20 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
       return;
     }
 
-    // 板子拿到 WiFi 后会向云端 POST announce，给它几秒同步窗口
-    setState(() => _status = 'WiFi 已连上，正在向云端登记…');
+    // 板子拿到 WiFi 后会向云端 POST announce，给它几秒同步窗口。
+    //
+    // 两条路径下都进这个等待：
+    // 1) BLE 端拿到 state=Connected → 板子已经联网，几秒内就会 announce。
+    // 2) BLE 端在 STA 测试连接阶段被 LINK_SUPERVISION_TIMEOUT 掐掉（常见于
+    //    ESP32-S3 BT/Wi-Fi 共射频）→ 凭据已落到 NVS，板子会自己重启 WiFi，
+    //    时间窗会更长（重启 + STA 关联 + announce 大概 30–60 s）。
+    final awaitingCloud = _phase == ProvStatus.credsDeliveredAwaitingCloud;
+    setState(() => _status = awaitingCloud
+        ? '凭据已发送，板子正在加入 WiFi（最多 60 秒）…'
+        : 'WiFi 已连上，正在向云端登记…');
+    final retries = awaitingCloud ? 30 : 8;
     bool bound = false;
-    for (var i = 0; i < 8 && mounted; i++) {
+    for (var i = 0; i < retries && mounted; i++) {
       await Future<void>.delayed(const Duration(seconds: 2));
       bound = await widget.cloudService.bindEsp32(
         result.deviceId,
@@ -193,12 +203,21 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
         kind: widget.kind.bindKind,
       );
       if (bound) break;
+      if (awaitingCloud && mounted) {
+        setState(() => _status =
+            '凭据已发送，等待板子向云端报到（${(i + 1) * 2}/${retries * 2}s）…');
+      }
     }
     if (!mounted) return;
     if (!bound) {
       setState(() {
         _busy = false;
-        _status = '配网成功但云端未识别到设备，请稍后在"设备管理"重试绑定';
+        _status = awaitingCloud
+            ? '凭据已发送但 60 秒内云端未收到 announce。常见原因：\n'
+                '① SSID/密码错误（ESP32-S3 只支持 2.4GHz）\n'
+                '② AP 不在板子附近、信号太弱\n'
+                '可重新扫描 → 长按 BOOT 5 秒 → 再次配网。'
+            : '配网成功但云端未识别到设备，请稍后在"设备管理"重试绑定';
       });
       return;
     }
@@ -259,6 +278,8 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
       case ProvStatus.applyingConfig: return '应用配置…';
       case ProvStatus.pollingStatus: return '等待 ESP32 联网…';
       case ProvStatus.connectedOk: return '✅ 已连上 WiFi';
+      case ProvStatus.credsDeliveredAwaitingCloud:
+        return '凭据已送达，板子重启加入 WiFi 中…';
       case ProvStatus.failed: return '失败';
     }
   }

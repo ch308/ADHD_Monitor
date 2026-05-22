@@ -141,9 +141,13 @@ void adhd_prov_ble_start_blocking(void) {
     // second Flutter connection attempt succeed without requiring a device reset,
     // even when the phone hotspot / AP is slow to respond.
     //
-    // The 45 s threshold intentionally matches Flutter's poll deadline so the
-    // manager is already in a fresh state by the time the user retries.
-    static const int64_t WATCHDOG_MS = 45000;
+    // The 25 s threshold matches the typical IDF retry budget for a single
+    // STA connect attempt: by then network_prov_mgr has either reported
+    // success / fail through events, or the BLE link is dead from
+    // LINK_SUPERVISION_TIMEOUT (BT/Wi-Fi coexistence on S3).  Restarting the
+    // prov manager re-advertises XIAOZHI_<MAC>, so the next phone retry can
+    // succeed without requiring a BOOT-button reset.
+    static const int64_t WATCHDOG_MS = 25000;
 
     const TickType_t poll = pdMS_TO_TICKS(500);
     const int max_iters = (5 * 60 * 1000) / 500;

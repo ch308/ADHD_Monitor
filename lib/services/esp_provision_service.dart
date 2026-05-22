@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 /// 项目固定的 BLE 服务 / 特征 UUID
@@ -53,6 +54,10 @@ enum ProvStatus {
   applyingConfig,
   pollingStatus,
   connectedOk,
+  /// 凭据已经写过去并被板子接收，但 BLE 链路在 STA 测试连接阶段被对端
+  /// 掐掉（多见 LINK_SUPERVISION_TIMEOUT，ESP32-S3 BT/Wi-Fi 共射频协调失败）。
+  /// 此时板子大概率会自己 reboot 加入 WiFi → 等云端 announce。
+  credsDeliveredAwaitingCloud,
   failed,
 }
 
@@ -72,6 +77,12 @@ enum ProvFailReason {
   /// Flutter 端 poll 到自身 deadline 时 ESP32 还在 Connecting，
   /// manager 还没下定论；这一般也是连接超长，建议用户排查 SSID/密码。
   pollTimeout,
+
+  /// BLE 链路在轮询途中被掐掉（最常见 LINK_SUPERVISION_TIMEOUT），
+  /// 但 ApplyConfig 已经成功——凭据已落到 ESP32 NVS。这种情况上层应当
+  /// 当作"凭据已送达，等云端 announce"而非真正失败。仅供 [_PollOutcome]
+  /// 内部使用，不会通过 [ProvResult] 暴露给 UI。
+  bleDroppedAwaitCloud,
 }
 
 /// 配网结果。Wi-Fi 状态来自 ESP32 GetStatus 上报。
@@ -274,16 +285,23 @@ class EspProvisionService {
       // ── 4. 轮询 GetStatus 直到 ESP32 报告 Connected ────────────────────
       emit(ProvStatus.pollingStatus);
       final r = await _pollUntilConnected(cfg);
-      if (!r.ok) {
-        return ProvResult.fail(
-          target.deviceId,
-          _failMessage(r.reason),
-          failReason: r.reason,
-        );
+      if (r.ok) {
+        emit(ProvStatus.connectedOk);
+        return ProvResult.ok(target.deviceId);
       }
-
-      emit(ProvStatus.connectedOk);
-      return ProvResult.ok(target.deviceId);
+      // ESP32-S3 BT/Wi-Fi 共射频：当 STA 真的去试着加入 AP 时，BLE 控制器有
+      // 时来不及发 LL ACK，安卓侧报 LINK_SUPERVISION_TIMEOUT 把链路掐掉。
+      // 板子会自己跑完 STA 重试或重启进 WiFi，凭据已经在 NVS 里了——
+      // 上层 UI 这时不要报错，改成等云端 announce 即可。
+      if (r.reason == ProvFailReason.bleDroppedAwaitCloud) {
+        emit(ProvStatus.credsDeliveredAwaitingCloud);
+        return ProvResult.ok(target.deviceId);
+      }
+      return ProvResult.fail(
+        target.deviceId,
+        _failMessage(r.reason),
+        failReason: r.reason,
+      );
     } catch (e) {
       emit(ProvStatus.failed);
       debugPrint('EspProvisionService.provision error: $e');
@@ -322,17 +340,34 @@ class EspProvisionService {
     int? lastReason;
     while (DateTime.now().difference(start) < deadline) {
       iter++;
-      final resp = await _writeRead(ch, _encodeCmdGetStatus());
-      final parsed = _parseRespGetStatus(resp);
+      _RespStatus parsed;
+      try {
+        final resp = await _writeRead(ch, _encodeCmdGetStatus());
+        parsed = _parseRespGetStatus(resp);
+        debugPrint(
+          'EspProv poll #$iter: state=${parsed.state} reason=${parsed.reason} '
+          'elapsed=${DateTime.now().difference(start).inSeconds}s '
+          'raw=${resp.length}B',
+        );
+      } on PlatformException catch (e) {
+        // ESP32-S3 BT/Wi-Fi 共享射频，STA 试连 AP 时 BLE 控制器常常发不出
+        // LL ACK，安卓侧 ~14s 后报 LINK_SUPERVISION_TIMEOUT 把链路掐掉。
+        // 这里我们已经成功通过 ApplyConfig，把凭据送到了 ESP32 NVS，所以
+        // 把这种"轮询途中链路掉了"视作"creds delivered"，让上层去等云端
+        // announce，而不是把它当作真正的失败抛给用户。
+        debugPrint('EspProv poll #$iter dropped: $e — switching to cloud-wait');
+        return const _PollOutcome(false, ProvFailReason.bleDroppedAwaitCloud);
+      } on TimeoutException catch (e) {
+        // 单次 read/write 超时；不立即放弃 BLE 通道，但若链路实际上已经死，
+        // 下一次 _writeRead 会马上抛 PlatformException → 走上面的分支。
+        debugPrint('EspProv poll #$iter read timeout: $e');
+        await Future<void>.delayed(const Duration(milliseconds: 400));
+        continue;
+      }
       lastState = parsed.state;
       lastReason = parsed.reason;
-      debugPrint(
-        'EspProv poll #$iter: state=${parsed.state} reason=${parsed.reason} '
-        'elapsed=${DateTime.now().difference(start).inSeconds}s '
-        'raw=${resp.length}B',
-      );
       if (parsed.state == 0) {
-        return _PollOutcome(true, ProvFailReason.unknown);
+        return const _PollOutcome(true, ProvFailReason.unknown);
       }
       if (parsed.state == 3) {
         // ConnectionFailed：依据 fail_reason 区分密码错 / 找不到 AP。
@@ -346,7 +381,7 @@ class EspProvisionService {
       await Future<void>.delayed(const Duration(milliseconds: 800));
     }
     debugPrint('EspProv poll deadline; lastState=$lastState lastReason=$lastReason');
-    return _PollOutcome(false, ProvFailReason.pollTimeout);
+    return const _PollOutcome(false, ProvFailReason.pollTimeout);
   }
 
   static String _failMessage(ProvFailReason r) {
