@@ -476,11 +476,14 @@ class XiaozhiConn:
             bool(self.hint_opening)
             and user_text.strip() == self.hint_opening.strip()
         )
+        is_asr_miss = user_text.startswith("（没有听清你说的话")
         if is_proactive_opening:
             reply = self.hint_opening
             log.info(
                 "xiaozhi proactive opening (parent-triggered), len=%d", len(reply)
             )
+        elif is_asr_miss:
+            reply = "我刚才没有听清楚。你可以靠近一点，再慢慢说一遍吗？"
         else:
             sys_prompt = (
                 "你是陪伴孩子成长的口语伙伴，语气温暖简短，适合外放给孩子听。"

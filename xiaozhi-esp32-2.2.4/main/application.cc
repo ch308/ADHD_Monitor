@@ -20,6 +20,10 @@
 
 #define TAG "Application"
 
+static constexpr int64_t kAutoStopIgnoreInitialVadMs = 1200;
+static constexpr int64_t kAutoStopMinSpeechMs = 600;
+static constexpr int64_t kAutoStopMinListenMs = 1800;
+
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -237,12 +241,20 @@ void Application::Run() {
             if (GetDeviceState() == kDeviceStateListening) {
                 const bool voice_detected = IsVoiceDetected();
                 if (listening_mode_ == kListeningModeAutoStop) {
+                    const int64_t now_ms = esp_timer_get_time() / 1000;
+                    const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
                     if (voice_detected) {
-                        auto_stop_voice_seen_ = true;
+                        if (listening_ms >= kAutoStopIgnoreInitialVadMs) {
+                            auto_stop_voice_seen_ = true;
+                            auto_stop_voice_started_ms_ = now_ms;
+                        }
                     } else if (auto_stop_voice_seen_) {
+                        const int64_t speech_ms = now_ms - auto_stop_voice_started_ms_;
                         auto_stop_voice_seen_ = false;
-                        protocol_->SendStopListening();
-                        SetDeviceState(kDeviceStateIdle);
+                        if (speech_ms >= kAutoStopMinSpeechMs && listening_ms >= kAutoStopMinListenMs) {
+                            protocol_->SendStopListening();
+                            SetDeviceState(kDeviceStateIdle);
+                        }
                     }
                 }
                 auto led = Board::GetInstance().GetLed();
@@ -952,6 +964,8 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
             auto_stop_voice_seen_ = false;
+            auto_stop_listen_started_ms_ = esp_timer_get_time() / 1000;
+            auto_stop_voice_started_ms_ = 0;
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
