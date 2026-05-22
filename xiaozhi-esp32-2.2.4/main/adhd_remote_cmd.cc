@@ -10,7 +10,16 @@
 #include "settings.h"
 #endif
 
-#if CONFIG_ADHD_MONITOR_REMOTE_CMD
+// announce + long-poll both belong to Path A. They were originally only
+// compiled when CONFIG_ADHD_MONITOR_REMOTE_CMD was on, but in practice
+// CONFIG_ADHD_MONITOR_BYPASS_OTA=y already implies "we're on Path A and
+// the Flutter app is waiting for /device/esp32/announce". Latch the two
+// together so a stale sdkconfig with REMOTE_CMD=n + BYPASS_OTA=y (which
+// happened to one user after defaults were merged into an old sdkconfig
+// without fullclean) still emits the announce — otherwise the Flutter
+// cloud-wait silently fails 60 s out and the user thinks BLE provisioning
+// broke.
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 #include <cctype>
 #include <cJSON.h>
 #include <esp_http_client.h>
@@ -27,7 +36,7 @@
 static const char* TAG = "adhd_cmd";
 #endif
 
-#if CONFIG_ADHD_MONITOR_REMOTE_CMD
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 static std::string MacNoColonUpper() {
     std::string mac = SystemInfo::GetMacAddress();
     std::string out;
@@ -67,7 +76,7 @@ void adhd_remote_cmd_seed_settings(void) {
 void adhd_remote_cmd_seed_settings(void) {}
 #endif
 
-#if CONFIG_ADHD_MONITOR_REMOTE_CMD
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 
 static bool HttpPostJson(const std::string& url, const std::string& body) {
     esp_http_client_config_t cfg = {};
@@ -222,14 +231,25 @@ static void RemoteCmdTask(void* /*arg*/) {
 void adhd_remote_cmd_start(void) {
     static bool started = false;
     if (started) {
+        ESP_LOGI(TAG, "remote cmd task already running, skip");
         return;
     }
     if (strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
         ESP_LOGW(TAG, "ADHD_MONITOR_CMD_HOST empty, skip remote cmd");
         return;
     }
+    // Echo where we'll announce so the next ESP32.txt makes it obvious
+    // the build actually compiled the announce path. The previous build
+    // silently no-op'd because CONFIG_ADHD_MONITOR_REMOTE_CMD was n in a
+    // stale sdkconfig — that case now logs "(via BYPASS_OTA fallback)".
+    ESP_LOGI(TAG, "remote cmd task starting → http://%s:%d/device/esp32/announce",
+             CONFIG_ADHD_MONITOR_CMD_HOST, CONFIG_ADHD_MONITOR_CMD_PORT);
     started = true;
-    xTaskCreate(RemoteCmdTask, "adhd_remote_cmd", 8192, nullptr, 3, nullptr);
+    BaseType_t r = xTaskCreate(RemoteCmdTask, "adhd_remote_cmd", 8192, nullptr, 3, nullptr);
+    if (r != pdPASS) {
+        ESP_LOGE(TAG, "xTaskCreate failed (%d), announce path is dead", (int)r);
+        started = false;
+    }
 }
 
 #else

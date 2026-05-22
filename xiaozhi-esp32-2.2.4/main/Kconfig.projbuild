@@ -923,10 +923,12 @@ endmenu
 menu "ADHD Monitor integration"
     config ADHD_MONITOR_REMOTE_CMD
         bool "Long-poll ADHD Monitor /device/<mac>/cmd (xiaozhi_invoke_chat)"
-        default n
+        default y
         help
             Polls the ADHD_Monitor Flask server and calls WakeWordInvoke when the cloud
-            queues action xiaozhi_invoke_chat (Path A).
+            queues action xiaozhi_invoke_chat (Path A). Also emits the
+            POST /device/esp32/announce on boot that the Flutter app waits
+            for after BLE provisioning, so this MUST stay y for Path A.
 
     config ADHD_MONITOR_CMD_HOST
         string "ADHD Monitor server host or IP"
