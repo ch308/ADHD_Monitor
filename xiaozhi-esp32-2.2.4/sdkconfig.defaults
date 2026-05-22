@@ -86,3 +86,18 @@ CONFIG_BT_ENABLED=y
 CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
 CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y
 
+# ADHD Monitor 云端集成（Path A）。Without these the firmware connects to
+# the upstream xiaozhi cloud (api.tenclass.net / mqtt.xiaozhi.me) and never
+# announces to our Flask server, so cloudService.bindEsp32(...) on the Flutter
+# side can never resolve the device after BLE provisioning.
+#   CMD_HOST/PORT  → POST /device/esp32/announce + long-poll /device/<id>/cmd
+#   BYPASS_OTA=y   → skip xiaozhi's OTA + activation, seed the websocket NVS
+#                    namespace from the WS_URL/WS_TOKEN below at every boot.
+#   WS_URL         → /xiaozhi/ws on the same Flask server (Kimi proxy)
+CONFIG_ADHD_MONITOR_REMOTE_CMD=y
+CONFIG_ADHD_MONITOR_CMD_HOST="124.223.53.33"
+CONFIG_ADHD_MONITOR_CMD_PORT=11760
+CONFIG_ADHD_MONITOR_BYPASS_OTA=y
+CONFIG_ADHD_MONITOR_WS_URL="ws://124.223.53.33:11760/xiaozhi/ws"
+CONFIG_ADHD_MONITOR_WS_TOKEN=""
+
