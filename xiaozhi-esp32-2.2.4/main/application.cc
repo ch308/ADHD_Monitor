@@ -551,9 +551,9 @@ void Application::InitializeProtocol() {
         const auto st = GetDeviceState();
         const bool ch_open = protocol_->IsAudioChannelOpened();
         if (st == kDeviceStateSpeaking) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+            audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         } else if (ch_open && (st == kDeviceStateConnecting || st == kDeviceStateListening)) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+            audio_service_.PushPacketToDecodeQueue(std::move(packet), true);
         }
     });
     
