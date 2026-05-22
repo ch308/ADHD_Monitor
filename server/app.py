@@ -1608,15 +1608,22 @@ def _get_esp32_device(device_id: str):
 def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
     """挑出该孩子绑定的 xiaozhi 星星机器人 device_id 列表。
 
-    选择策略：
-      1) 优先：`kind` 字段含 `xiaozhi`（Flutter 端 bindEsp32(kind='xiaozhi') 或固件
-         announce 时 kind='xiaozhi' 会写入这一行）。
-      2) 回退：如果策略 1 命中 0 行（部分老设备 bind 时未带 kind，或固件 announce
-         覆盖了 kind=None），就退而取该孩子名下 **所有** kind 为空或不含 'plush' 的
-         设备——避免出现"星星机器人确实绑了，但因为 kind 没写 'xiaozhi' 就静默
-         丢失行为推送"这种排查极困难的情况（用户线上已经遇到过：长轮询每次返回
-         204、enqueue 这条 INFO 根本没出，唯一的解释就是 ids=[]）。
-      3) 仍空 → 返回 []，调用方会打 WARNING 让我们立刻看到。
+    用户名下两类设备**绝对不能搞混**：
+
+      * 毛绒球 `ESP32-S3-LCD-1.47B`：固件 announce 写 `kind='esp32-s3-lcd-1.47B'`，
+        Flutter 端 bind 时不带 kind。它走 LED 呼吸命令，**不能**收到 `xiaozhi_invoke_chat`。
+      * 星星机器人 `xiaozhi-esp32-2.2.4`：固件 announce 写 `kind='xiaozhi'`，
+        Flutter 端 bind 时也写 `kind='xiaozhi'`。这才是我们要 TTS 的对象。
+
+    选择策略（按优先级）：
+      1) 严格：`kind LIKE '%xiaozhi%'` —— 99% 的情况落在这里。
+      2) 仅当严格命中为 0 行时，回退到 `kind IS NULL` 的"裸 bind"行。这种行
+         只可能出现在「Flutter 已 bind 但设备从未 announce 过」的极端情况下，
+         不会含毛绒球（毛绒球只要正常上电就一定有 `esp32-s3-lcd-...` 字面值）。
+      3) 含 `lcd` / `s3-lcd` / `plush` 等毛绒球家族字面值的行 **永远不会** 被
+         当成 xiaozhi 目标——即便 Flutter 误把毛绒球 bind 时给了 kind='xiaozhi'，
+         只要它 announce 过一次，kind 就会被 announce 的字面值覆盖（见
+         `_touch_esp32_device` 的 COALESCE 逻辑），下一次行为推送就自然过滤掉。
     """
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
@@ -1639,26 +1646,44 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
         )
         return []
 
-    strict = [
-        r[0] for r in rows
-        if r[1] and "xiaozhi" in str(r[1]).lower()
-    ]
+    # 已知的"绝对不是 xiaozhi"的 kind 关键词 —— 命中即排除，绝不回退。
+    NON_XIAOZHI_HINTS = ("lcd", "plush", "毛绒")
+
+    def _is_plush(kind_val: str | None) -> bool:
+        if not kind_val:
+            return False
+        k = str(kind_val).lower()
+        return any(hint in k for hint in NON_XIAOZHI_HINTS)
+
+    strict = [r[0] for r in rows if r[1] and "xiaozhi" in str(r[1]).lower()]
     if strict:
         return strict
 
+    # 仅在严格无命中时，回退到「绑定了但 announce 从未上送 kind」的行；明确
+    # 已写为毛绒球家族字面值的行不会被纳入。
     relaxed = [
         r[0] for r in rows
-        if not r[1] or "plush" not in str(r[1]).lower()
+        if (r[1] is None or str(r[1]).strip() == "") and not _is_plush(r[1])
     ]
     if relaxed:
         app.logger.warning(
             "xiaozhi target lookup: no strict kind=xiaozhi match for child_id=%s; "
-            "falling back to %d device(s) with empty/non-plush kind: %s "
-            "(rows=%s). Re-run BLE provisioning so the bind row gets kind='xiaozhi'.",
+            "falling back to %d device(s) with NULL kind: %s (all rows=%s). "
+            "If you actually have a xiaozhi bound, power-cycle it once so its "
+            "announce writes kind='xiaozhi'.",
             child_id, len(relaxed), relaxed,
             [(r[0], r[1]) for r in rows],
         )
-    return relaxed
+        return relaxed
+
+    # 一行都没匹配，但确实有绑定 —— 99% 是只绑了毛绒球还没绑星星机器人。
+    app.logger.warning(
+        "xiaozhi target lookup: child_id=%s has %d bound device(s) but NONE "
+        "look like a xiaozhi robot. rows=%s. Use '星星机器人配网' in Flutter "
+        "to bind a xiaozhi, then re-record the behavior.",
+        child_id, len(rows), [(r[0], r[1]) for r in rows],
+    )
+    return []
 
 
 def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str, condition_type: str = "") -> None:
