@@ -55,6 +55,9 @@ xiaozhi-esp32-2.2.4/.vscode/
 xiaozhi-esp32-2.2.4/managed_components/
 xiaozhi-esp32-2.2.4/sdkconfig.old
 xiaozhi-esp32-2.2.4/dependencies.lock
+# 本地 monitor log dump，仅作为粘贴给 Cursor 的临时文件，不入库
+xiaozhi-esp32-2.2.4/main/ESP32.txt
+xiaozhi-esp32-2.2.4/main/flutter.txt
 
 # Server 本地产物 / 机密
 server/.venv/
