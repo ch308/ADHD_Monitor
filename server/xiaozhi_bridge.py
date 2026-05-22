@@ -21,6 +21,39 @@ from openai import OpenAI
 log = logging.getLogger(__name__)
 
 
+def _bridge_warning(fmt: str, *args) -> None:
+    """Werkzeug/PM2 合并日志里主要看 Flask app.logger；子模块 log 默认不一定落盘。"""
+    try:
+        from flask import current_app, has_app_context
+
+        if has_app_context():
+            current_app.logger.warning(fmt, *args)
+            return
+    except Exception:
+        pass
+    # 避免 _bridge_warning → _bridge_warning 递归：回落仍用模块 logger
+    logging.getLogger(__name__).warning(fmt, *args)
+
+
+def _bridge_error(fmt: str, *args, **kwargs) -> None:
+    try:
+        from flask import current_app, has_app_context
+
+        if has_app_context():
+            if kwargs.get("exc_info"):
+                current_app.logger.exception(fmt, *args)
+            else:
+                current_app.logger.error(fmt, *args)
+            return
+    except Exception:
+        pass
+    _m = logging.getLogger(__name__)
+    if kwargs.get("exc_info"):
+        _m.exception(fmt, *args)
+    else:
+        _m.error(fmt, *args)
+
+
 def _requests_mod():
     """延迟导入：避免仅调用 stash_xinvoke_hint 时因未装 requests 而整模块导入失败。
 
@@ -33,7 +66,7 @@ def _requests_mod():
 
         return rq
     except ImportError:
-        log.error(
+        _bridge_error(
             "xiaozhi_bridge: Python package 'requests' is missing. "
             "Install server deps: pip install -r requirements.txt"
         )
@@ -173,16 +206,16 @@ def _baidu_get_access_token() -> str:
             timeout=10,
         )
     except Exception as e:
-        log.warning("baidu oauth failed: %s", e)
+        _bridge_warning("baidu oauth failed: %s", e)
         return ""
     if r.status_code != 200:
-        log.warning("baidu oauth http %s: %s", r.status_code, r.text[:400])
+        _bridge_warning("baidu oauth http %s: %s", r.status_code, r.text[:400])
         return ""
     data = r.json() if r.content else {}
     token = (data.get("access_token") or "").strip()
     expires_in = int(data.get("expires_in") or 0)
     if not token:
-        log.warning("baidu oauth no token: %s", data)
+        _bridge_warning("baidu oauth no token: %s", data)
         return ""
     # 提前 10 分钟续期，避免拿到刚过期的 token
     _baidu_token_cache["value"] = token
@@ -209,12 +242,12 @@ def _transcribe_pcm(pcm_bytes: bytes, sample_rate: int = 16000) -> str:
     if not pcm_bytes:
         return ""
     if sample_rate not in (8000, 16000):
-        log.warning("baidu asr unsupported sample_rate=%d, fallback to 16000", sample_rate)
+        _bridge_warning("baidu asr unsupported sample_rate=%d, fallback to 16000", sample_rate)
         sample_rate = 16000
     # 百度短语音上限 ~60s；16k/16bit/单声道 = 32000 B/s，~1.92 MB
     max_bytes = sample_rate * 2 * 60
     if len(pcm_bytes) > max_bytes:
-        log.warning(
+        _bridge_warning(
             "baidu asr clip overlength %d>%d bytes, truncating",
             len(pcm_bytes),
             max_bytes,
@@ -239,18 +272,18 @@ def _transcribe_pcm(pcm_bytes: bytes, sample_rate: int = 16000) -> str:
             timeout=30,
         )
     except Exception as e:
-        log.warning("baidu asr request failed: %s", e)
+        _bridge_warning("baidu asr request failed: %s", e)
         return ""
     if r.status_code != 200:
-        log.warning("baidu asr http %s: %s", r.status_code, r.text[:400])
+        _bridge_warning("baidu asr http %s: %s", r.status_code, r.text[:400])
         return ""
     try:
         data = r.json()
     except ValueError:
-        log.warning("baidu asr non-json: %s", r.text[:400])
+        _bridge_warning("baidu asr non-json: %s", r.text[:400])
         return ""
     if int(data.get("err_no", -1)) != 0:
-        log.warning("baidu asr err_no=%s err_msg=%s", data.get("err_no"), data.get("err_msg"))
+        _bridge_warning("baidu asr err_no=%s err_msg=%s", data.get("err_no"), data.get("err_msg"))
         return ""
     result = data.get("result") or []
     if not isinstance(result, list) or not result:
@@ -265,7 +298,7 @@ def _opus_to_pcm(opus_packets: list[bytes], sample_rate: int = 16000) -> bytes:
     try:
         dec = __import__("opuslib").Decoder(sample_rate, 1)
     except Exception as e:
-        log.error("opuslib decoder: %s", e)
+        _bridge_error("opuslib decoder: %s", e)
         return b""
     pcm = bytearray()
     frame_samples = int(sample_rate * 60 / 1000)  # 设备默认 60ms 帧
@@ -302,7 +335,7 @@ def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
 
     ffmpeg_exe = _ffmpeg_bin()
     if ffmpeg_exe is None:
-        log.error(
+        _bridge_error(
             "ffmpeg not found (PATH=%r); set FFMPEG_PATH or install ffmpeg. "
             "Cannot build TTS opus.",
             os.environ.get("PATH", ""),
@@ -356,7 +389,7 @@ def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
             packets.append(enc.encode(frame, samples_per_frame))
         return packets
     except Exception as e:
-        log.exception("tts pipeline: %s", e)
+        _bridge_error("tts pipeline: %s", e, exc_info=True)
         return []
     finally:
         for p in (mp3, pcm_path):
@@ -452,6 +485,17 @@ class XiaozhiConn:
         pcm = _opus_to_pcm(self.uplink_packets, 16000)
         user_text = _transcribe_pcm(pcm, 16000) if pcm else ""
         if not user_text:
+            # 占位文案容易误导：空识别还可能是「无上行 PCM / 麦克风静音 /
+            # 百度 err_no≠0 / 网络」等。这里打一条摘要日志便于对照 app.error.log。
+            tok = _baidu_get_access_token()
+            _bridge_warning(
+                "xiaozhi listen_stop: ASR empty (uplink_frames=%d pcm_bytes=%d "
+                "baidu_token_ok=%s). If pcm_bytes=0 check device uplink; if token_ok "
+                "but still empty search logs for baidu asr err_no / http.",
+                len(self.uplink_packets),
+                len(pcm or b""),
+                bool(tok),
+            )
             user_text = (
                 "（没有听清你说的话；请检查服务器 BAIDU_SPEECH_API_KEY / "
                 "BAIDU_SPEECH_SECRET_KEY 是否配置正确。）"
@@ -514,7 +558,7 @@ class XiaozhiConn:
         )
         packets = _tts_to_opus_packets(reply, 24000)
         if not packets:
-            log.error(
+            _bridge_error(
                 "xiaozhi TTS produced 0 opus packets (reply_len=%d). "
                 "Install ffmpeg on the server and ensure edge-tts / opuslib work.",
                 len(reply),
@@ -544,7 +588,7 @@ def register_xiaozhi(app, sock) -> None:
             if sent.startswith("Bearer "):
                 sent = sent[len("Bearer ") :].strip()
             if sent != expected:
-                log.warning(
+                _bridge_warning(
                     "xiaozhi ws rejected: token mismatch from device %s",
                     request.headers.get("Device-Id", "?"),
                 )
@@ -556,4 +600,4 @@ def register_xiaozhi(app, sock) -> None:
         try:
             XiaozhiConn(ws).run()
         except Exception:
-            log.exception("xiaozhi_ws session error")
+            _bridge_error("xiaozhi_ws session error", exc_info=True)
