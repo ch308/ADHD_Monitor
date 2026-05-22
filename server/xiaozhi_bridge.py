@@ -16,10 +16,28 @@ import tempfile
 import time
 import uuid
 
-import requests
 from openai import OpenAI
 
 log = logging.getLogger(__name__)
+
+
+def _requests_mod():
+    """延迟导入：避免仅调用 stash_xinvoke_hint 时因未装 requests 而整模块导入失败。
+
+    生产环境仍应 `pip install -r requirements.txt`；缺包时百度 ASR 会静默失败，
+    但家长记录 → 命令入队 → 主动开场 TTS 至少能走通（只要 flask-sock / edge-tts
+    / ffmpeg / opuslib 齐全）。
+    """
+    try:
+        import requests as rq  # type: ignore[import-untyped]
+
+        return rq
+    except ImportError:
+        log.error(
+            "xiaozhi_bridge: Python package 'requests' is missing. "
+            "Install server deps: pip install -r requirements.txt"
+        )
+        return None
 
 # device_id (MAC hex, no colons, upper) -> (deadline_monotonic, {"opening": str, "context": str})
 _xinvoke_hints: dict[str, tuple[float, dict[str, str]]] = {}
@@ -141,8 +159,11 @@ def _baidu_get_access_token() -> str:
     expire_at = float(_baidu_token_cache.get("expire_at") or 0.0)
     if cached and now < expire_at:
         return str(cached)
+    rq = _requests_mod()
+    if rq is None:
+        return ""
     try:
-        r = requests.post(
+        r = rq.post(
             "https://aip.baidubce.com/oauth/2.0/token",
             params={
                 "grant_type": "client_credentials",
@@ -202,8 +223,11 @@ def _transcribe_pcm(pcm_bytes: bytes, sample_rate: int = 16000) -> str:
     token = _baidu_get_access_token()
     if not token:
         return ""
+    rq = _requests_mod()
+    if rq is None:
+        return ""
     try:
-        r = requests.post(
+        r = rq.post(
             "https://vop.baidu.com/server_api",
             params={
                 "cuid": _baidu_cuid(),

@@ -25,6 +25,22 @@ try:
 
     register_xiaozhi(app, _xiaozhi_sock)
 except ImportError as exc:
+    # 没有 flask-sock 时 /xiaozhi/ws 根本不会注册，ESP32 连上后收不到任何 TTS，
+    # 星星机器人会表现为「完全没声音」。务必在运行 app 的 venv 里安装 requirements.txt。
+    import sys
+
+    msg = (
+        "\n"
+        "========== ADHD xiaozhi Path A: WebSocket DISABLED ==========\n"
+        f"Reason: {exc}\n"
+        "Fix (on the server, in the same Python env that runs app.py):\n"
+        "  cd server && pip install -r requirements.txt\n"
+        "Required for star-robot voice: flask-sock, simple-websocket, requests, "
+        "edge-tts, opuslib, and system package: ffmpeg\n"
+        "Then restart Flask / gunicorn / your process manager.\n"
+        "==============================================================\n"
+    )
+    print(msg, file=sys.stderr)
     print("xiaozhi Path A bridge disabled (missing dependency?):", exc)
 
 # Kimi 使用 OpenAI SDK 兼容接口；请在服务器环境变量中配置 MOONSHOT_API_KEY
