@@ -489,7 +489,14 @@ class XiaozhiConn:
                 "text": reply[:200],
             }
         )
-        for pkt in _tts_to_opus_packets(reply, 24000):
+        packets = _tts_to_opus_packets(reply, 24000)
+        if not packets:
+            log.error(
+                "xiaozhi TTS produced 0 opus packets (reply_len=%d). "
+                "Install ffmpeg on the server and ensure edge-tts / opuslib work.",
+                len(reply),
+            )
+        for pkt in packets:
             self.ws.send(pkt)
         self.send_json(
             {"session_id": self.session_id, "type": "tts", "state": "stop"}

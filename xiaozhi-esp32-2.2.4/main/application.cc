@@ -544,7 +544,15 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
+        // 下行 Opus 与 JSON 在同一条 WebSocket 回调链里顺序到达：服务器先发
+        // `tts state=start`，固件里用 Schedule() 异步切到 kDeviceStateSpeaking；
+        // 若紧接着就发二进制帧，此时状态往往仍是 Listening/Connecting，
+        // 旧逻辑「仅 Speaking 才入队」会把整段 TTS 全部丢光 → 星星机器人完全没声音。
+        const auto st = GetDeviceState();
+        const bool ch_open = protocol_->IsAudioChannelOpened();
+        if (st == kDeviceStateSpeaking) {
+            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        } else if (ch_open && (st == kDeviceStateConnecting || st == kDeviceStateListening)) {
             audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
