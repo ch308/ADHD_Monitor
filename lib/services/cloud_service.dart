@@ -234,12 +234,13 @@ class CloudService {
           )
           .timeout(timeout);
       if (r.statusCode >= 200 && r.statusCode < 300) {
+        debugPrint('CloudService: esp32 cmd $action → $deviceId OK');
         return true;
       }
-      debugPrint('CloudService: esp32 cmd failed ${r.statusCode}: ${r.body}');
+      debugPrint('CloudService: esp32 cmd $action → $deviceId FAIL ${r.statusCode}: ${r.body}');
       return false;
     } catch (e) {
-      debugPrint('CloudService: esp32 cmd error $e');
+      debugPrint('CloudService: esp32 cmd $action → $deviceId ERROR $e');
       return false;
     }
   }

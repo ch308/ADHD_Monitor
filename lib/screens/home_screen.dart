@@ -778,13 +778,26 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       setState(() => message = _resolveStatusMessage());
     }
 
-    // 进入正念呼吸：通知毛绒球呼吸灯开始呼吸灯效（与 UI 呼吸球同步周期）
+    // 进入正念呼吸：通知毛绒球呼吸灯开始呼吸灯效 + 播放 432Hz 疗愈音乐
     final esp = _boundEsp32DeviceId;
+    debugPrint('BreathingBall: enter, boundEsp32=$esp');
     if (esp != null && esp.isNotEmpty) {
+      debugPrint('BreathingBall: sending breathing_start + sdcard_audio_start to $esp');
       unawaited(_cloudService.triggerEsp32BreathingStart(
         esp,
         cyclePeriod: const Duration(milliseconds: 8000),
       ));
+      unawaited(_cloudService.triggerEsp32SdcardAudioStart(esp, '432Hz'));
+    } else {
+      debugPrint('BreathingBall: no bound ESP32, skipping device commands');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('未绑定毛绒球设备，请先在右上角菜单中"配网毛绒球呼吸灯"'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     }
 
     try {
@@ -804,9 +817,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
     } finally {
       _breathingPageVisible = false;
-      // 用户从呼吸页返回/取消：通知毛绒球呼吸灯停止
+      // 用户从呼吸页返回/取消：通知毛绒球呼吸灯停止 + 停止音乐
       if (esp != null && esp.isNotEmpty) {
+        debugPrint('BreathingBall: exit, sending breathing_stop + sdcard_audio_stop to $esp');
         unawaited(_cloudService.triggerEsp32BreathingStop(esp));
+        unawaited(_cloudService.triggerEsp32SdcardAudioStop(esp));
       }
       if (mounted) {
         setState(() => message = _resolveStatusMessage());

@@ -170,7 +170,7 @@ static void flush_i2s_silence(void)
     if (s_tx_chan == NULL || !s_tx_enabled) {
         return;
     }
-    int16_t zero[512 * 2];
+    static int16_t zero[512 * 2];
     memset(zero, 0, sizeof(zero));
     for (int i = 0; i < 6; i++) {
         size_t w = 0;
@@ -187,7 +187,7 @@ static bool decode_play_file(const char *path, int *out_hz)
         return false;
     }
 
-    mp3dec_t dec;
+    static mp3dec_t dec;
     mp3dec_init(&dec);
 
     uint8_t *buf = (uint8_t *)malloc(MP3_BUF_SIZE);
@@ -365,7 +365,7 @@ void sd_audio_start(const char *folder)
     BaseType_t ok = xTaskCreatePinnedToCore(
         audio_task,
         "sd_audio",
-        32768,
+        12288,
         NULL,
         5,
         &s_audio_task,
