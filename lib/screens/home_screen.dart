@@ -790,16 +790,15 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       setState(() => message = _resolveStatusMessage());
     }
 
-    // 进入正念呼吸：通知毛绒球呼吸灯开始呼吸灯效 + 播放 432Hz 疗愈音乐
+    // 进入正念呼吸：只通知毛绒球开始呼吸灯效；432/528 音乐由页面按钮显式触发。
     final esp = _boundEsp32DeviceId;
     debugPrint('BreathingBall: enter, boundEsp32=$esp');
     if (esp != null && esp.isNotEmpty) {
-      debugPrint('BreathingBall: sending breathing_start + sdcard_audio_start to $esp');
+      debugPrint('BreathingBall: sending breathing_start to $esp');
       unawaited(_cloudService.triggerEsp32BreathingStart(
         esp,
         cyclePeriod: const Duration(milliseconds: 8000),
       ));
-      unawaited(_cloudService.triggerEsp32SdcardAudioStart(esp, '432Hz'));
     } else {
       debugPrint('BreathingBall: no bound ESP32, skipping device commands');
       if (mounted) {

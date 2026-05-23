@@ -28,6 +28,7 @@ static const char *TAG = "sd_audio";
 #define SD_AUDIO_PATH_LEN   160
 #define READ_CHUNK          4096
 #define MP3_BUF_SIZE        (READ_CHUNK + 2048)
+#define SD_AUDIO_TASK_STACK 49152
 
 static TaskHandle_t s_audio_task;
 static volatile bool s_stop_request;
@@ -365,7 +366,7 @@ void sd_audio_start(const char *folder)
     BaseType_t ok = xTaskCreatePinnedToCore(
         audio_task,
         "sd_audio",
-        12288,
+        SD_AUDIO_TASK_STACK,
         NULL,
         5,
         &s_audio_task,
