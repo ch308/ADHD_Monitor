@@ -220,7 +220,7 @@ sequenceDiagram
     Parent->>App: 在记录卡片填观察文本 + 选 ADHD/自闭症
     App->>Cloud: POST /submit_log<br/>{bpm, observation, condition_type}
     Cloud->>Cloud: fetch_kimi_advice()<br/>挑 ADHD/自闭症 prompt 模板
-    Cloud->>Kimi: chat.completions(moonshot-v1-8k, 0.7)
+    Cloud->>Kimi: chat.completions(kimi-k2.5, 0.7)
     Kimi-->>Cloud: 50字以内现场干预建议
     Cloud->>DB: INSERT parent_logs(timestamp, bpm, observation,<br/>ai_advice, condition_type, child_id)
     Cloud-->>App: {advice}
@@ -236,7 +236,7 @@ flowchart LR
     C -->|是| A
     C -->|否| D[_collect_week_digest<br/>聚合心率 + 家长记录]
     D --> E[_build_weekly_kimi_user_prompt<br/>组合中文长 prompt]
-    E --> F[Kimi moonshot-v1-8k<br/>temperature=0.42, 2800 tok]
+    E --> F[Kimi kimi-k2.5<br/>temperature=0.42, 2800 tok]
     F --> G[INSERT OR REPLACE<br/>weekly_reports]
     G --> A
 ```
@@ -639,7 +639,7 @@ sequenceDiagram
 
 ### 5.5 AI 单次建议 & 趋势对比
 
-- `fetch_kimi_advice(bpm, observation, condition_type)` 按 ADHD / 自闭症 各自挑 system + user prompt 模板，`moonshot-v1-8k` + `temperature=0.7`，要求 50 字以内不带套话。Kimi 不可用时按 `condition_type` 返回硬编码兜底文案。
+- `fetch_kimi_advice(bpm, observation, condition_type)` 按 ADHD / 自闭症 各自挑 system + user prompt 模板，默认 **`kimi-k2.5`**（可用 `MOONSHOT_CHAT_MODEL` 覆盖）+ `temperature=0.7`，并要求默认 `extra_body` 关闭思考（更快）。要求 50 字以内不带套话。Kimi 不可用时按 `condition_type` 返回硬编码兜底文案。
 - `/footprint/today` 拉今天每条 `parent_logs`，并逐条调 `_trend_after_advice`：取**记录前 15 min** 与**记录后 20 min** 的心率均值差 `delta`，
   `delta ≤ -3 → improving`，`delta ≥ +3 → worsen`，否则 `steady`；样本不足为 `unknown`。
 
@@ -648,7 +648,7 @@ sequenceDiagram
 - `_weekly_scheduler_loop`：每周日 21:00 触发（若 `now.weekday()==6 && now<21:00` 用今天；否则下周日）；保底 30 s 间隔；`DISABLE_WEEKLY_SCHEDULER=1` 可关闭。
 - `_collect_week_digest`：心率全表统计 + 按小时聚合 top-12 高压时段（`alert_rate DESC, avg_bpm DESC`）+ 按天聚合 + 最近 40 条 `parent_logs`。
 - `_build_weekly_kimi_user_prompt`：固定 8 段 Markdown-free 中文 prompt，强制 350–700 字、2–4 段、第二人称、不带 JSON 标题。
-- `moonshot-v1-8k` + `temperature=0.42`，`max_tokens=2800`；返回 < 40 字符直接 `RuntimeError` 不入库。
+- 默认 **`kimi-k2.5`**（`WEEKLY_REPORT_MODEL` 可覆盖）+ `temperature=0.42`，`max_tokens=2800`，同样默认关闭思考；返回 < 40 字符直接 `RuntimeError` 不入库。
 
 > 当前实现 hard-code `child_id=1`，多孩子家庭的周报需要手动 `POST /weekly_report/generate` 指定 `child_id`。
 
@@ -838,7 +838,11 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
    可选环境变量（与 `app.py` 一致）：
    - `MOONSHOT_API_KEY`（必填，Kimi）
    - `MOONSHOT_BASE_URL`（默认 `https://api.moonshot.cn/v1`）
-   - `WEEKLY_REPORT_MODEL`（默认 `moonshot-v1-8k`）
+   - `MOONSHOT_CHAT_MODEL`（默认 `kimi-k2.5`：家长建议 + 星星机器人脚本）
+   - `WEEKLY_REPORT_MODEL`（默认 `kimi-k2.5`）
+   - `MOONSHOT_ENABLE_THINKING=1`（可选；设置后不再自动附带 `thinking: disabled`）
+   - `MOONSHOT_EXTRA_BODY_JSON`（可选；合法 JSON 对象，与默认 `thinking` 合并）
+   - `XIAOZHI_CHAT_MODEL`（默认 `kimi-k2.5`；小智 WebSocket Kimi 回复）
    - `WEEKLY_REPORT_SECRET`（可选；设置后 `/weekly_report/generate` 要带 `X-Weekly-Report-Secret`）
    - `DISABLE_WEEKLY_SCHEDULER=1` 可关周报守护线程
    - `CHILD_DISPLAY_NAME`（影响周报里的称呼）

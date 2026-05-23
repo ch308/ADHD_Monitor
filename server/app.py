@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import sys
 import json
 import re
 import threading
@@ -48,6 +49,71 @@ client = OpenAI(
     api_key=os.getenv("MOONSHOT_API_KEY", "你的_MOONSHOT_API_KEY"),
     base_url=os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.cn/v1"),
 )
+
+
+def _moonshot_chat_model() -> str:
+    """单次建议 + 星星机器人脚本等「短对话」默认模型（周报单独用 WEEKLY_REPORT_MODEL）。"""
+    m = (os.getenv("MOONSHOT_CHAT_MODEL") or "kimi-k2.5").strip()
+    return m or "kimi-k2.5"
+
+
+def _moonshot_kimi_extra_body():
+    """Kimi 扩展参数：默认关闭思考（kimi-k2.x 更快）。
+
+    - 默认附带 ``{"thinking": {"type": "disabled"}}``，除非 ``MOONSHOT_ENABLE_THINKING=1``。
+    - ``MOONSHOT_EXTRA_BODY_JSON`` 为合法 JSON 对象时，与默认值合并（后者键可覆盖前者）。
+    - 兼容旧开关：``MOONSHOT_DISABLE_THINKING=0|false|no`` 等价于开启思考（不传关闭字段）。
+    """
+    enable_thinking = (os.getenv("MOONSHOT_ENABLE_THINKING") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    legacy_off = (os.getenv("MOONSHOT_DISABLE_THINKING") or "").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    )
+    if legacy_off:
+        enable_thinking = True
+
+    base = None if enable_thinking else {"thinking": {"type": "disabled"}}
+
+    raw = (os.getenv("MOONSHOT_EXTRA_BODY_JSON") or "").strip()
+    if not raw:
+        return base
+
+    try:
+        user = json.loads(raw)
+    except json.JSONDecodeError as e:
+        print(f"⚠️ MOONSHOT_EXTRA_BODY_JSON 不是合法 JSON，已忽略: {e}", file=sys.stderr)
+        return base
+
+    if not isinstance(user, dict):
+        return base
+
+    if base is None:
+        return user if user else None
+
+    merged = dict(base)
+    merged.update(user)
+    return merged
+
+
+def _kimi_chat_create(**kwargs):
+    """统一走 OpenAI SDK，合并 extra_body（供 Moonshot/Kimi 非标准字段）。"""
+    extra = _moonshot_kimi_extra_body()
+    if extra:
+        kwargs = dict(kwargs)
+        existing = kwargs.get("extra_body")
+        if isinstance(existing, dict):
+            merged = dict(extra)
+            merged.update(existing)
+            kwargs["extra_body"] = merged
+        else:
+            kwargs["extra_body"] = extra
+    return client.chat.completions.create(**kwargs)
+
 
 # 内存：各 child_id 最新状态（GET /webhook 按 X-Child-Id 返回）
 latest_child_status = {}
@@ -493,8 +559,8 @@ def fetch_kimi_advice(bpm, observation, condition_type):
         )
 
     try:
-        response = client.chat.completions.create(
-            model="moonshot-v1-8k",
+        response = _kimi_chat_create(
+            model=_moonshot_chat_model(),
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt}
@@ -544,8 +610,8 @@ def fetch_kimi_child_script(observation, advice, condition_type):
         "\n- 直接输出对孩子说的那段话，不要前缀。"
     )
     try:
-        response = client.chat.completions.create(
-            model="moonshot-v1-8k",
+        response = _kimi_chat_create(
+            model=_moonshot_chat_model(),
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": prompt},
@@ -981,9 +1047,9 @@ def fetch_kimi_weekly_report(user_prompt: str) -> str:
         "你根据家长端设备采集的一周心率与家长文字记录，撰写「周报」帮助家长看见规律与下一步。"
         "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
     )
-    model = os.getenv("WEEKLY_REPORT_MODEL", "moonshot-v1-8k")
+    model = (os.getenv("WEEKLY_REPORT_MODEL") or "kimi-k2.5").strip() or "kimi-k2.5"
     try:
-        response = client.chat.completions.create(
+        response = _kimi_chat_create(
             model=model,
             messages=[
                 {"role": "system", "content": system},

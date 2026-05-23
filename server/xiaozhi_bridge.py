@@ -152,13 +152,51 @@ def _moonshot_client() -> OpenAI:
     )
 
 
+def _moonshot_kimi_extra_body():
+    """与 app.py 相同：默认关闭思考；见 app.py 内文档字符串。"""
+    enable_thinking = (os.getenv("MOONSHOT_ENABLE_THINKING") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    legacy_off = (os.getenv("MOONSHOT_DISABLE_THINKING") or "").strip().lower() in (
+        "0",
+        "false",
+        "no",
+    )
+    if legacy_off:
+        enable_thinking = True
+
+    base = None if enable_thinking else {"thinking": {"type": "disabled"}}
+
+    raw = (os.getenv("MOONSHOT_EXTRA_BODY_JSON") or "").strip()
+    if not raw:
+        return base
+
+    try:
+        user = json.loads(raw)
+    except json.JSONDecodeError as e:
+        _bridge_warning("MOONSHOT_EXTRA_BODY_JSON 不是合法 JSON，已忽略: %s", e)
+        return base
+
+    if not isinstance(user, dict):
+        return base
+
+    if base is None:
+        return user if user else None
+
+    merged = dict(base)
+    merged.update(user)
+    return merged
+
+
 def _kimi_reply(system: str, user_text: str) -> str:
     key = os.getenv("MOONSHOT_API_KEY", "")
     if not key or key.startswith("你的_"):
         return "请先在服务器配置 MOONSHOT_API_KEY。"
     client = _moonshot_client()
-    model = os.getenv("XIAOZHI_CHAT_MODEL", "moonshot-v1-8k")
-    r = client.chat.completions.create(
+    model = (os.getenv("XIAOZHI_CHAT_MODEL") or "kimi-k2.5").strip() or "kimi-k2.5"
+    kwargs = dict(
         model=model,
         messages=[
             {"role": "system", "content": system},
@@ -167,6 +205,16 @@ def _kimi_reply(system: str, user_text: str) -> str:
         temperature=0.6,
         max_tokens=512,
     )
+    extra = _moonshot_kimi_extra_body()
+    if extra:
+        existing = kwargs.get("extra_body")
+        if isinstance(existing, dict):
+            merged = dict(extra)
+            merged.update(existing)
+            kwargs["extra_body"] = merged
+        else:
+            kwargs["extra_body"] = extra
+    r = client.chat.completions.create(**kwargs)
     return (r.choices[0].message.content or "").strip()
 
 
