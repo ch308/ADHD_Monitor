@@ -129,6 +129,9 @@ private:
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
+    /** AutoStop endpoint detector: fires once `kAutoStopSilenceMs` after the
+     * child stops talking, used instead of waiting for the 1 Hz clock tick. */
+    esp_timer_handle_t endpoint_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -180,6 +183,12 @@ private:
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
+
+    // Endpoint detection: invoked from Schedule() once kAutoStopSilenceMs has
+    // elapsed since the child stopped talking. Re-checks state (the user may
+    // have started talking again, or left listening) and, if conditions still
+    // hold, sends listen-stop and transitions to Idle.
+    void OnEndpointTimer();
 };
 
 

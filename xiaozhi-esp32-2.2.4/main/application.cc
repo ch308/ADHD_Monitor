@@ -20,11 +20,21 @@
 
 #define TAG "Application"
 
-static constexpr int64_t kAutoStopIgnoreInitialVadMs = 1200;
-static constexpr int64_t kAutoStopMinSpeechMs = 600;
-static constexpr int64_t kAutoStopMinListenMs = 1800;
+// 进入 Listening 后头多少 ms 的 VAD 抖动忽略（避免上一段 TTS 残音/开 mic 时
+// 的杂音被误识别为孩子说话）。设小一点，否则孩子立刻回答会被这段忽略期吞掉。
+static constexpr int64_t kAutoStopIgnoreInitialVadMs = 300;
+// 至少说够多少 ms 才算"说过话"——给低声/简短回答留余量（孩子常常只说"嗯"
+// "好"、"我不要"这种 200~400ms 的短语）。
+static constexpr int64_t kAutoStopMinSpeechMs = 150;
+// Listening 总时长不到这么久不允许 endpoint。
+static constexpr int64_t kAutoStopMinListenMs = 800;
 // 孩子停顿多久算讲完一句 → 触发 listen stop / ASR / 回复。
-static constexpr int64_t kAutoStopSilenceMs = 3000;
+// 1.5s 是常见 endpointing 阈值；之前用 3s 体感非常迟钝。
+static constexpr int64_t kAutoStopSilenceMs = 1500;
+// 兜底：即使 VAD 一次都没把"说话"标到 voice_seen（小声、麦克输入弱、AFE
+// 误判），只要进入 Listening 后到这个时长还没 endpoint，就强制提交一次。
+// 这样既不会让孩子完全没法被听见，也不会无谓占用上行带宽。
+static constexpr int64_t kAutoStopHardCutoffMs = 8000;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
 static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
 
@@ -53,12 +63,29 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+    // One-shot endpoint detector: fires `kAutoStopSilenceMs` after VAD goes silent.
+    esp_timer_create_args_t endpoint_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            app->Schedule([app]() { app->OnEndpointTimer(); });
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "endpoint_timer",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&endpoint_timer_args, &endpoint_timer_handle_);
 }
 
 Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (endpoint_timer_handle_ != nullptr) {
+        esp_timer_stop(endpoint_timer_handle_);
+        esp_timer_delete(endpoint_timer_handle_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -251,14 +278,29 @@ void Application::Run() {
                         if (listening_ms >= kAutoStopIgnoreInitialVadMs) {
                             if (!auto_stop_voice_seen_) {
                                 auto_stop_voice_started_ms_ = now_ms;
+                                ESP_LOGI(TAG, "VAD voice (listen=%lldms)", listening_ms);
                             }
                             auto_stop_voice_seen_ = true;
+                        } else {
+                            ESP_LOGI(TAG, "VAD voice ignored (listen=%lldms < %lldms)",
+                                     listening_ms, kAutoStopIgnoreInitialVadMs);
                         }
-                        // 还在说话，重置静音计时
+                        // 仍在说话：取消 endpoint 倒计时
                         auto_stop_silence_started_ms_ = 0;
+                        if (endpoint_timer_handle_ != nullptr) {
+                            esp_timer_stop(endpoint_timer_handle_);
+                        }
                     } else if (auto_stop_voice_seen_ && auto_stop_silence_started_ms_ == 0) {
-                        // 第一次进入静音，开始数 kAutoStopSilenceMs 在 CLOCK_TICK 里判断
+                        // 第一次进入静音：启动 one-shot endpoint 倒计时
                         auto_stop_silence_started_ms_ = now_ms;
+                        const int64_t spoke_ms = now_ms - auto_stop_voice_started_ms_;
+                        ESP_LOGI(TAG, "VAD silent → endpoint timer armed (spoke=%lldms)",
+                                 spoke_ms);
+                        if (endpoint_timer_handle_ != nullptr) {
+                            esp_timer_stop(endpoint_timer_handle_);
+                            esp_timer_start_once(endpoint_timer_handle_,
+                                                 kAutoStopSilenceMs * 1000);
+                        }
                     }
                 }
                 auto led = Board::GetInstance().GetLed();
@@ -280,24 +322,27 @@ void Application::Run() {
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
 
-            // AutoStop：VAD 静音事件只触发一次，必须用周期轮询才能等满 N 秒静音。
+            // 真正的 endpoint 检测改用 one-shot esp_timer（OnEndpointTimer）；
+            // 这里 1 Hz 只做两个兜底：
+            //   (a) Hard cutoff: VAD 始终没拿到 voice_seen，但 listening 已经
+            //       超过 kAutoStopHardCutoffMs，也强制 stop 一次，让服务端给个
+            //       回复（避免麦克风 / AFE 误判直接吃掉这一轮）。
+            //   (b) Auto-close: 一直没有任何 voice 也没人交互，达到 60s 关闭
+            //       音频通道，避免无限轮询。
             if (GetDeviceState() == kDeviceStateListening &&
                 listening_mode_ == kListeningModeAutoStop && protocol_) {
                 const int64_t now_ms = esp_timer_get_time() / 1000;
                 const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
-                if (auto_stop_voice_seen_ && auto_stop_silence_started_ms_ != 0) {
-                    const int64_t silence_ms = now_ms - auto_stop_silence_started_ms_;
-                    const int64_t speech_ms = auto_stop_silence_started_ms_ - auto_stop_voice_started_ms_;
-                    if (silence_ms >= kAutoStopSilenceMs &&
-                        speech_ms >= kAutoStopMinSpeechMs &&
-                        listening_ms >= kAutoStopMinListenMs) {
-                        ESP_LOGI(TAG, "Auto-stop: silence=%lldms speech=%lldms",
-                                 silence_ms, speech_ms);
-                        auto_stop_voice_seen_ = false;
-                        auto_stop_silence_started_ms_ = 0;
-                        protocol_->SendStopListening();
-                        SetDeviceState(kDeviceStateIdle);
+                if (!auto_stop_voice_seen_ &&
+                    listening_ms >= kAutoStopHardCutoffMs &&
+                    protocol_->IsAudioChannelOpened()) {
+                    ESP_LOGI(TAG, "Hard cutoff: %lldms listening, no voice seen → stop",
+                             listening_ms);
+                    if (endpoint_timer_handle_ != nullptr) {
+                        esp_timer_stop(endpoint_timer_handle_);
                     }
+                    protocol_->SendStopListening();
+                    SetDeviceState(kDeviceStateIdle);
                 } else if (!auto_stop_voice_seen_ &&
                            listening_ms >= kAutoCloseIdleTimeoutMs &&
                            protocol_->IsAudioChannelOpened()) {
@@ -963,8 +1008,12 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
 }
 
 void Application::OnStateChanged(DeviceState old_state, DeviceState new_state) {
-    (void)new_state;
     last_state_transition_from_ = old_state;
+    // Any state transition out of Listening invalidates a pending endpoint
+    // timer (esp_timer_stop is safe to call when the timer is not running).
+    if (new_state != kDeviceStateListening && endpoint_timer_handle_ != nullptr) {
+        esp_timer_stop(endpoint_timer_handle_);
+    }
     xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
 }
 
@@ -998,6 +1047,10 @@ void Application::HandleStateChangedEvent() {
             auto_stop_listen_started_ms_ = esp_timer_get_time() / 1000;
             auto_stop_voice_started_ms_ = 0;
             auto_stop_silence_started_ms_ = 0;
+            // Cancel any leftover endpoint timer from a previous turn.
+            if (endpoint_timer_handle_ != nullptr) {
+                esp_timer_stop(endpoint_timer_handle_);
+            }
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
@@ -1058,6 +1111,39 @@ void Application::Schedule(std::function<void()>&& callback) {
         main_tasks_.push_back(std::move(callback));
     }
     xEventGroupSetBits(event_group_, MAIN_EVENT_SCHEDULE);
+}
+
+void Application::OnEndpointTimer() {
+    // Endpoint timer fired kAutoStopSilenceMs after the child went silent.
+    // We re-check the world from the main task because state may have changed
+    // in the meantime (user resumed speaking, server replied, channel closed).
+    if (GetDeviceState() != kDeviceStateListening ||
+        listening_mode_ != kListeningModeAutoStop || !protocol_) {
+        ESP_LOGI(TAG, "Endpoint timer: skip (state changed)");
+        return;
+    }
+    if (!auto_stop_voice_seen_ || auto_stop_silence_started_ms_ == 0) {
+        // Voice came back during the timer window — don't stop.
+        ESP_LOGI(TAG, "Endpoint timer: skip (voice resumed)");
+        return;
+    }
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    const int64_t silence_ms = now_ms - auto_stop_silence_started_ms_;
+    const int64_t speech_ms = auto_stop_silence_started_ms_ - auto_stop_voice_started_ms_;
+    const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
+    if (silence_ms < kAutoStopSilenceMs ||
+        speech_ms < kAutoStopMinSpeechMs ||
+        listening_ms < kAutoStopMinListenMs) {
+        ESP_LOGI(TAG, "Endpoint timer: skip (silence=%lld speech=%lld listen=%lld)",
+                 silence_ms, speech_ms, listening_ms);
+        return;
+    }
+    ESP_LOGI(TAG, "Auto-stop (one-shot): silence=%lldms speech=%lldms",
+             silence_ms, speech_ms);
+    auto_stop_voice_seen_ = false;
+    auto_stop_silence_started_ms_ = 0;
+    protocol_->SendStopListening();
+    SetDeviceState(kDeviceStateIdle);
 }
 
 void Application::AbortSpeaking(AbortReason reason) {
