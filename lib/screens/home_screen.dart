@@ -174,6 +174,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   @override
   void initState() {
     super.initState();
+    _syncMacToCloudService();
     _initTts(); // 初始化语音
     // 初始化呼吸动画控制器
     _breathingController = AnimationController(
@@ -204,6 +205,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     unawaited(_restoreBoundEsp32());
     unawaited(_restoreBoundXiaozhi());
     unawaited(_restoreStressThreshold());
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activeChildId != widget.activeChildId ||
+        oldWidget.authToken != widget.authToken ||
+        oldWidget.serverIp != widget.serverIp) {
+      _cloudService.serverHost = widget.serverIp;
+      _syncMacToCloudService();
+    }
   }
 
   Future<void> _restoreStressThreshold() async {
