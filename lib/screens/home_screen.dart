@@ -208,7 +208,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   @override
-  void didUpdateWidget(covariant HomeScreen oldWidget) {
+  void didUpdateWidget(covariant AdhdMonitorApp oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activeChildId != widget.activeChildId ||
         oldWidget.authToken != widget.authToken ||
