@@ -149,6 +149,8 @@ private:
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     bool auto_stop_voice_seen_ = false;
+    bool auto_stop_endpoint_timer_armed_ = false;
+    bool session_termination_requested_ = false;
     int64_t auto_stop_listen_started_ms_ = 0;
     int64_t auto_stop_voice_started_ms_ = 0;
     int64_t auto_stop_silence_started_ms_ = 0;
@@ -180,6 +182,8 @@ private:
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
     ListeningMode GetDefaultListeningMode() const;
+    bool IsSessionStopCommand(const std::string& text) const;
+    void TerminateCurrentSession(const char* reason, bool notify_server);
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
