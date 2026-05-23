@@ -3,6 +3,7 @@
 #include "RGB.h"
 #include "ST7789.h"
 #include "LVGL_Example.h"
+#include "sd_audio.h"
 
 #include "esp_log.h"
 #include "esp_http_client.h"
@@ -45,6 +46,7 @@ static void breathing_watchdog_cb(void *arg)
 {
     (void)arg;
     ESP_LOGW(TAG, "breathing watchdog fired (stop cmd never arrived) → all_off");
+    sd_audio_stop();
     RGB_All_Off();
     Lvgl_Mindfulness_Stop();
     Set_Backlight(0);
@@ -153,6 +155,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         Lvgl_Mindfulness_Stop();
         Set_Backlight(0);
         breathing_watchdog_cancel();
+        sd_audio_stop();
         ESP_LOGI(TAG, "→ breathing_stop");
         return;
     }
@@ -178,6 +181,7 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         Lvgl_Mindfulness_Stop();
         Set_Backlight(0);
         breathing_watchdog_cancel();
+        sd_audio_stop();
         ESP_LOGI(TAG, "→ all_off");
         return;
     }
@@ -188,9 +192,25 @@ static void dispatch_cmd(const char *action, const cJSON *params)
         Lvgl_Mindfulness_Stop();
         Set_Backlight(0);
         breathing_watchdog_cancel();
+        sd_audio_stop();
         ESP_LOGW(TAG, "→ reset_provisioning (clear creds & reboot to BLE prov)");
         vTaskDelay(pdMS_TO_TICKS(300));
         Wireless_ResetProvisioning();
+        return;
+    }
+    if (strcmp(action, "sdcard_audio_start") == 0) {
+        const cJSON *f = cJSON_GetObjectItemCaseSensitive(params, "folder");
+        if (cJSON_IsString(f) && f->valuestring != NULL) {
+            sd_audio_start(f->valuestring);
+            ESP_LOGI(TAG, "→ sdcard_audio_start folder=%s", f->valuestring);
+        } else {
+            ESP_LOGW(TAG, "sdcard_audio_start: missing folder");
+        }
+        return;
+    }
+    if (strcmp(action, "sdcard_audio_stop") == 0) {
+        sd_audio_stop();
+        ESP_LOGI(TAG, "→ sdcard_audio_stop");
         return;
     }
     ESP_LOGW(TAG, "unknown action: %s", action);

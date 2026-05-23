@@ -2035,6 +2035,8 @@ _ESP32_ALLOWED_ACTIONS = {
     "reset_provisioning",
     "xiaozhi_invoke_chat",
     "xiaozhi_abort",
+    "sdcard_audio_start",
+    "sdcard_audio_stop",
 }
 
 
@@ -2077,6 +2079,13 @@ def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
             return False, "context too long (max 8000)"
         payload["context"] = ctx
     if action == "xiaozhi_abort":
+        pass
+    if action == "sdcard_audio_start":
+        folder = (payload.get("folder") or "").strip()
+        if folder not in ("432Hz", "528Hz"):
+            return False, "folder must be 432Hz or 528Hz"
+        payload["folder"] = folder
+    if action == "sdcard_audio_stop":
         pass
     return True, ""
 

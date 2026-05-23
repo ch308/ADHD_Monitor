@@ -1,5 +1,6 @@
 idf_component_register(
                          SRCS "main.c"
+                              "SD_Audio/sd_audio.c"
                               "LCD_Driver/Vernon_ST7789T/Vernon_ST7789T.c"
                               "LCD_Driver/ST7789.c"
                               "LVGL_Driver/LVGL_Driver.c"
@@ -16,6 +17,7 @@ idf_component_register(
                               "QMI8658/QMI8658.c"
 
                          INCLUDE_DIRS
+                              "./SD_Audio"
                               "./LCD_Driver/Vernon_ST7789T"
                               "./LCD_Driver"
                               "./LVGL_Driver"
@@ -32,5 +34,5 @@ idf_component_register(
                               "."
                          REQUIRES esp_http_client esp_netif esp_wifi esp_event nvs_flash
                                   bt protocomm cjson esp_timer esp_lcd esp_driver_ledc
-                                 fatfs spi_flash esp_adc sdmmc driver
+                                 fatfs spi_flash esp_adc sdmmc driver esp_driver_i2s
                        )

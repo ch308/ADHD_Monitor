@@ -13,6 +13,9 @@
 #include "RGB.h"
 #include "Cloud.h"
 
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
 void Driver_Loop(void *parameter)
 {
     Wireless_Init();

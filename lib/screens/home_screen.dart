@@ -684,45 +684,52 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     super.dispose();
   }
 
-  Future<void> _playHealingTone(String folder) async {
-    // folder: 'assets/audio/432Hz' 或 'assets/audio/528Hz'
-    final tracks = folder.contains('432')
-        ? const [
-            'assets/audio/432Hz/danamusic-432hz-meditation.mp3',
-            'assets/audio/432Hz/danamusic-432hz-meditation-with-nature-sound.mp3',
-            'assets/audio/432Hz/denis-pavlov-music-432hz-healing-meditation-zen-stress-relief-music.mp3',
-            'assets/audio/432Hz/megisss-deep-healing-432hz.mp3',
-            'assets/audio/432Hz/wings_of_freedom-nature-sounds-slow-meditation-healing-frequency-432hz.mp3',
-          ]
-        : const [
-            'assets/audio/528Hz/danamusic-528hz-healing-meditation.mp3',
-            'assets/audio/528Hz/danamusic-528hz-healing-meditation-with-nature-sound.mp3',
-            'assets/audio/528Hz/frequencyoflove-528hz-dna-repair-and-love.mp3',
-            'assets/audio/528Hz/frequencyoflove-528hz-miracle-love-tone.mp3',
-            'assets/audio/528Hz/frequencyoflove-unconditional-love-resonance-528hz.mp3',
-          ];
-    try {
-      await _flutterTts.stop();
-      await _healingPlayer.stop();
-      final playlist = ConcatenatingAudioSource(
-        useLazyPreparation: true,
-        shuffleOrder: DefaultShuffleOrder(),
-        children: tracks.map((p) => AudioSource.asset(p)).toList(),
-      );
-      await _healingPlayer.setAudioSource(playlist, initialIndex: 0);
-      await _healingPlayer.setLoopMode(LoopMode.all);
-      await _healingPlayer.play();
-      _healingPlaybackActive = true;
-      if (mounted) {
-        setState(() => message = _resolveStatusMessage());
-      }
-    } catch (e) {
-      debugPrint('疗愈音频: $e');
+  /// 正念页：由毛绒球 SD 卡播放 432Hz 目录（不经手机扬声器）。
+  Future<void> _playMindfulnessSdcard432() async {
+    await _stopHealingTones();
+    final esp = _boundEsp32DeviceId;
+    if (esp == null || esp.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('音频播放失败：$e')),
+          const SnackBar(content: Text('请先绑定毛绒球后再播放 SD 卡疗愈音频')),
         );
       }
+      return;
+    }
+    final ok = await _cloudService.triggerEsp32SdcardAudioStart(esp, '432Hz');
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法通知毛绒球播放（请检查网络与绑定）')),
+      );
+    }
+  }
+
+  /// 正念页：由毛绒球 SD 卡播放 528Hz 目录。
+  Future<void> _playMindfulnessSdcard528() async {
+    await _stopHealingTones();
+    final esp = _boundEsp32DeviceId;
+    if (esp == null || esp.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先绑定毛绒球后再播放 SD 卡疗愈音频')),
+        );
+      }
+      return;
+    }
+    final ok = await _cloudService.triggerEsp32SdcardAudioStart(esp, '528Hz');
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('无法通知毛绒球播放（请检查网络与绑定）')),
+      );
+    }
+  }
+
+  /// 停止手机端疗愈音 + 通知毛绒球停止 SD 播放。
+  Future<void> _stopMindfulnessAudio() async {
+    await _stopHealingTones();
+    final esp = _boundEsp32DeviceId;
+    if (esp != null && esp.isNotEmpty) {
+      await _cloudService.triggerEsp32SdcardAudioStop(esp);
     }
   }
 
@@ -766,6 +773,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     vibrationTimer = null;
     _breathingPageVisible = true;
     unawaited(_flutterTts.stop());
+    unawaited(_stopHealingTones());
     if (mounted && isAlerting) {
       setState(() => message = _resolveStatusMessage());
     }
@@ -788,9 +796,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               BreathingBallPage(
             massageStrokeOn: _massageStrokeOn,
             onToggleMassageStroke: _toggleMassageStroke,
-            onPlay432: () => _playHealingTone('assets/audio/432Hz'),
-            onPlay528: () => _playHealingTone('assets/audio/528Hz'),
-            onStopAudio: _stopHealingTones,
+            onPlay432: _playMindfulnessSdcard432,
+            onPlay528: _playMindfulnessSdcard528,
+            onStopAudio: _stopMindfulnessAudio,
           ),
         ),
       );

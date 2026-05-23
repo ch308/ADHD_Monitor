@@ -265,6 +265,21 @@ class CloudService {
     return sendEsp32Command(deviceId, 'breathing_stop');
   }
 
+  /// 毛绒球 SD 卡 `/audio/432Hz` 或 `528Hz` 下 MP3 循环播放（不经过手机扬声器）。
+  /// [folder] 必须为 `432Hz` 或 `528Hz`。
+  Future<bool> triggerEsp32SdcardAudioStart(String deviceId, String folder) {
+    return sendEsp32Command(
+      deviceId,
+      'sdcard_audio_start',
+      extra: {'folder': folder},
+    );
+  }
+
+  /// 停止毛绒球 SD 卡音频播放。
+  Future<bool> triggerEsp32SdcardAudioStop(String deviceId) {
+    return sendEsp32Command(deviceId, 'sdcard_audio_stop');
+  }
+
   /// 让 ESP32 清掉 NVS 中的 WiFi 凭据并重启进入 BLE 配网模式。
   ///
   /// 板子收到命令后会：
