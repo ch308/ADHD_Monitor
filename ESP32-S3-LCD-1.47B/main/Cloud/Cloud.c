@@ -23,7 +23,7 @@
 #define CONFIG_ADHD_CLOUD_PORT 11760
 #endif
 #ifndef CONFIG_ADHD_CLOUD_POLL_WAIT_S
-#define CONFIG_ADHD_CLOUD_POLL_WAIT_S 25
+#define CONFIG_ADHD_CLOUD_POLL_WAIT_S 3
 #endif
 
 static const char *TAG = "Cloud";
@@ -282,7 +282,7 @@ static void poll_once(void)
     esp_http_client_cleanup(client);
 
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "poll err: %s (status=%d)", esp_err_to_name(err), status);
+        ESP_LOGW(TAG, "poll err: %s (status=%d url=%s)", esp_err_to_name(err), status, url);
         vTaskDelay(pdMS_TO_TICKS(2000));
         return;
     }
@@ -293,7 +293,7 @@ static void poll_once(void)
         ESP_LOGI(TAG, "cmd %u bytes", (unsigned)s_resp_len);
         parse_and_dispatch(s_resp_buf, s_resp_len);
     } else if (status == 204) {
-        /* 服务器 hold 超时无命令，立即下一轮 */
+        ESP_LOGD(TAG, "poll 204 no cmd");
     } else {
         ESP_LOGW(TAG, "unexpected status=%d body=%.*s",
                  status, (int)s_resp_len, s_resp_buf);
@@ -325,7 +325,14 @@ static void announce_once(void)
     }
     esp_http_client_set_header(client, "Content-Type", "application/json");
     esp_http_client_set_post_field(client, body, (int)strlen(body));
-    (void)esp_http_client_perform(client);
+    esp_err_t err = esp_http_client_perform(client);
+    int status = esp_http_client_get_status_code(client);
+    if (err == ESP_OK && status >= 200 && status < 300) {
+        ESP_LOGI(TAG, "announce OK status=%d body=%s", status, body);
+    } else {
+        ESP_LOGW(TAG, "announce failed err=%s status=%d url=%s body=%s",
+                 esp_err_to_name(err), status, url, body);
+    }
     esp_http_client_cleanup(client);
 }
 
@@ -342,7 +349,10 @@ static void cloud_task(void *arg)
              CONFIG_ADHD_CLOUD_HOST, CONFIG_ADHD_CLOUD_PORT,
              Wireless_GetDeviceId());
 
-    announce_once();
+    for (int i = 0; i < 3; i++) {
+        announce_once();
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
 
     while (1) {
         if (Wireless_State != WIRELESS_STATE_CONNECTED) {

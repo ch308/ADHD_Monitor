@@ -77,7 +77,7 @@ menu "Example Configuration"
 
         config ADHD_CLOUD_POLL_WAIT_S
             int "Long-poll hold time (s)"
-            default 25
+            default 3
             range 1 60
             help
                 ESP32 一次拉指令时让服务器最多 hold 多久（秒）。

@@ -1850,7 +1850,9 @@ def esp32_announce():
     device_id = _normalize_device_id(data.get("device_id") or "")
     if not _ESP32_DEVICE_ID_RE.match(device_id):
         return jsonify({"status": "error", "message": "invalid device_id"}), 400
-    _touch_esp32_device(device_id, data.get("kind"))
+    kind = data.get("kind")
+    _touch_esp32_device(device_id, kind)
+    app.logger.info("esp32 announce device_id=%s kind=%s", device_id, kind)
     with _esp32_cmd_lock:
         dropped = _esp32_cmd_queue.pop(device_id, None)
     if dropped:
