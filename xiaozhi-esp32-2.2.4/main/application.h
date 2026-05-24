@@ -151,6 +151,7 @@ private:
     bool auto_stop_voice_seen_ = false;
     bool auto_stop_endpoint_timer_armed_ = false;
     bool session_termination_requested_ = false;
+    bool sleep_power_save_mode_ = false;
     int64_t auto_stop_listen_started_ms_ = 0;
     int64_t auto_stop_voice_started_ms_ = 0;
     int64_t auto_stop_silence_started_ms_ = 0;
@@ -184,6 +185,7 @@ private:
     ListeningMode GetDefaultListeningMode() const;
     bool IsSessionStopCommand(const std::string& text) const;
     void TerminateCurrentSession(const char* reason, bool notify_server);
+    void EnterSleepPowerSaveMode(const char* reason, bool notify_server);
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

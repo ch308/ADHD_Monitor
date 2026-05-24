@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
@@ -19,6 +20,28 @@ import uuid
 from openai import OpenAI
 
 log = logging.getLogger(__name__)
+
+_timeout_executor = concurrent.futures.ThreadPoolExecutor(max_workers=6)
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float((os.getenv(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+def _run_with_timeout(label: str, fn, timeout_s: float, fallback):
+    fut = _timeout_executor.submit(fn)
+    try:
+        return fut.result(timeout=timeout_s)
+    except concurrent.futures.TimeoutError:
+        _bridge_warning("%s timeout after %.1fs; using fallback", label, timeout_s)
+        fut.cancel()
+        return fallback
+    except Exception as e:
+        _bridge_warning("%s failed: %s; using fallback", label, e)
+        return fallback
 
 
 def _bridge_warning(fmt: str, *args) -> None:
@@ -204,6 +227,7 @@ def _kimi_reply(system: str, user_text: str) -> str:
         ],
         temperature=0.6,
         max_tokens=512,
+        timeout=_float_env("XIAOZHI_KIMI_HTTP_TIMEOUT_S", 5.0),
     )
     extra = _moonshot_kimi_extra_body()
     if extra:
@@ -251,7 +275,7 @@ def _baidu_get_access_token() -> str:
                 "client_id": api_key,
                 "client_secret": secret_key,
             },
-            timeout=10,
+            timeout=_float_env("XIAOZHI_BAIDU_OAUTH_TIMEOUT_S", 5.0),
         )
     except Exception as e:
         _bridge_warning("baidu oauth failed: %s", e)
@@ -317,7 +341,7 @@ def _transcribe_pcm(pcm_bytes: bytes, sample_rate: int = 16000) -> str:
             },
             headers={"Content-Type": f"audio/pcm;rate={sample_rate}"},
             data=pcm_bytes,
-            timeout=30,
+            timeout=_float_env("XIAOZHI_ASR_HTTP_TIMEOUT_S", 5.0),
         )
     except Exception as e:
         _bridge_warning("baidu asr request failed: %s", e)
@@ -567,7 +591,17 @@ class XiaozhiConn:
             self.uplink_packets = []
             return
         pcm = _opus_to_pcm(self.uplink_packets, 16000)
-        user_text = _transcribe_pcm(pcm, 16000) if pcm else ""
+        asr_timeout = _float_env("XIAOZHI_ASR_TIMEOUT_S", 5.0)
+        user_text = (
+            _run_with_timeout(
+                "baidu asr",
+                lambda: _transcribe_pcm(pcm, 16000),
+                asr_timeout,
+                "",
+            )
+            if pcm
+            else ""
+        )
         if not user_text:
             # 占位文案容易误导：空识别还可能是「无上行 PCM / 麦克风静音 /
             # 百度 err_no≠0 / 网络」等。这里打一条摘要日志便于对照 app.error.log。
@@ -631,7 +665,12 @@ class XiaozhiConn:
                 )
             # 不再把 hint_opening 拼到回答前 —— 开场白只在第一次主动开场时讲过；
             # 后续每轮孩子说话时再重复一遍会显得机器人在"自言自语"。
-            reply = _kimi_reply(sys_prompt, user_text)
+            reply = _run_with_timeout(
+                "kimi reply",
+                lambda: _kimi_reply(sys_prompt, user_text),
+                _float_env("XIAOZHI_REPLY_TIMEOUT_S", 5.0),
+                "我好像打了个盹，刚才没完全听见。你可以再慢慢说一遍吗？",
+            )
 
         self.send_json(
             {"session_id": self.session_id, "type": "stt", "text": user_text}
@@ -656,7 +695,12 @@ class XiaozhiConn:
             seg = seg.strip()
             if not seg:
                 continue
-            seg_packets = _tts_to_opus_packets(seg, 24000)
+            seg_packets = _run_with_timeout(
+                "edge tts",
+                lambda seg=seg: _tts_to_opus_packets(seg, 24000),
+                _float_env("XIAOZHI_TTS_TIMEOUT_S", 5.0),
+                [],
+            )
             if not seg_packets:
                 continue
             if first_pkt_at is None:

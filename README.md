@@ -3,7 +3,7 @@
 面向 ADHD（注意缺陷多动障碍）与自闭症谱系家庭的"边缘+云"陪伴方案。
 小米手环采集心率与压力，Flutter App 在父母手机端实时展示并触发陪伴流程，
 ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道具，
-腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发；可选接入 **小智 xiaozhi-esp32** 自建语音与远程唤醒（Path A，见 §5.4.1）。
+腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发；可选接入 **星星机器人（xiaozhi-esp32）** 自建语音与远程唤醒（Path A，见 §5.4.1）。
 
 ---
 
@@ -102,7 +102,7 @@ ADHD_Monitor/
 │   ├── partitions.csv / sdkconfig    # 16 MB Flash, Octal PSRAM
 │   └── idf_component.yml             # 含 network_provisioning / led_strip / lvgl 等
 │
-├── xiaozhi-esp32-2.2.4/              # 小智 AI 固件（Path A：menuconfig 改 OTA + 可选 ADHD 长轮询）
+├── xiaozhi-esp32-2.2.4/              # 星星机器人固件（Path A：menuconfig 改 OTA + 可选 ADHD 长轮询）
 │   └── main/                         # 含 adhd_remote_cmd.cc（CONFIG_ADHD_MONITOR_REMOTE_CMD）
 │
 └── server/
@@ -608,7 +608,7 @@ sequenceDiagram
 - ESP32 端 `Cloud.c` 两种都能解析。
 - hold 上限 60 s，下限 0 s；ESP32 客户端默认 25 s。
 
-### 5.4.1 Path A：小智（xiaozhi-esp32）自建语音云（**无 OTA**）
+### 5.4.1 Path A：星星机器人（xiaozhi-esp32）自建语音云（**无 OTA**）
 
 本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus → 百度短语音 ASR → Kimi → edge-tts → 下行 Opus**（不再依赖 OpenAI）。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
 
@@ -636,6 +636,15 @@ sequenceDiagram
    - 「让星星机器人重新配网」下发 `reset_provisioning` 命令 → `adhd_prov_ble_reset_and_reboot()` 清掉 wifi NVS（包括 xiaozhi `SsidManager` 用的 `wifi` 命名空间）→ 重启重新进入 BLE 配网。
 
 烧录后无需任何 OTA URL 配置——设备每次启动都用 Kconfig 中的值覆盖 NVS `websocket` 命名空间，并直接走 WebSocket 协议。
+
+**对话行为与省电 / 容错**：
+
+- 主动开场身份：家长提交行为记录后，星星机器人第一次主动对孩子说话时会先说 **「我是星星守护者。」**，后续普通追问轮不会重复自我介绍。
+- 称呼规则：无论家长记录里写“他/她/孩子”，对孩子外放时都必须改写为 **「你」**，避免第三人称造成生硬感。
+- 回复容错：`server/xiaozhi_bridge.py` 对百度 ASR、Kimi、edge-tts 分别加超时兜底。若外部服务卡住，会回复“我刚才没有听清楚…”或“我好像打了个盹…”这类兜底句，不让设备长时间无声。
+- 休眠省电模式：固件收到明确停止类口令（如“停止”“结束对话”“别说了”“不聊了”“进入休眠省电模式”“睡觉吧”）会调用 `EnterSleepPowerSaveMode(...)`，关闭当前音频通道并切回 `PowerSaveLevel::LOW_POWER`，状态显示为“休眠省电中”。
+- 1 分钟无语音自动休眠：星星机器人进入聆听后，如果 60 秒内没有检测到有效说话，也会自动终止本轮对话并进入休眠省电模式。
+- 误判规避：普通语义里的“休息”（例如“怎么休息呢？拍皮球吗？”）不会再被当成停止对话；只有明确停止/休眠类口令才会触发休眠。
 
 ### 5.5 AI 单次建议 & 趋势对比
 
@@ -842,7 +851,13 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
    - `WEEKLY_REPORT_MODEL`（默认 `kimi-k2.5`）
    - `MOONSHOT_ENABLE_THINKING=1`（可选；设置后不再自动附带 `thinking: disabled`）
    - `MOONSHOT_EXTRA_BODY_JSON`（可选；合法 JSON 对象，与默认 `thinking` 合并）
-   - `XIAOZHI_CHAT_MODEL`（默认 `kimi-k2.5`；小智 WebSocket Kimi 回复）
+   - `XIAOZHI_CHAT_MODEL`（默认 `kimi-k2.5`；星星机器人 WebSocket Kimi 回复）
+   - `XIAOZHI_ASR_TIMEOUT_S`（默认 5；ASR 整体超时，超时后走“没听清”兜底）
+   - `XIAOZHI_ASR_HTTP_TIMEOUT_S`（默认 5；百度短语音 HTTP 请求超时）
+   - `XIAOZHI_BAIDU_OAUTH_TIMEOUT_S`（默认 5；百度 OAuth token 请求超时）
+   - `XIAOZHI_REPLY_TIMEOUT_S`（默认 5；Kimi 普通对话回复超时，超时后走“打盹了”兜底）
+   - `XIAOZHI_KIMI_HTTP_TIMEOUT_S`（默认 5；Kimi SDK HTTP 请求超时）
+   - `XIAOZHI_TTS_TIMEOUT_S`（默认 5；单段 edge-tts → opus 合成超时）
    - `WEEKLY_REPORT_SECRET`（可选；设置后 `/weekly_report/generate` 要带 `X-Weekly-Report-Secret`）
    - `DISABLE_WEEKLY_SCHEDULER=1` 可关周报守护线程
    - `CHILD_DISPLAY_NAME`（影响周报里的称呼）

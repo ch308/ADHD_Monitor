@@ -349,8 +349,8 @@ void Application::Run() {
                 } else if (!auto_stop_voice_seen_ &&
                            listening_ms >= kAutoCloseIdleTimeoutMs &&
                            protocol_->IsAudioChannelOpened()) {
-                    ESP_LOGI(TAG, "No answer timeout: %lldms in Listening", listening_ms);
-                    TerminateCurrentSession("no answer timeout", false);
+                    ESP_LOGI(TAG, "Sleep idle timeout: %lldms no voice in Listening", listening_ms);
+                    EnterSleepPowerSaveMode("idle 60s no voice", false);
                 }
             }
 
@@ -719,7 +719,7 @@ void Application::InitializeProtocol() {
                 Schedule([this, display, message, stop_session]() {
                     display->SetChatMessage("user", message.c_str());
                     if (stop_session) {
-                        TerminateCurrentSession("user stop command", true);
+                        EnterSleepPowerSaveMode("user stop command", true);
                     }
                 });
             }
@@ -1042,18 +1042,20 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
-            display->SetStatus(Lang::Strings::STANDBY);
+            display->SetStatus(sleep_power_save_mode_ ? "休眠省电中" : Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
+            sleep_power_save_mode_ = false;
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
             break;
         case kDeviceStateListening:
+            sleep_power_save_mode_ = false;
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
             session_termination_requested_ = false;
@@ -1130,11 +1132,35 @@ void Application::Schedule(std::function<void()>&& callback) {
 }
 
 bool Application::IsSessionStopCommand(const std::string& text) const {
-    static const char* kStopWords[] = {
-        "终止", "停止", "停下", "结束", "休息", "暂停", "别说", "不要说", "不聊了", "先这样"
+    // 只把明确的"结束对话/别说了"当作停止会话。不能用子串宽松匹配
+    // "休息" 这类词，否则"怎么休息呢？拍皮球吗？"会被误判成 stop command。
+    static const char* kExactStopCommands[] = {
+        "终止", "停止", "停下", "结束", "暂停", "别说", "不要说", "不聊了", "先这样",
+        "终止对话", "停止对话", "结束对话", "暂停对话", "别说了", "不要说了",
+        "先不聊了", "今天先这样", "就这样吧", "可以了", "不用说了",
+        "休眠", "进入休眠", "进入休眠模式", "进入省电模式", "进入休眠省电模式",
+        "休眠省电", "休眠省电模式", "睡觉吧"
     };
-    for (const auto* word : kStopWords) {
-        if (text.find(word) != std::string::npos) {
+    static const char* kStrongStopPhrases[] = {
+        "停止对话", "结束对话", "暂停对话", "终止对话", "别说了", "不要说了",
+        "不想聊了", "先不聊了", "今天先这样", "就这样吧", "不用说了",
+        "进入休眠", "进入省电模式", "进入休眠省电模式"
+    };
+    std::string normalized = text;
+    const char* puncts[] = {" ", "\t", "\r", "\n", "。", "，", "！", "？", "!", "?", ",", ".", "～", "~"};
+    for (const auto* p : puncts) {
+        size_t pos = 0;
+        while ((pos = normalized.find(p, pos)) != std::string::npos) {
+            normalized.erase(pos, strlen(p));
+        }
+    }
+    for (const auto* cmd : kExactStopCommands) {
+        if (normalized == cmd) {
+            return true;
+        }
+    }
+    for (const auto* phrase : kStrongStopPhrases) {
+        if (text.find(phrase) != std::string::npos) {
             return true;
         }
     }
@@ -1159,6 +1185,17 @@ void Application::TerminateCurrentSession(const char* reason, bool notify_server
         protocol_->CloseAudioChannel();
     }
     SetDeviceState(kDeviceStateIdle);
+}
+
+void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server) {
+    ESP_LOGI(TAG, "Enter sleep power-save mode: %s", reason ? reason : "");
+    sleep_power_save_mode_ = true;
+    auto& board = Board::GetInstance();
+    board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    auto display = board.GetDisplay();
+    display->SetStatus("休眠省电中");
+    display->SetChatMessage("system", "休眠省电中");
+    TerminateCurrentSession(reason, notify_server);
 }
 
 void Application::OnEndpointTimer() {
