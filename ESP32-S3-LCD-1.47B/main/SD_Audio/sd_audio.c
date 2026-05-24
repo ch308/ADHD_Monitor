@@ -9,6 +9,7 @@
 #include "driver/i2s_std.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
@@ -198,6 +199,7 @@ static bool decode_play_file(const char *path, int *out_hz)
         ESP_LOGW(TAG, "fopen failed: %s", path);
         return false;
     }
+    ESP_LOGI(TAG, "now playing: %s", path);
 
     static mp3dec_t dec;
     mp3dec_init(&dec);
@@ -274,6 +276,26 @@ static bool decode_play_file(const char *path, int *out_hz)
     return s_stop_request;
 }
 
+/* In-place Fisher-Yates shuffle over the path list so every playback session
+ * starts on a different track and the loop order keeps varying. */
+static void shuffle_paths(char (*paths)[SD_AUDIO_PATH_LEN], int n)
+{
+    if (n <= 1) {
+        return;
+    }
+    static char tmp[SD_AUDIO_PATH_LEN];
+    for (int i = n - 1; i > 0; i--) {
+        const uint32_t r = esp_random();
+        const int j = (int)(r % (uint32_t)(i + 1));
+        if (j == i) {
+            continue;
+        }
+        memcpy(tmp, paths[i], SD_AUDIO_PATH_LEN);
+        memcpy(paths[i], paths[j], SD_AUDIO_PATH_LEN);
+        memcpy(paths[j], tmp, SD_AUDIO_PATH_LEN);
+    }
+}
+
 static void scan_mp3_sorted(const char *dir_path, char paths[][SD_AUDIO_PATH_LEN], int *out_count)
 {
     *out_count = 0;
@@ -322,10 +344,11 @@ static void audio_task(void *arg)
         goto done;
     }
 
-    ESP_LOGI(TAG, "playing %d file(s) from %s (loop)", nfiles, dir_path);
+    ESP_LOGI(TAG, "playing %d file(s) from %s (shuffled loop)", nfiles, dir_path);
 
     int out_hz = 0;
     while (!s_stop_request) {
+        shuffle_paths(paths, nfiles);
         for (int i = 0; i < nfiles && !s_stop_request; i++) {
             if (decode_play_file(paths[i], &out_hz)) {
                 goto done;

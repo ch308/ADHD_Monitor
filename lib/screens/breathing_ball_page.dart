@@ -2,19 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-/// 报警时自动打开：全屏正念呼吸球，并可一键 432/528Hz 与轻抚式震动（自闭症 / 阿斯伯格感官支持）
+/// 报警时自动打开：全屏正念呼吸球，并可一键 432/528Hz 疗愈音乐（由毛绒球 SD 卡播放）。
 class BreathingBallPage extends StatefulWidget {
   const BreathingBallPage({
     super.key,
-    required this.massageStrokeOn,
-    required this.onToggleMassageStroke,
     required this.onPlay432,
     required this.onPlay528,
     required this.onStopAudio,
   });
 
-  final ValueNotifier<bool> massageStrokeOn;
-  final VoidCallback onToggleMassageStroke;
   final Future<void> Function() onPlay432;
   final Future<void> Function() onPlay528;
   final Future<void> Function() onStopAudio;
@@ -24,9 +20,19 @@ class BreathingBallPage extends StatefulWidget {
 }
 
 class _BreathingBallPageState extends State<BreathingBallPage>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late final AnimationController _cycle;
   late final Animation<double> _scaleAnim;
+
+  /// 吸/呼气与底部按钮之间的滚动说明（432 / 528 各一段 + 当前曲目说明）
+  String? _marqueeText;
+
+  static const String _k432Intro =
+      '432Hz：常被称为"自然谐和音率"。它的频率更低一些，所以听起来会觉得更柔和、温暖、放松，让人联想到大自然。';
+  static const String _k528Intro =
+      '528Hz：被称为"奇迹频率"或"爱的频率"。它被认为与修复和转化有关，能帮助缓解紧张，带来内心深处的平静与和谐感';
+  static const String _kTrackHint =
+      '【当前曲目】由毛绒球从 SD 卡对应目录随机选曲；具体文件名以设备串口日志「now playing:」为准。';
 
   @override
   void initState() {
@@ -44,6 +50,25 @@ class _BreathingBallPageState extends State<BreathingBallPage>
   void dispose() {
     _cycle.dispose();
     super.dispose();
+  }
+
+  Future<void> _onTap432() async {
+    setState(() {
+      _marqueeText = '$_k432Intro　　$_kTrackHint';
+    });
+    await widget.onPlay432();
+  }
+
+  Future<void> _onTap528() async {
+    setState(() {
+      _marqueeText = '$_k528Intro　　$_kTrackHint';
+    });
+    await widget.onPlay528();
+  }
+
+  Future<void> _onTapStop() async {
+    setState(() => _marqueeText = null);
+    await widget.onStopAudio();
   }
 
   @override
@@ -166,6 +191,12 @@ class _BreathingBallPageState extends State<BreathingBallPage>
                   );
                 },
               ),
+              const SizedBox(height: 12),
+              if (_marqueeText != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: _BreathingMarquee(text: _marqueeText!),
+                ),
               const Spacer(),
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -183,29 +214,19 @@ class _BreathingBallPageState extends State<BreathingBallPage>
                     _BreathingActionChip(
                       icon: Icons.graphic_eq,
                       label: '432Hz',
-                      onTap: () => unawaited(widget.onPlay432()),
+                      onTap: () => unawaited(_onTap432()),
                     ),
                     _BreathingActionChip(
                       icon: Icons.equalizer,
                       label: '528Hz',
-                      onTap: () => unawaited(widget.onPlay528()),
-                    ),
-                    ValueListenableBuilder<bool>(
-                      valueListenable: widget.massageStrokeOn,
-                      builder: (context, on, _) {
-                        return _BreathingActionChip(
-                          icon: on ? Icons.stop_circle_outlined : Icons.waves,
-                          label: on ? '停止轻抚' : '轻抚震动',
-                          active: on,
-                          onTap: widget.onToggleMassageStroke,
-                        );
-                      },
+                      onTap: () => unawaited(_onTap528()),
                     ),
                     _BreathingActionChip(
                       icon: Icons.music_off,
                       label: '停止音乐',
                       muted: true,
-                      onTap: () => unawaited(widget.onStopAudio()),
+                      prominent: true,
+                      onTap: () => unawaited(_onTapStop()),
                     ),
                   ],
                 ),
@@ -226,6 +247,7 @@ class _BreathingActionChip extends StatelessWidget {
     required this.onTap,
     this.active = false,
     this.muted = false,
+    this.prominent = false,
   });
 
   final IconData icon;
@@ -233,9 +255,15 @@ class _BreathingActionChip extends StatelessWidget {
   final VoidCallback onTap;
   final bool active;
   final bool muted;
+  /// 略大触控区与字号（用于「停止音乐」）
+  final bool prominent;
 
   @override
   Widget build(BuildContext context) {
+    final hPad = prominent ? 18.0 : 14.0;
+    final vPad = prominent ? 13.0 : 10.0;
+    final iconSize = prominent ? 19.0 : 16.0;
+    final fontSize = prominent ? 14.0 : 12.0;
     return Material(
       color: active
           ? Colors.white.withValues(alpha: 0.2)
@@ -245,25 +273,178 @@ class _BreathingActionChip extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding:
+              EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(icon,
-                  size: 16,
-                  color: muted ? Colors.white30 : Colors.white70),
-              const SizedBox(width: 6),
+                  size: iconSize,
+                  color: muted ? Colors.white38 : Colors.white70),
+              SizedBox(width: prominent ? 8 : 6),
               Text(
                 label,
                 style: TextStyle(
-                    color: muted ? Colors.white30 : Colors.white70,
-                    fontSize: 12,
+                    color: muted ? Colors.white38 : Colors.white70,
+                    fontSize: fontSize,
                     fontWeight: FontWeight.w500),
               ),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 单行横向循环滚动（吸/呼气与底部按钮之间）
+class _BreathingMarquee extends StatefulWidget {
+  const _BreathingMarquee({required this.text});
+
+  final String text;
+
+  @override
+  State<_BreathingMarquee> createState() => _BreathingMarqueeState();
+}
+
+class _BreathingMarqueeState extends State<_BreathingMarquee>
+    with SingleTickerProviderStateMixin {
+  static const TextStyle _style = TextStyle(
+    color: Colors.white70,
+    fontSize: 13,
+    height: 1.35,
+    letterSpacing: 0.2,
+  );
+
+  late final AnimationController _controller;
+  int? _layoutSyncToken;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(vsync: this);
+  }
+
+  @override
+  void didUpdateWidget(covariant _BreathingMarquee oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text) {
+      _controller.stop();
+      _controller.reset();
+      _layoutSyncToken = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  double _measureWidth(String text, double textScale) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: _style),
+      maxLines: 1,
+      textDirection: TextDirection.ltr,
+      textScaler: TextScaler.linear(textScale),
+    )..layout();
+    return tp.width;
+  }
+
+  void _scheduleSyncAnimation(double segW, double viewW) {
+    final token = Object.hash(segW.round(), viewW.round(), widget.text);
+    if (_layoutSyncToken == token) return;
+    _layoutSyncToken = token;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (segW <= viewW) {
+        _controller.stop();
+        return;
+      }
+      final dur = Duration(
+        milliseconds: (segW * 38).round().clamp(12000, 90000),
+      );
+      if (_controller.duration != dur) {
+        _controller.duration = dur;
+      }
+      if (!_controller.isAnimating) {
+        _controller.repeat();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = MediaQuery.textScalerOf(context).scale(1.0);
+    final full = '${widget.text}　　　　';
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewW = constraints.maxWidth;
+        final segW = _measureWidth(full, scale);
+        _scheduleSyncAnimation(segW, viewW);
+
+        if (segW <= viewW) {
+          return Container(
+            height: 40,
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.22),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              widget.text,
+              textAlign: TextAlign.center,
+              style: _style,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }
+
+        return Container(
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.22),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          clipBehavior: Clip.hardEdge,
+          child: AnimatedBuilder(
+            animation: _controller,
+            builder: (context, _) {
+              final t = _controller.value;
+              final dx = -t * segW;
+              return ShaderMask(
+                shaderCallback: (rect) {
+                  return const LinearGradient(
+                    begin: Alignment.centerLeft,
+                    end: Alignment.centerRight,
+                    colors: [
+                      Colors.transparent,
+                      Colors.white,
+                      Colors.white,
+                      Colors.transparent,
+                    ],
+                    stops: [0.0, 0.06, 0.94, 1.0],
+                  ).createShader(rect);
+                },
+                blendMode: BlendMode.dstIn,
+                child: Transform.translate(
+                  offset: Offset(dx, 0),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(full, style: _style, maxLines: 1),
+                      Text(full, style: _style, maxLines: 1),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

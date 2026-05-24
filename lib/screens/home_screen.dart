@@ -62,10 +62,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
   /// 疗愈纯音（资源为 ffmpeg 生成的正弦波，可替换为更长混音）
   final AudioPlayer _healingPlayer = AudioPlayer();
-  final ValueNotifier<bool> _massageStrokeOn = ValueNotifier(false);
-  Timer? _massageStrokeTimer;
 
-  /// 正念呼吸全屏是否在前台（与音乐、轻抚同属「陪伴调节」）
+  /// 正念呼吸全屏是否在前台（与音乐同属「陪伴调节」）
   bool _breathingPageVisible = false;
 
   /// 432/528Hz 疗愈音是否正在播放
@@ -660,7 +658,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   bool _inCompanionRegulationMode() {
     if (_breathingPageVisible) return true;
     if (_healingPlaybackActive) return true;
-    if (_massageStrokeOn.value) return true;
     return false;
   }
 
@@ -683,8 +680,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     _breathingController.dispose();
     _recordController.dispose();
     vibrationTimer?.cancel();
-    _massageStrokeTimer?.cancel();
-    _massageStrokeOn.dispose();
     unawaited(_healingPlayer.dispose());
     _flutterTts.stop(); // 停止语音播报
     _btAdapterSub?.cancel();
@@ -755,29 +750,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
   }
 
-  void _toggleMassageStroke() {
-    if (_massageStrokeOn.value) {
-      _massageStrokeTimer?.cancel();
-      _massageStrokeTimer = null;
-      _massageStrokeOn.value = false;
-      if (mounted && isAlerting) {
-        setState(() => message = _resolveStatusMessage());
-      }
-      return;
-    }
-    _massageStrokeOn.value = true;
-    _massageStrokeTimer?.cancel();
-    _massageStrokeTimer =
-        Timer.periodic(const Duration(milliseconds: 880), (_) {
-      if (!_massageStrokeOn.value) return;
-      // 轻抚感：短促、错落，与报警用长震区分
-      Vibration.vibrate(pattern: [0, 32, 100, 26, 130, 20, 150, 0]);
-    });
-    if (mounted && isAlerting) {
-      setState(() => message = _resolveStatusMessage());
-    }
-  }
-
   Future<void> _presentBreathingBallPage() async {
     if (!mounted) return;
     final hadAlarmTimer = vibrationTimer != null;
@@ -818,8 +790,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           opaque: true,
           pageBuilder: (ctx, _, __) =>
               BreathingBallPage(
-            massageStrokeOn: _massageStrokeOn,
-            onToggleMassageStroke: _toggleMassageStroke,
             onPlay432: _playMindfulnessSdcard432,
             onPlay528: _playMindfulnessSdcard528,
             onStopAudio: _stopMindfulnessAudio,
@@ -828,7 +798,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
     } finally {
       _breathingPageVisible = false;
-      // 用户从呼吸页返回/取消：通知毛绒球呼吸灯停止 + 停止音乐
+      // 用户主动关闭正念呼吸页 = 想结束此次陪伴调节：停呼吸灯 + 停音乐。
+      // （只有 ESP32 端的 10 分钟 watchdog 不会自动停音乐，那是防丢命令的兜底。）
       if (esp != null && esp.isNotEmpty) {
         debugPrint('BreathingBall: exit, sending breathing_stop + sdcard_audio_stop to $esp');
         unawaited(_cloudService.triggerEsp32BreathingStop(esp));
