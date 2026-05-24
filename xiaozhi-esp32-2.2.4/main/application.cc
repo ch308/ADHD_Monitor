@@ -33,8 +33,8 @@ static constexpr int64_t kAutoStopAllowShortSpeechAfterMs = 7000;
 // Listening 总时长不到这么久不允许 endpoint。
 static constexpr int64_t kAutoStopMinListenMs = 800;
 // 孩子停顿多久算讲完一句 → 触发 listen stop / ASR / 回复。
-// 1s 更贴近儿童短句互动；VAD 偶发抖动由 one-shot endpoint 兜住。
-static constexpr int64_t kAutoStopSilenceMs = 1000;
+// 800ms 更贴近儿童短句互动；VAD 偶发抖动由 one-shot endpoint 兜住。
+static constexpr int64_t kAutoStopSilenceMs = 800;
 // 兜底：如果 VAD 已经看到过说话但一直没稳定 endpoint，到这个时长强制提交。
 static constexpr int64_t kAutoStopMaxUtteranceMs = 12000;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
