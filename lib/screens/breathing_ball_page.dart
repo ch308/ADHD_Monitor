@@ -193,11 +193,14 @@ class _BreathingBallPageState extends State<BreathingBallPage>
               ),
               const SizedBox(height: 12),
               if (_marqueeText != null)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: _BreathingMarquee(text: _marqueeText!),
-                ),
-              const Spacer(),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: _BreathingMarquee(text: _marqueeText!),
+                  ),
+                )
+              else
+                const Spacer(),
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16),
                 padding:
@@ -264,40 +267,38 @@ class _BreathingActionChip extends StatelessWidget {
     final vPad = prominent ? 13.0 : 10.0;
     final iconSize = prominent ? 19.0 : 16.0;
     final fontSize = prominent ? 14.0 : 12.0;
-    return Material(
-      color: active
-          ? Colors.white.withValues(alpha: 0.2)
-          : Colors.white.withValues(alpha: 0.05),
-      borderRadius: BorderRadius.circular(16),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding:
-              EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon,
-                  size: iconSize,
-                  color: muted ? Colors.white38 : Colors.white70),
-              SizedBox(width: prominent ? 8 : 6),
-              Text(
-                label,
-                style: TextStyle(
-                    color: muted ? Colors.white38 : Colors.white70,
-                    fontSize: fontSize,
-                    fontWeight: FontWeight.w500),
-              ),
-            ],
-          ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: active
+              ? Colors.white.withValues(alpha: 0.2)
+              : Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        padding: EdgeInsets.symmetric(horizontal: hPad, vertical: vPad),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: iconSize,
+                color: muted ? Colors.white38 : Colors.white70),
+            SizedBox(width: prominent ? 8 : 6),
+            Text(
+              label,
+              style: TextStyle(
+                  color: muted ? Colors.white38 : Colors.white70,
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.w500),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// 单行横向循环滚动（吸/呼气与底部按钮之间）
+/// 多行纵向循环滚动（吸/呼气与底部按钮之间）
 class _BreathingMarquee extends StatefulWidget {
   const _BreathingMarquee({required this.text});
 
@@ -341,28 +342,28 @@ class _BreathingMarqueeState extends State<_BreathingMarquee>
     super.dispose();
   }
 
-  double _measureWidth(String text, double textScale) {
+  double _measureHeight(String text, double maxWidth, double textScale) {
     final tp = TextPainter(
       text: TextSpan(text: text, style: _style),
-      maxLines: 1,
+      maxLines: null,
       textDirection: TextDirection.ltr,
       textScaler: TextScaler.linear(textScale),
-    )..layout();
-    return tp.width;
+    )..layout(maxWidth: maxWidth);
+    return tp.height;
   }
 
-  void _scheduleSyncAnimation(double segW, double viewW) {
-    final token = Object.hash(segW.round(), viewW.round(), widget.text);
+  void _scheduleSyncAnimation(double segH, double viewH) {
+    final token = Object.hash(segH.round(), viewH.round(), widget.text);
     if (_layoutSyncToken == token) return;
     _layoutSyncToken = token;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (segW <= viewW) {
+      if (segH <= viewH) {
         _controller.stop();
         return;
       }
       final dur = Duration(
-        milliseconds: (segW * 38).round().clamp(12000, 90000),
+        milliseconds: (segH * 38).round().clamp(12000, 90000),
       );
       if (_controller.duration != dur) {
         _controller.duration = dur;
@@ -376,19 +377,20 @@ class _BreathingMarqueeState extends State<_BreathingMarquee>
   @override
   Widget build(BuildContext context) {
     final scale = MediaQuery.textScalerOf(context).scale(1.0);
-    final full = '${widget.text}　　　　';
+    final full = '${widget.text}\n\n　　';
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final viewW = constraints.maxWidth;
-        final segW = _measureWidth(full, scale);
-        _scheduleSyncAnimation(segW, viewW);
+        final viewW = constraints.maxWidth - 24;
+        final viewH = constraints.maxHeight;
+        final segH = _measureHeight(full, viewW, scale);
+        _scheduleSyncAnimation(segH, viewH);
 
-        if (segW <= viewW) {
+        if (segH <= viewH) {
           return Container(
-            height: 40,
+            width: double.infinity,
             alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.22),
               borderRadius: BorderRadius.circular(12),
@@ -397,14 +399,12 @@ class _BreathingMarqueeState extends State<_BreathingMarquee>
               widget.text,
               textAlign: TextAlign.center,
               style: _style,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
             ),
           );
         }
 
         return Container(
-          height: 40,
+          width: double.infinity,
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.22),
             borderRadius: BorderRadius.circular(12),
@@ -414,12 +414,12 @@ class _BreathingMarqueeState extends State<_BreathingMarquee>
             animation: _controller,
             builder: (context, _) {
               final t = _controller.value;
-              final dx = -t * segW;
+              final dy = -t * segH;
               return ShaderMask(
                 shaderCallback: (rect) {
                   return const LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
                     colors: [
                       Colors.transparent,
                       Colors.white,
@@ -431,13 +431,17 @@ class _BreathingMarqueeState extends State<_BreathingMarquee>
                 },
                 blendMode: BlendMode.dstIn,
                 child: Transform.translate(
-                  offset: Offset(dx, 0),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(full, style: _style, maxLines: 1),
-                      Text(full, style: _style, maxLines: 1),
-                    ],
+                  offset: Offset(0, dy),
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(full, style: _style),
+                        Text(full, style: _style),
+                      ],
+                    ),
                   ),
                 ),
               );
