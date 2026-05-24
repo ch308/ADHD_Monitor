@@ -7,8 +7,10 @@
 #include <strings.h>
 
 #include "driver/i2s_std.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "hal/gpio_types.h"
@@ -28,7 +30,16 @@ static const char *TAG = "sd_audio";
 #define SD_AUDIO_PATH_LEN   160
 #define READ_CHUNK          4096
 #define MP3_BUF_SIZE        (READ_CHUNK + 2048)
-#define SD_AUDIO_TASK_STACK 49152
+/* minimp3's mp3dec_decode_frame() puts a ~13KB mp3dec_scratch_t (grbuf + syn
+ * + gr_info) on the stack. With a 12KB task stack the scratch overflows into
+ * neighbouring heap and silently corrupts heap metadata, which later panics
+ * the next heap_caps_calloc() (LoadProhibited, EXCVADDR=garbage).
+ *
+ * Internal RAM is too fragmented on this board (largest_free_block ≈ 31KB)
+ * to host a 24KB stack reliably, so we place the task stack in PSRAM via
+ * xTaskCreatePinnedToCoreWithCaps(MALLOC_CAP_SPIRAM). The PSRAM stack is
+ * a bit slower than DRAM but more than enough for MP3 decode at 240MHz. */
+#define SD_AUDIO_TASK_STACK 24576
 
 static TaskHandle_t s_audio_task;
 static volatile bool s_stop_request;
@@ -329,8 +340,9 @@ done:
         (void)i2s_channel_disable(s_tx_chan);
         s_tx_enabled = false;
     }
+    TaskHandle_t self = s_audio_task;
     s_audio_task = NULL;
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(self);
 }
 
 void sd_audio_stop(void)
@@ -363,16 +375,24 @@ void sd_audio_start(const char *folder)
     strncpy(s_folder_copy, folder, sizeof(s_folder_copy) - 1);
     s_folder_copy[sizeof(s_folder_copy) - 1] = '\0';
 
-    BaseType_t ok = xTaskCreatePinnedToCore(
+    BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
         audio_task,
         "sd_audio",
         SD_AUDIO_TASK_STACK,
         NULL,
         5,
         &s_audio_task,
-        1);
+        1,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     if (ok != pdPASS) {
-        ESP_LOGE(TAG, "xTaskCreatePinnedToCore failed");
+        ESP_LOGE(TAG,
+                 "xTaskCreatePinnedToCoreWithCaps failed stack=%u "
+                 "spiram_free=%u spiram_largest=%u internal_free=%u internal_largest=%u",
+                 (unsigned)SD_AUDIO_TASK_STACK,
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),
+                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
         s_audio_task = NULL;
     }
 

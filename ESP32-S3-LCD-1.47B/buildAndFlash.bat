@@ -111,7 +111,18 @@ if not exist "%CD%\sdkconfig" (
 
 echo [buildAndFlash.bat] Running: idf.py %* build flash
 idf.py %* build flash
-if errorlevel 1 goto :fail
+if errorlevel 1 (
+  echo.
+  echo [buildAndFlash.bat] Initial build failed. Cleaning generated CMake files and retrying once...
+  echo [buildAndFlash.bat] This fixes stale bootloader cache after changing ESP-IDF paths.
+  echo.
+  idf.py fullclean
+  if errorlevel 1 goto :fail
+  echo.
+  echo [buildAndFlash.bat] Running: idf.py %* build flash
+  idf.py %* build flash
+  if errorlevel 1 goto :fail
+)
 
 echo.
 echo [buildAndFlash.bat] SUCCESS: build and flash completed.
