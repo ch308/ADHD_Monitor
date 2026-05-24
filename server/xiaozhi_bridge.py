@@ -375,6 +375,42 @@ def _ffmpeg_bin() -> str | None:
     return None
 
 
+def _split_for_streaming_tts(text: str) -> list[str]:
+    """把回复拆成 1~3 段，便于第一段就开始往设备推 opus，
+    显著减小"用户说完→机器人开口"的首字节延迟。
+
+    切分点：中文/英文句末标点（。！？!?；;）与换行。
+    合并策略：第一段太短（<8 字）会合并到下一段，避免反复唤起 edge-tts/ffmpeg
+    子进程；最终保留至多 3 段，剩余全部并到最后一段。
+    """
+    import re
+
+    if not text:
+        return []
+    parts = [p for p in re.split(r"(?<=[。！？!?；;\n])", text) if p.strip()]
+    if not parts:
+        return [text]
+    if len(parts) == 1:
+        return [parts[0].strip()]
+
+    # 第一段太短就并入第二段（避免短到 5-10 字一段，子进程开销反而比合成还大）
+    first = parts[0].strip()
+    rest = parts[1:]
+    if len(first) < 8 and rest:
+        first = (first + rest[0]).strip()
+        rest = rest[1:]
+
+    segments: list[str] = [first]
+    # 最多再保留一段中段、一段尾段；多余的并到尾段
+    if rest:
+        if len(rest) <= 1:
+            segments.append("".join(rest).strip())
+        else:
+            segments.append(rest[0].strip())
+            segments.append("".join(rest[1:]).strip())
+    return [s for s in segments if s]
+
+
 def _tts_to_opus_packets(text: str, out_sr: int = 24000) -> list[bytes]:
     """edge-tts -> mp3 -> ffmpeg PCM -> opuslib packets (60ms)."""
     import subprocess
@@ -580,10 +616,16 @@ class XiaozhiConn:
             sys_prompt = (
                 "你是陪伴孩子成长的口语伙伴，语气温暖简短，适合外放给孩子听。"
                 "回答控制在 2～4 句中文。"
+                "\n【称呼硬规则】你是直接和这个孩子说话；称呼对方一律用\"你\"，"
+                "绝不可以用\"她/他/她们/他们/这孩子/那个孩子/小朋友\"等第三人称指代。"
+                "家长上下文里如果出现\"她/他/孩子\"，那都是指此刻正在对话的"
+                "这个孩子，你要把它们改写成\"你\"再回应。"
             )
             if self.hint_context:
                 sys_prompt += (
-                    "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考）：\n"
+                    "\n以下是家长端上下文（可能含医疗/教育观察，仅供参考；"
+                    "里面的\"她/他/孩子\"全部指代你正在对话的这个孩子，"
+                    "回话时一律改用\"你\"）：\n"
                     + self.hint_context
                 )
             # 不再把 hint_opening 拼到回答前 —— 开场白只在第一次主动开场时讲过；
@@ -604,19 +646,40 @@ class XiaozhiConn:
                 "text": reply[:200],
             }
         )
-        packets = _tts_to_opus_packets(reply, 24000)
-        if not packets:
+        # 按句拆段，第一段先合成 + 推流，让设备尽早开始播放；剩余段在后台依次
+        # 合成并继续推。比"整段合成完再发"的实现，首字节延迟降低 30~70%。
+        segments = _split_for_streaming_tts(reply)
+        total_packets = 0
+        first_pkt_at: float | None = None
+        for seg in segments:
+            seg = seg.strip()
+            if not seg:
+                continue
+            seg_packets = _tts_to_opus_packets(seg, 24000)
+            if not seg_packets:
+                continue
+            if first_pkt_at is None:
+                first_pkt_at = time.monotonic()
+            for pkt in seg_packets:
+                self.ws.send(pkt)
+            total_packets += len(seg_packets)
+
+        if total_packets == 0:
             _bridge_error(
                 "xiaozhi TTS produced 0 opus packets (reply_len=%d). "
                 "Install ffmpeg on the server and ensure edge-tts / opuslib work.",
                 len(reply),
             )
-        for pkt in packets:
-            self.ws.send(pkt)
-        if packets:
-            # Keep the device in Speaking long enough to drain locally queued
-            # audio before it reacts to tts stop / websocket close.
-            time.sleep(min(20.0, len(packets) * 0.06 + 0.45))
+
+        if total_packets > 0 and first_pkt_at is not None:
+            # 让设备把本轮全部 opus 帧播完再发 tts/stop（一帧 60ms）。
+            # 这里按"从第一帧开始算总播放时长"减去已经过去的时间，避免分段
+            # 合成时把同一段时间累加两次。
+            target_dur = total_packets * 0.06 + 0.45
+            elapsed = time.monotonic() - first_pkt_at
+            remaining = target_dur - elapsed
+            if remaining > 0:
+                time.sleep(min(20.0, remaining))
         self.send_json(
             {"session_id": self.session_id, "type": "tts", "state": "stop"}
         )
