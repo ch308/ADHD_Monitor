@@ -19,6 +19,8 @@ dependencies:
   just_audio: ^0.9.40
   shared_preferences: ^2.3.3
   flutter_foreground_task: ^7.5.2
+  speech_to_text: ^7.0.0
+  share_plus: ^10.1.4
 
 flutter:
   uses-material-design: true

@@ -7,6 +7,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:vibration/vibration.dart';
 
 import '../models/band_stress_data.dart';
@@ -22,6 +23,7 @@ import 'breathing_ball_page.dart';
 import 'esp_provision_page.dart';
 import 'footprint_page.dart';
 import 'weekly_report_page.dart';
+import 'xiaohongshu_draft_page.dart';
 
 class AdhdMonitorApp extends StatefulWidget {
   const AdhdMonitorApp({
@@ -75,11 +77,20 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   /// Kimi 建议内容（不为 null 时在主屏显示建议卡片，无需第二个 Dialog）
   String? _kimiAdvice;
   String? _kimiAdviceLabel;
+  int? _lastRecordLogId;
+  String? _lastRecordObservation;
+  String? _lastRecordConditionType;
+  double? _lastRecordBpm;
   // ── 内联记录表单（彻底取代 Dialog，消除 _dependents.isEmpty 断言）──
   final TextEditingController _recordController = TextEditingController();
   String? _selectedConditionType; // null=显示选择按钮 'adhd'/'autism'=显示表单
   String? _selectedConditionLabel;
   bool _recordSubmitting = false;
+  final stt.SpeechToText _speechToText = stt.SpeechToText();
+  bool _speechReady = false;
+  bool _speechInitializing = false;
+  bool _speechListening = false;
+  String _speechBaseText = '';
 
   static const double _alertBpm = 120;
 
@@ -675,6 +686,64 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     unawaited(_speak('孩子可能处于焦虑状态，请及时关注'));
   }
 
+  Future<void> _toggleRecordSpeech() async {
+    if (_speechListening) {
+      await _speechToText.stop();
+      if (mounted) setState(() => _speechListening = false);
+      return;
+    }
+
+    if (_speechInitializing) return;
+    _speechInitializing = true;
+    try {
+      if (!_speechReady) {
+        _speechReady = await _speechToText.initialize(
+          onStatus: (status) {
+            if (!mounted) return;
+            final listening = status == 'listening';
+            if (_speechListening != listening) {
+              setState(() => _speechListening = listening);
+            }
+          },
+          onError: (error) {
+            if (!mounted) return;
+            setState(() => _speechListening = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('语音识别失败：${error.errorMsg}')),
+            );
+          },
+        );
+      }
+      if (!_speechReady) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前设备暂不支持语音输入')),
+        );
+        return;
+      }
+
+      _speechBaseText = _recordController.text.trim();
+      await _speechToText.listen(
+        localeId: 'zh_CN',
+        listenFor: const Duration(seconds: 60),
+        pauseFor: const Duration(seconds: 4),
+        partialResults: true,
+        onResult: (result) {
+          if (!mounted) return;
+          final words = result.recognizedWords.trim();
+          final prefix = _speechBaseText.isEmpty ? '' : '$_speechBaseText ';
+          _recordController.text = '$prefix$words'.trim();
+          _recordController.selection = TextSelection.collapsed(
+            offset: _recordController.text.length,
+          );
+        },
+      );
+      if (mounted) setState(() => _speechListening = true);
+    } finally {
+      _speechInitializing = false;
+    }
+  }
+
   @override
   void dispose() {
     _breathingController.dispose();
@@ -682,6 +751,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     vibrationTimer?.cancel();
     unawaited(_healingPlayer.dispose());
     _flutterTts.stop(); // 停止语音播报
+    unawaited(_speechToText.stop());
     _btAdapterSub?.cancel();
     _bandHrSub?.cancel();
     _bandStressSub?.cancel();
@@ -1287,6 +1357,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 decoration: InputDecoration(
                   hintText: '孩子现在在做什么？（如：写作业、大叫、来回踱步）',
                   hintStyle: TextStyle(color: Colors.grey.shade400),
+                  suffixIcon: IconButton(
+                    tooltip: _speechListening ? '停止语音输入' : '语音输入',
+                    onPressed:
+                        _recordSubmitting ? null : _toggleRecordSpeech,
+                    icon: Icon(
+                      _speechListening ? Icons.mic : Icons.mic_none,
+                      color: _speechListening
+                          ? Colors.red.shade400
+                          : Colors.grey.shade500,
+                    ),
+                  ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(color: Colors.grey.shade300),
@@ -1312,17 +1393,30 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 autofocus: true,
                 textInputAction: TextInputAction.done,
               ),
+              if (_speechListening) ...[
+                const SizedBox(height: 6),
+                Text(
+                  '正在听写，点击麦克风可停止',
+                  style: TextStyle(fontSize: 12, color: Colors.red.shade400),
+                ),
+              ],
               const SizedBox(height: 12),
               Row(
                 children: [
                   TextButton(
                     onPressed: _recordSubmitting
                         ? null
-                        : () => setState(() {
+                        : () {
+                            if (_speechListening) {
+                              unawaited(_speechToText.stop());
+                            }
+                            setState(() {
                               _selectedConditionType = null;
                               _selectedConditionLabel = null;
+                              _speechListening = false;
                               _recordController.clear();
-                            }),
+                            });
+                          },
                     child: const Text('返回'),
                   ),
                   const SizedBox(width: 8),
@@ -1362,6 +1456,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   Future<void> _submitRecord() async {
+    if (_speechListening) {
+      await _speechToText.stop();
+      if (mounted) setState(() => _speechListening = false);
+    }
     final text = _recordController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1369,15 +1467,18 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
       return;
     }
+    final submittedConditionType = _selectedConditionType ?? 'adhd';
+    final submittedConditionLabel = _selectedConditionLabel ?? '多动症';
+    final submittedBpm = bpm;
     setState(() => _recordSubmitting = true);
     try {
       final response = await http.post(
         Uri.parse('http://${widget.serverIp}:11760/submit_log'),
         headers: _apiHeaders(),
         body: json.encode({
-          'bpm': bpm,
+          'bpm': submittedBpm,
           'observation': text,
-          'condition_type': _selectedConditionType,
+          'condition_type': submittedConditionType,
         }),
       );
       if (!mounted) return;
@@ -1392,9 +1493,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       final advice = data is Map && data['advice'] != null
           ? data['advice'].toString()
           : '暂无建议';
+      final logId = data is Map ? int.tryParse('${data['log_id']}') : null;
       setState(() {
         _kimiAdvice = advice;
-        _kimiAdviceLabel = _selectedConditionLabel;
+        _kimiAdviceLabel = submittedConditionLabel;
+        _lastRecordLogId = logId;
+        _lastRecordObservation = text;
+        _lastRecordConditionType = submittedConditionType;
+        _lastRecordBpm = submittedBpm;
         _selectedConditionType = null;
         _selectedConditionLabel = null;
         isDismissed = false;
@@ -1407,6 +1513,35 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           .showSnackBar(SnackBar(content: Text('网络错误：$e')));
       setState(() => _recordSubmitting = false);
     }
+  }
+
+  void _openXiaohongshuDraft() {
+    final advice = _kimiAdvice;
+    final observation = _lastRecordObservation;
+    final conditionType = _lastRecordConditionType;
+    final recordBpm = _lastRecordBpm;
+    if (advice == null ||
+        observation == null ||
+        conditionType == null ||
+        recordBpm == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('缺少本次记录内容，请先提交一条家长记录')),
+      );
+      return;
+    }
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => XiaohongshuDraftPage(
+          serverIp: widget.serverIp,
+          headers: _apiHeaders(),
+          logId: _lastRecordLogId,
+          observation: observation,
+          advice: advice,
+          conditionType: conditionType,
+          bpm: recordBpm,
+        ),
+      ),
+    );
   }
 
   Widget _buildAdviceCard() {
@@ -1461,6 +1596,22 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       style:
                           const TextStyle(fontSize: 14, height: 1.65)),
                   const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.rate_review_outlined, size: 18),
+                      label: const Text('生成小红书树洞草稿'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFFE91E63),
+                        side: const BorderSide(color: Color(0xFFE91E63)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: _openXiaohongshuDraft,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
@@ -1713,7 +1864,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           ),
           IconButton(
             icon: const Icon(Icons.auto_stories_outlined, color: Colors.white),
-            tooltip: 'AI 周报',
+            tooltip: 'AI 报告',
             onPressed: () {
               Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(

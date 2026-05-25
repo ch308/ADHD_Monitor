@@ -203,6 +203,30 @@ def init_db():
 
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS period_reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            child_id INTEGER NOT NULL DEFAULT 1,
+            period_type TEXT NOT NULL,
+            period_start TEXT NOT NULL,
+            period_end TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            digest_json TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(child_id, period_type, period_start)
+        )
+        """
+    )
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO period_reports
+        (child_id, period_type, period_start, period_end, summary, digest_json, created_at)
+        SELECT child_id, 'week', week_start, week_end, summary, digest_json, created_at
+        FROM weekly_reports
+        """
+    )
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT NOT NULL UNIQUE,
@@ -575,6 +599,88 @@ def fetch_kimi_advice(bpm, observation, condition_type):
         return "建议家长先帮孩子把任务拆小、降低干扰，温和引导深呼吸或短暂休息，再一起继续。"
 
 
+def _extract_json_object(text):
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+    try:
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", text, flags=re.S)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def fetch_xiaohongshu_draft(observation, advice, condition_type, bpm=None):
+    """把一条家长记录改写成可编辑的小红书树洞草稿，默认不直接发布。"""
+    label = "自闭症谱系" if condition_type == "autism" else "ADHD"
+    bpm_desc = "当时心率偏高" if bpm not in (None, "", 0, 0.0) else "当时孩子状态有些紧绷"
+    system = (
+        "你是帮助特殊儿童家长写小红书树洞帖的中文编辑。"
+        "目标是保护隐私、降低诊断化表达、保留真实处境和共鸣感，方便类似情况的家长交流。"
+        "不得编造学校、城市、姓名、医院、班级、具体年龄、精确时间地点等隐私信息。"
+    )
+    prompt = (
+        "请把下面这条家长现场记录改写成一篇可编辑的小红书草稿。\n"
+        f"孩子主要支持方向：{label}\n"
+        f"状态背景：{bpm_desc}\n"
+        f"家长原始观察：{observation}\n"
+        f"当时给家长的建议摘要：{advice or '无'}\n\n"
+        "要求：\n"
+        "1. 必须隐去或泛化个人隐私，不出现姓名、学校、住址、医院、设备、精确心率、具体日期。\n"
+        "2. 语气像真实家长树洞/轻吐槽/求交流，不要像医学报告，不要诊断孩子。\n"
+        "3. 可以增加少量生活化描写，但不能编造新的敏感事实。\n"
+        "4. 结尾邀请有类似经历的家长交流。\n"
+        "5. 返回严格 JSON：{\"title\":\"...\",\"content\":\"...\",\"tags\":[\"...\",\"...\"]}。"
+    )
+    try:
+        response = _kimi_chat_create(
+            model=_moonshot_chat_model(),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.72,
+            max_tokens=900,
+        )
+        raw = response.choices[0].message.content
+        parsed = _extract_json_object(raw)
+        if parsed:
+            title = str(parsed.get("title") or "").strip()
+            content = str(parsed.get("content") or "").strip()
+            tags_raw = parsed.get("tags") or []
+            tags = [str(t).strip().lstrip("#") for t in tags_raw if str(t).strip()]
+            if title and content:
+                return {
+                    "title": title[:80],
+                    "content": content[:1200],
+                    "tags": tags[:8],
+                }
+    except Exception as e:
+        print(f"Kimi 小红书草稿生成错误: {e}")
+
+    fallback_title = "今天又被孩子的状态拉扯了一下"
+    fallback_content = (
+        "今天想来这里树洞一下。孩子刚才明显有些紧绷，我也差点跟着着急起来。"
+        "后来我试着先把声音放轻，把眼前的事拆成很小的一步，先陪孩子缓一缓。"
+        "养育这样的孩子，很多时候不是不爱，也不是不努力，而是真的需要一边摸索一边稳住自己。"
+        "有没有类似情况的家长？你们通常会怎么陪孩子度过这种时刻，想听听大家的经验。"
+    )
+    return {
+        "title": fallback_title,
+        "content": fallback_content,
+        "tags": ["育儿树洞", "特殊儿童陪伴", "家长互助"],
+    }
+
+
 def fetch_kimi_child_script(observation, advice, condition_type):
     """生成"星星机器人对孩子说的话"。
 
@@ -756,6 +862,7 @@ def submit_log():
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     advice = fetch_kimi_advice(bpm, observation, condition_type)
+    log_id = None
 
     try:
         conn = sqlite3.connect('adhd_data.db')
@@ -764,6 +871,7 @@ def submit_log():
             'INSERT INTO parent_logs (timestamp, bpm, observation, ai_advice, condition_type, child_id) VALUES (?, ?, ?, ?, ?, ?)',
             (timestamp, bpm, observation, advice, condition_type, child_id),
         )
+        log_id = cursor.lastrowid
         conn.commit()
         conn.close()
     except Exception as e:
@@ -775,7 +883,58 @@ def submit_log():
     except Exception as e:
         app.logger.warning("xiaozhi enqueue after submit_log: %s", e)
 
-    return jsonify({"advice": advice, "child_id": child_id}), 200
+    return jsonify({"advice": advice, "child_id": child_id, "log_id": log_id}), 200
+
+
+@app.route('/share/xiaohongshu_draft', methods=['POST'])
+def xiaohongshu_draft():
+    """生成脱敏的小红书树洞草稿；只返回草稿，不代替家长发布。"""
+    cid, err = _resolve_child_id_for_read()
+    if err is not None:
+        return err
+
+    data = request.json or {}
+    observation = (data.get("observation") or "").strip()
+    advice = (data.get("advice") or "").strip()
+    condition_type = (data.get("condition_type") or "").strip().lower()
+    bpm = data.get("bpm")
+
+    log_id = data.get("log_id")
+    if log_id is not None:
+        try:
+            conn = sqlite3.connect("adhd_data.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT bpm, observation, ai_advice, condition_type
+                FROM parent_logs
+                WHERE id = ? AND child_id = ?
+                """,
+                (int(log_id), cid),
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                bpm, observation, advice, condition_type = row
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
+    condition_type = (condition_type or "adhd").lower()
+    if condition_type not in ("adhd", "autism"):
+        return jsonify({
+            "status": "error",
+            "message": "condition_type is required and must be adhd or autism",
+        }), 400
+    if not observation:
+        return jsonify({"status": "error", "message": "observation is required"}), 400
+
+    draft = fetch_xiaohongshu_draft(observation, advice, condition_type, bpm=bpm)
+    return jsonify({
+        "status": "success",
+        "child_id": cid,
+        "draft": draft,
+        "privacy_notice": "草稿已尽量脱敏，但发布前仍建议家长再次检查姓名、学校、住址、医院等隐私信息。",
+    }), 200
 
 @app.route('/history', methods=['GET'])
 def get_history():
@@ -885,7 +1044,19 @@ def footprint_today():
     ), 200
 
 
-# --- AI 周报（周日夜间 Kimi 长文总结）---
+# --- AI 周/月/年周期报告（家长主动生成，已生成后只查看）---
+
+_PERIOD_LABELS = {
+    "week": "周报",
+    "month": "月报",
+    "year": "年报",
+}
+
+_PERIOD_RANGE_LABELS = {
+    "week": "一周",
+    "month": "一个月",
+    "year": "一年",
+}
 
 
 def _week_monday_sunday_strings(anchor: datetime):
@@ -900,6 +1071,55 @@ def _week_monday_sunday_strings(anchor: datetime):
 
 def _week_sql_bounds(week_start: str, week_end: str):
     return f"{week_start} 00:00:00", f"{week_end} 23:59:59"
+
+
+def _month_start_end_strings(anchor: datetime):
+    base = anchor.replace(day=1, hour=12, minute=0, second=0, microsecond=0)
+    if base.month == 12:
+        next_month = base.replace(year=base.year + 1, month=1)
+    else:
+        next_month = base.replace(month=base.month + 1)
+    end = next_month - timedelta(days=1)
+    return base.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def _year_start_end_strings(anchor: datetime):
+    start = anchor.replace(month=1, day=1, hour=12, minute=0, second=0, microsecond=0)
+    end = anchor.replace(month=12, day=31, hour=12, minute=0, second=0, microsecond=0)
+    return start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d")
+
+
+def _period_start_end_strings(period_type: str, anchor: datetime):
+    if period_type == "week":
+        return _week_monday_sunday_strings(anchor)
+    if period_type == "month":
+        return _month_start_end_strings(anchor)
+    if period_type == "year":
+        return _year_start_end_strings(anchor)
+    raise ValueError("period_type must be week, month or year")
+
+
+def _period_sql_bounds(period_start: str, period_end: str):
+    return f"{period_start} 00:00:00", f"{period_end} 23:59:59"
+
+
+def _period_has_ended(period_end: str, now: datetime = None) -> bool:
+    now = now or datetime.now()
+    end_dt = datetime.strptime(f"{period_end} 23:59:59", "%Y-%m-%d %H:%M:%S")
+    return now > end_dt
+
+
+def _latest_completed_anchor(period_type: str, now: datetime = None) -> datetime:
+    now = now or datetime.now()
+    if period_type == "week":
+        return now - timedelta(days=now.weekday() + 1)
+    if period_type == "month":
+        first_this_month = now.replace(day=1, hour=12, minute=0, second=0, microsecond=0)
+        return first_this_month - timedelta(days=1)
+    if period_type == "year":
+        first_this_year = now.replace(month=1, day=1, hour=12, minute=0, second=0, microsecond=0)
+        return first_this_year - timedelta(days=1)
+    raise ValueError("period_type must be week, month or year")
 
 
 def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
@@ -1060,6 +1280,75 @@ def _build_weekly_kimi_user_prompt(child_name: str, week_start: str, week_end: s
     return "\n".join(lines)
 
 
+def _build_period_kimi_user_prompt(
+    period_type: str,
+    child_name: str,
+    period_start: str,
+    period_end: str,
+    digest: dict,
+) -> str:
+    report_label = _PERIOD_LABELS.get(period_type, "报告")
+    range_label = _PERIOD_RANGE_LABELS.get(period_type, "一段时间")
+    suggestion_hint = {
+        "week": "给出 2～4 条下周可执行的具体家庭支持建议。",
+        "month": "总结本月反复出现的场景、时段或任务类型，给出 3～5 条下月可执行的支持策略。",
+        "year": "关注长期变化、家庭支持节奏与下一年度重点，不要被单次事件带偏，给出 3～5 条年度支持建议。",
+    }.get(period_type, "给出具体、可执行的家庭支持建议。")
+    length_hint = {
+        "week": "全文约 350～700 字，分 2～4 段",
+        "month": "全文约 500～900 字，分 3～5 段",
+        "year": "全文约 700～1200 字，分 4～6 段",
+    }.get(period_type, "全文分段自然")
+
+    lines = [
+        f"请根据以下「{range_label}数据摘要」，给家长写一份中文「AI {report_label}」。",
+        "",
+        f"【统计周期】{period_start} 至 {period_end}",
+        f"【孩子称呼】{child_name}（文中可直接用此称呼）",
+        "",
+        "【心率数据概览】",
+        f"- 采样条数：{digest['heart_sample_count']}",
+        f"- 平均心率(BPM)：{digest.get('heart_avg_bpm')}",
+        f"- 最低/最高(BPM)：{digest.get('heart_min_bpm')} / {digest.get('heart_max_bpm')}",
+        f"- 采样中处于「报警心率」的次数合计：{digest.get('heart_alert_count')}",
+        "",
+        "【按小时聚合：报警比例或平均心率偏高的时段（最多列出前若干）】",
+    ]
+    for h in digest.get("hourly_stress_ranked") or []:
+        lines.append(
+            f"- {h['bucket']}时 平均心率≈{h['avg_bpm']} 报警比例≈{h['alert_rate']} 样本数={h['n']}"
+        )
+    if not digest.get("hourly_stress_ranked"):
+        lines.append("- （该周期无足够按小时聚合的心率数据）")
+
+    lines += ["", "【按天汇总（有数据的天）】"]
+    for d in digest.get("daily_heart") or []:
+        lines.append(
+            f"- {d['date']} 平均心率≈{d['avg_bpm']} 报警比例≈{d['alert_rate']} 样本={d['n']}"
+        )
+    if not digest.get("daily_heart"):
+        lines.append("- （该周期无按天汇总数据）")
+
+    logs = digest.get("parent_logs") or []
+    lines += ["", f"【家长观察与当时 AI 单次建议】共 {len(logs)} 条（最多纳入近期代表性记录）"]
+    for p in logs:
+        lines.append(
+            f"- {p['timestamp']} [{p['condition_label']}] 心率{p['bpm']} 观察：{p['observation']}"
+        )
+        lines.append(f"  当时 AI 建议摘要：{p['ai_advice_snippet']}")
+
+    lines += [
+        "",
+        "【写作要求】",
+        "1. 用自然、亲切的第二人称写给家长；不要医学诊断，不要替代就医。",
+        "2. 若数据能支持，请综合心率时段与家长记录，指出更容易紧张或焦躁的大致时间段或场景；若证据不足请诚实说明，不要编造。",
+        f"3. {suggestion_hint}",
+        "4. 对 ADHD / 自闭症谱系相关支持保持温和、具体、非标签化表达。",
+        f"5. {length_hint}，不要用 Markdown 标题符号，不要输出 JSON。",
+    ]
+    return "\n".join(lines)
+
+
 def fetch_kimi_weekly_report(user_prompt: str) -> str:
     """调用 Kimi 生成长文周报。"""
     system = (
@@ -1085,42 +1374,100 @@ def fetch_kimi_weekly_report(user_prompt: str) -> str:
         raise
 
 
-def generate_weekly_report(anchor: datetime = None, force: bool = False, child_id: int = 1):
+def fetch_kimi_period_report(period_type: str, user_prompt: str) -> str:
+    """调用 Kimi 生成周/月/年周期报告。"""
+    report_label = _PERIOD_LABELS.get(period_type, "报告")
+    system = (
+        "你是儿童发育与特殊教育领域的资深顾问，熟悉 ADHD 与自闭症谱系的居家与学校适应支持。"
+        f"你根据家长端设备采集的心率与家长文字记录，撰写「{report_label}」帮助家长看见规律与下一步。"
+        "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
+    )
+    model = (
+        os.getenv("PERIOD_REPORT_MODEL")
+        or os.getenv("WEEKLY_REPORT_MODEL")
+        or "kimi-k2.5"
+    ).strip() or "kimi-k2.5"
+    max_tokens = {"week": 2800, "month": 3600, "year": 4600}.get(period_type, 3200)
+    try:
+        response = _kimi_chat_create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.42,
+            max_tokens=max_tokens,
+        )
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        print(f"Kimi {report_label} API 错误: {e}")
+        raise
+
+
+def generate_period_report(
+    period_type: str,
+    anchor: datetime = None,
+    force: bool = False,
+    child_id: int = 1,
+):
     """
-    聚合 anchor 所在自然周（周一至周日）的数据，调用 Kimi，写入 weekly_reports。
-    返回 dict: week_start, week_end, summary, created_at, id, child_id
+    为指定孩子生成已结束周期的周/月/年报告。
+    同一 child_id + period_type + period_start 只生成一次；已存在则直接返回已有报告。
     """
+    period_type = (period_type or "").strip().lower()
+    if period_type not in _PERIOD_LABELS:
+        raise ValueError("period_type must be week, month or year")
+
     anchor = anchor or datetime.now()
-    week_start, week_end = _week_monday_sunday_strings(anchor)
-    t_lo, t_hi = _week_sql_bounds(week_start, week_end)
-    child_name = (os.getenv("CHILD_DISPLAY_NAME") or "孩子").strip() or "孩子"
+    period_start, period_end = _period_start_end_strings(period_type, anchor)
+    if not _period_has_ended(period_end):
+        return {
+            "status": "not_ready",
+            "message": f"{_PERIOD_LABELS[period_type]}对应周期尚未结束，暂不生成正式报告",
+            "child_id": child_id,
+            "period_type": period_type,
+            "period_start": period_start,
+            "period_end": period_end,
+        }
 
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     if not force:
         cursor.execute(
-            "SELECT id FROM weekly_reports WHERE week_start = ? AND child_id = ?",
-            (week_start, child_id),
+            """
+            SELECT id, summary, created_at
+            FROM period_reports
+            WHERE child_id = ? AND period_type = ? AND period_start = ?
+            LIMIT 1
+            """,
+            (child_id, period_type, period_start),
         )
-        if cursor.fetchone():
+        row = cursor.fetchone()
+        if row:
             conn.close()
             return {
-                "status": "skipped",
-                "message": f"本周 {week_start} 孩子{child_id} 已有周报，若需覆盖请传 force=true",
-                "week_start": week_start,
-                "week_end": week_end,
+                "status": "exists",
+                "id": row[0],
                 "child_id": child_id,
+                "period_type": period_type,
+                "period_label": _PERIOD_LABELS[period_type],
+                "period_start": period_start,
+                "period_end": period_end,
+                "summary": row[1],
+                "created_at": row[2],
             }
 
+    t_lo, t_hi = _period_sql_bounds(period_start, period_end)
     digest = _collect_week_digest(cursor, t_lo, t_hi, child_id)
     conn.close()
 
-    user_prompt = _build_weekly_kimi_user_prompt(
-        child_name, week_start, week_end, digest
+    child_name = (os.getenv("CHILD_DISPLAY_NAME") or "孩子").strip() or "孩子"
+    user_prompt = _build_period_kimi_user_prompt(
+        period_type, child_name, period_start, period_end, digest
     )
-    summary = fetch_kimi_weekly_report(user_prompt)
+    summary = fetch_kimi_period_report(period_type, user_prompt)
     if not summary or len(summary) < 40:
-        raise RuntimeError("Kimi 返回内容过短，未写入周报表")
+        raise RuntimeError("Kimi 返回内容过短，未写入报告表")
 
     created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     digest_json = json.dumps(digest, ensure_ascii=False)
@@ -1129,24 +1476,50 @@ def generate_weekly_report(anchor: datetime = None, force: bool = False, child_i
     cursor = conn.cursor()
     cursor.execute(
         """
-        INSERT OR REPLACE INTO weekly_reports (week_start, week_end, summary, digest_json, created_at, child_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO period_reports
+        (child_id, period_type, period_start, period_end, summary, digest_json, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (week_start, week_end, summary, digest_json, created_at, child_id),
+        (child_id, period_type, period_start, period_end, summary, digest_json, created_at),
     )
     rid = cursor.lastrowid
+    # 兼容旧 weekly_report/* 接口与旧表。
+    if period_type == "week":
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO weekly_reports
+            (week_start, week_end, summary, digest_json, created_at, child_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (period_start, period_end, summary, digest_json, created_at, child_id),
+        )
     conn.commit()
     conn.close()
 
     return {
-        "status": "ok",
+        "status": "created",
         "id": rid,
         "child_id": child_id,
-        "week_start": week_start,
-        "week_end": week_end,
+        "period_type": period_type,
+        "period_label": _PERIOD_LABELS[period_type],
+        "period_start": period_start,
+        "period_end": period_end,
         "summary": summary,
         "created_at": created_at,
     }
+
+
+def generate_weekly_report(anchor: datetime = None, force: bool = False, child_id: int = 1):
+    """
+    兼容旧调用：聚合 anchor 所在自然周（周一至周日）的数据，调用 Kimi，写入报告表。
+    返回 dict: week_start, week_end, summary, created_at, id, child_id
+    """
+    result = generate_period_report(
+        "week", anchor=anchor, force=force, child_id=child_id
+    )
+    result["week_start"] = result.get("period_start")
+    result["week_end"] = result.get("period_end")
+    return result
 
 
 def _seconds_until_next_sunday_2100(now: datetime = None) -> float:
@@ -1270,6 +1643,161 @@ def weekly_report_history():
         return jsonify({"child_id": cid, "reports": out}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
+
+
+def _report_payload(row):
+    if not row:
+        return None
+    rid, child_id, period_type, period_start, period_end, summary, created_at = row
+    return {
+        "id": rid,
+        "child_id": child_id,
+        "period_type": period_type,
+        "period_label": _PERIOD_LABELS.get(period_type, "报告"),
+        "period_start": period_start,
+        "period_end": period_end,
+        "summary": summary,
+        "created_at": created_at,
+    }
+
+
+@app.route("/reports/latest", methods=["GET"])
+def reports_latest():
+    """获取当前孩子最近一份周/月/年报告。"""
+    cid, err = _resolve_child_id_for_read()
+    if err is not None:
+        return err
+    period_type = (request.args.get("period_type") or "week").strip().lower()
+    if period_type not in _PERIOD_LABELS:
+        return jsonify({"status": "error", "message": "invalid period_type"}), 400
+    try:
+        conn = sqlite3.connect("adhd_data.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, child_id, period_type, period_start, period_end, summary, created_at
+            FROM period_reports
+            WHERE child_id = ? AND period_type = ?
+            ORDER BY period_start DESC, id DESC
+            LIMIT 1
+            """,
+            (cid, period_type),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"status": "empty", "message": "暂无报告"}), 404
+        return jsonify(_report_payload(row)), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/reports/history", methods=["GET"])
+def reports_history():
+    """获取当前孩子的周/月/年历史报告列表。"""
+    cid, err = _resolve_child_id_for_read()
+    if err is not None:
+        return err
+    period_type = (request.args.get("period_type") or "week").strip().lower()
+    if period_type not in _PERIOD_LABELS:
+        return jsonify({"status": "error", "message": "invalid period_type"}), 400
+    try:
+        lim = int(request.args.get("limit") or 12)
+        lim = max(1, min(lim, 60))
+        conn = sqlite3.connect("adhd_data.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, child_id, period_type, period_start, period_end, summary, created_at
+            FROM period_reports
+            WHERE child_id = ? AND period_type = ?
+            ORDER BY period_start DESC
+            LIMIT ?
+            """,
+            (cid, period_type, lim),
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        reports = []
+        for row in rows:
+            item = _report_payload(row)
+            preview = item["summary"] or ""
+            item["summary_preview"] = preview[:400] + ("…" if len(preview) > 400 else "")
+            item.pop("summary", None)
+            reports.append(item)
+        return jsonify({"child_id": cid, "period_type": period_type, "reports": reports}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/reports/<int:report_id>", methods=["GET"])
+def reports_detail(report_id):
+    """查看当前孩子的一份完整周期报告。"""
+    cid, err = _resolve_child_id_for_read()
+    if err is not None:
+        return err
+    try:
+        conn = sqlite3.connect("adhd_data.db")
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT id, child_id, period_type, period_start, period_end, summary, created_at
+            FROM period_reports
+            WHERE id = ? AND child_id = ?
+            """,
+            (report_id, cid),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return jsonify({"status": "empty", "message": "报告不存在"}), 404
+        return jsonify(_report_payload(row)), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/reports/generate", methods=["POST"])
+def reports_generate():
+    """
+    家长主动生成最近一个已结束的周/月/年报告。
+    相同 child_id + period_type + period_start 已存在时直接返回已有报告，不重复调用 Kimi。
+    """
+    data = request.json or {}
+    period_type = (data.get("period_type") or "week").strip().lower()
+    if period_type not in _PERIOD_LABELS:
+        return jsonify({"status": "error", "message": "invalid period_type"}), 400
+
+    raw_cid = data.get("child_id")
+    if raw_cid is None:
+        raw_cid = (request.headers.get("X-Child-Id") or "1").strip()
+    try:
+        child_id = max(1, int(raw_cid))
+    except (TypeError, ValueError):
+        child_id = 1
+
+    err = _resolve_child_id_for_write(child_id)
+    if err[1] is not None:
+        return err[1]
+    child_id = err[0]
+
+    date_str = (data.get("date") or "").strip()
+    if date_str:
+        try:
+            anchor = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"status": "error", "message": "invalid date"}), 400
+    else:
+        anchor = _latest_completed_anchor(period_type)
+
+    try:
+        result = generate_period_report(
+            period_type, anchor=anchor, force=False, child_id=child_id
+        )
+    except RuntimeError as e:
+        return jsonify({"status": "error", "message": str(e)}), 502
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+    return jsonify(result), 200
 
 
 @app.route("/auth/register", methods=["POST"])
@@ -2201,6 +2729,6 @@ def esp32_cmd(device_id: str):
 
 
 if __name__ == '__main__':
-    _start_weekly_scheduler_thread()
+    # 周/月/年报告改为家长主动生成，避免孩子多时后台批量产生大量报告数据。
     # 绑定 0.0.0.0 确保外网可访问，端口使用你已开放的 11760
     app.run(host='0.0.0.0', port=11760, debug=False, threaded=True)

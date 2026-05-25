@@ -24,6 +24,10 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于将家长的语音记录转换为文字。</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>用于在家长记录行为时提供语音转文字输入。</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

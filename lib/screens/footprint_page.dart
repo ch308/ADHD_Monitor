@@ -123,7 +123,7 @@ class _FootprintPageState extends State<FootprintPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.auto_stories_outlined),
-            tooltip: 'AI 周报',
+            tooltip: 'AI 报告',
             onPressed: () {
               Navigator.of(context).push<void>(
                 MaterialPageRoute<void>(
