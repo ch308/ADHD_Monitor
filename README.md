@@ -583,12 +583,12 @@ CONFIG_LV_USE_USER_DATA=y / CHART / PERF_MONITOR
 
 ```mermaid
 flowchart TB
-    PM2[PM2 ecosystem.config.js] -->|启动| Flask[Flask app (threaded=True)<br/>0.0.0.0:11760]
-    Flask --> Routes[HTTP 路由集]
-    Flask --> Cond[threading.Condition<br/>_esp32_cmd_lock]
-    Flask --> Sched[周报守护线程<br/>_weekly_scheduler_loop]
-    Routes --> DB[(SQLite<br/>adhd_data.db)]
-    Routes --> Kimi[Moonshot Kimi<br/>OpenAI SDK]
+    PM2["PM2 ecosystem.config.js"] -->|启动| Flask["Flask app threaded=True\nlisten 0.0.0.0:11760"]
+    Flask --> Routes["HTTP 路由集"]
+    Flask --> Cond["threading.Condition\n_esp32_cmd_lock"]
+    Flask --> Sched["周报守护线程\n_weekly_scheduler_loop"]
+    Routes --> DB[(SQLite adhd_data.db)]
+    Routes --> Kimi["Moonshot Kimi\nOpenAI SDK"]
 ```
 
 `threaded=True` 让每个 HTTP 请求一个线程处理，否则 ESP32 的长轮询会阻塞整服务。
@@ -704,14 +704,14 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    HR[HR 样本] -->|sliding 30| W[滑动窗口]
-    W --> E[基线抬升<br/>elevation = clamp(bpm-baseline, 0, 60)<br/>elevationScore = elevation/50]
-    W --> V[变异度<br/>variabilityScore = 1 - std/10]
-    W --> T[趋势<br/>线性回归斜率<br/>trendScore = clamp(0.5 + slope*0.5)]
-    E --> S[stress = 50·E + 25·V + 25·T<br/>clamp 0..100]
+    HR["HR 样本"] -->|sliding 30| W["滑动窗口"]
+    W --> E["基线抬升\nelevation = clamp(bpm − baseline, 0, 60)\nelevationScore = elevation/50"]
+    W --> V["变异度\nvariabilityScore = 1 − std/10"]
+    W --> T["趋势\n线性回归斜率\ntrendScore = clamp(0.5 + slope*0.5)"]
+    E --> S["stress = 50·E + 25·V + 25·T\nclamp 0..100"]
     V --> S
     T --> S
-    W -.->|平稳样本 EMA| Base[baseline EMA 0.95/0.05<br/>clamp 50..100]
+    W -.->|平稳样本 EMA| Base["baseline EMA 0.95/0.05\nclamp 50..100"]
 ```
 
 要点：
@@ -725,13 +725,16 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    App->>Band: write [0x01, 0x08, key(16B)]   ;; step1: register key
-    Band-->>App: notify [0x10, 0x01, 0x01]      ;; ack
-    App->>Band: write [0x02, 0x08]              ;; step2: request nonce
+    Note over App,Band: step1 register key
+    App->>Band: write [0x01, 0x08, key(16B)]
+    Band-->>App: notify [0x10, 0x01, 0x01] ack
+    Note over App,Band: step2 request nonce
+    App->>Band: write [0x02, 0x08]
     Band-->>App: notify [0x10, 0x02, 0x01, nonce(16B)]
     App->>App: encrypted = AES_ECB(key, nonce)
-    App->>Band: write [0x03, 0x08, encrypted]   ;; step3
-    Band-->>App: notify [0x10, 0x03, 0x01]      ;; success
+    Note over App,Band: step3 send encrypted
+    App->>Band: write [0x03, 0x08, encrypted]
+    Band-->>App: notify [0x10, 0x03, 0x01] success
 ```
 
 Auth Key 是 32 位 hex（用户从 Mi Fit / Zepp Life 抓包取），在 `home_screen.dart` 常量
