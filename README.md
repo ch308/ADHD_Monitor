@@ -1,11 +1,13 @@
 # ADHD\_Monitor — 多动症/自闭症儿童陪伴系统
 
+![系统示意图：手机 App 为中枢；毛绒球向 App 实时传输心率/压力；毛绒球与手环数据同步与预警推送；家长侧记录后向星星设备推送 AI 建议，并启动星星机器人（xiaozhi）的 AI 聊天对话模式](docs/images/README-system-overview.png)
+
 面向 ADHD（注意缺陷多动障碍）与自闭症谱系家庭的"边缘+云"陪伴方案。
 小米手环采集心率与压力，Flutter App 在父母手机端实时展示并触发陪伴流程，
 ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道具，
 腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发；
-接入 **星星机器人（xiaozhi-esp32）** 自建语音与远程唤醒（Path A，见 §5.4.1）；
-父母吐槽内容push到小红书发布。
+**星星机器人（xiaozhi-esp32）** 通过自建 WebSocket 语音云与长轮询远程唤醒（Path A，见 §5.4.1）——家长在手机端**提交行为记录（`POST /submit_log`）成功后，云端会立刻对孩子名下的星星设备入队 `xiaozhi_invoke_chat`，由星星主动开口陪伴孩子对话**，与 Kimi 给家长的文字建议并行完成；
+父母吐槽的内容 push 到小红书发布。
 
 ---
 
@@ -24,18 +26,18 @@ ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道�
 
 ## 1. 系统总览
 
-### 1.1 三端 + 两个外设
+### 1.1 三端 + 毛绒球 + 星星机器人
 
 ```mermaid
 flowchart LR
     subgraph User["家庭场景"]
-        Kid(["孩子<br/>戴小米手环"])
+        Kid(["孩子<br/>戴小米手环 · 可与星星对话"])
         Parent(["家长<br/>持手机"])
-        Lamp(["床边 ESP32-S3 LCD 毛绒球呼吸灯"])
+        Lamp(["毛绒球<br/>呼吸灯 ESP32-S3"])
     end
 
     subgraph Phone["Flutter App (Android / iOS)"]
-        UI[Home / 正念呼吸 / 周报 UI]
+        UI[Home / 记录 / 正念呼吸 / 周报 UI]
         MiBandSvc[MiBand6Auth 服务]
         StressCalc[StressCalculator]
         CloudSvc[CloudService HTTP]
@@ -45,17 +47,25 @@ flowchart LR
 
     subgraph Cloud["腾讯云 Flask (port 11760)"]
         WebHook[/POST /webhook心率入库/]
-        Logs[/POST /submit_logKimi 单次建议/]
+        Logs["POST /submit_log<br/>Kimi 建议 + 入队星星唤醒"]
         Weekly[/Weekly Report 守护线程/]
-        CmdQ[ESP32 长轮询命令队列]
+        CmdQ[毛绒球命令队列<br/>GET/POST …/cmd]
+        XzQ[星星命令队列<br/>同机制 per MAC]
+        XzWs[/WS /xiaozhi/ws<br/>Opus 语音对话/]
         SQLite[(SQLite<br/>adhd_data.db)]
     end
 
-    subgraph Device["ESP32-S3 LCD 1.47B"]
+    subgraph Device["毛绒球 ESP32-S3 LCD 1.47B"]
         Wireless[Wireless<br/>network_provisioning + STA]
         Cloudc[Cloud 长轮询客户端]
         RGB[RGB 呼吸 / 倒计时灯]
         LCDmod[LCD + LVGL + 背光]
+    end
+
+    subgraph XzDev["星星机器人 xiaozhi-esp32（孩子侧）"]
+        XzBleSta[BLE + STA<br/>配网 / announce]
+        XzPoll[RemoteCmd<br/>长轮询 /cmd]
+        XzVoice[WebsocketProtocol<br/>与 /xiaozhi/ws 互通]
     end
 
     Kid -- BLE HR/Stress --> MiBandSvc
@@ -63,17 +73,27 @@ flowchart LR
     MiBandSvc -- 上传 batch --> CloudSvc
     CloudSvc -- HTTP --> WebHook
     UI -- 显示 --> Parent
+    Parent -- 写记录 submit_log --> UI
+    UI -- POST /submit_log --> Logs
 
-    Parent -- 配网 --> ProvSvc
-    ProvSvc -- BLE provisioning --> Wireless
+    Parent -- 配网毛绒球/星星 --> ProvSvc
+    ProvSvc -- BLE provisioning ADHD_* --> Wireless
+    ProvSvc -- BLE provisioning XIAOZHI_* --> XzBleSta
 
     Wireless -- POST announce --> Cloud
+    XzBleSta -- POST announce --> Cloud
     Cloudc -- 长轮询 GET /device/<id>/cmd --> CmdQ
     UI -- 触发呼吸/取消 --> CloudSvc
     CloudSvc -- POST cmd --> CmdQ
     CmdQ -- breathing_start/stop --> Cloudc
     Cloudc --> RGB
     Cloudc --> LCDmod
+
+    XzBleSta --> XzPoll
+    XzPoll -- GET …/cmd?wait=55 --> XzQ
+    Logs -- xiaozhi_invoke_chat --> XzQ
+    XzQ -- notify 唤醒 --> XzPoll
+    XzVoice <-->|Opus 上下行| XzWs
 
     WebHook --> SQLite
     Logs --> SQLite
@@ -104,7 +124,7 @@ ADHD_Monitor/
 │   ├── partitions.csv / sdkconfig    # 16 MB Flash, Octal PSRAM
 │   └── idf_component.yml             # 含 network_provisioning / led_strip / lvgl 等
 │
-├── xiaozhi-esp32-2.2.4/              # 星星机器人固件（Path A：menuconfig 改 OTA + 可选 ADHD 长轮询）
+├── xiaozhi-esp32-2.2.4/              # 星星机器人固件（Path A：Bypass OTA + ADHD 长轮询 + /xiaozhi/ws）
 │   └── main/                         # 含 adhd_remote_cmd.cc（CONFIG_ADHD_MONITOR_REMOTE_CMD）
 │
 └── server/
@@ -122,11 +142,14 @@ ADHD_Monitor/
 - App ↔ 云端：`http://<server>:11760`（默认 `124.223.53.33:11760`，存于 `SessionStore`）。
 - ESP32 ↔ 云端：同 host:port，HTTP 长轮询 `/device/<device_id>/cmd?wait=25`。
 - App ↔ ESP32：仅在**首次配网**时通过 BLE 直连（`network_provisioning` 协议，IDF 6.x 重命名自 `wifi_provisioning`）；配网完成后两端走云端中转，**不再依赖局域网可达**。
+- 星星机器人 ↔ 云端：与毛绒球**同一 host:port**；HTTP 长轮询 `GET /device/<MAC>/cmd?wait=55` 收 `xiaozhi_invoke_chat`；语音会话走 **`ws(s)://<host>:11760/xiaozhi/ws`**（见 §5.4.1）。
 - 手机 ↔ 小米手环：BLE GATT（FEE1 + 标准 180D HR 服务）。
 
 ---
 
 ## 2. 端到端关键流程
+
+**家长提交行为记录（§2.4）** 是产品主链路之一：除 Kimi 给家长的短建议外，云端会**必走**对孩子绑定星星设备的 `xiaozhi_invoke_chat` 唤醒（详见 §5.4.1）。
 
 ### 2.1 ESP32 首次配网（一次性）
 
@@ -215,18 +238,34 @@ sequenceDiagram
 云端长轮询的延迟 < 100 ms（用 `threading.Condition` 唤醒 hold 住的连接）；
 若 ESP32 离线或正在重连，命令会在内存队列里排队，板子重连后会一次性收完积压。
 
-### 2.4 AI 单次建议（家长写记录）
+### 2.4 AI 单次建议 + 星星机器人对话（家长写记录）
+
+家长提交记录后，产品闭环包含两条并行结果：**手机端展示 Kimi 给家长的短建议**，以及**星星机器人在孩子侧被唤醒并开始语音陪伴**（见 §5.4.1）。
 
 ```mermaid
 sequenceDiagram
+    autonumber
+    participant Parent as 家长
+    participant App as Flutter App
+    participant Cloud as Flask
+    participant Kimi as Kimi API
+    participant DB as SQLite
+    participant Xz as 星星机器人<br/>(xiaozhi ESP32)
+
     Parent->>App: 在记录卡片填观察文本 + 选 ADHD/自闭症
     App->>Cloud: POST /submit_log<br/>{bpm, observation, condition_type}
     Cloud->>Cloud: fetch_kimi_advice()<br/>挑 ADHD/自闭症 prompt 模板
     Cloud->>Kimi: chat.completions(kimi-k2.5, 0.7)
     Kimi-->>Cloud: 50字以内现场干预建议
     Cloud->>DB: INSERT parent_logs(timestamp, bpm, observation,<br/>ai_advice, condition_type, child_id)
+    Cloud->>Cloud: 对当前孩子名下 kind 含 xiaozhi 的设备<br/>入队 xiaozhi_invoke_chat（notify 唤醒长轮询）
     Cloud-->>App: {advice}
     App->>App: 显示 _buildAdviceCard
+
+    Note over Cloud,Xz: 记录落库后的核心一步：星星在孩子侧开口（可与家长看手机并行）
+    Xz->>Cloud: GET /device/<MAC>/cmd?wait=55<br/>（阻塞中则立即被 notify 唤醒）
+    Cloud-->>Xz: {action: xiaozhi_invoke_chat, …}
+    Xz->>Xz: WakeWordInvoke → 连接 /xiaozhi/ws<br/>「星星守护者」语音对话（Opus 上下行）
 ```
 
 ### 2.5 AI 周报（守护线程，周日 21:00）
@@ -567,10 +606,10 @@ flowchart TB
 | --- | --- |
 | **认证 / 家庭** | `POST /auth/register`, `POST /auth/login`, `GET\|POST /my/children`, `POST /my/children/<id>/members` |
 | **心率 / 状态** | `POST\|GET /webhook`, `GET /history` |
-| **AI 单次建议** | `POST /submit_log`（写记录 + 调 Kimi） |
+| **AI 单次建议** | `POST /submit_log`（写记录 + 调 Kimi + **对孩子名下星星设备入队 `xiaozhi_invoke_chat`**） |
 | **AI 足迹 / 周报** | `GET /footprint/today`, `GET /weekly_report/latest`, `GET /weekly_report/history`, `POST /weekly_report/generate` |
 | **手环绑定** | `GET /device/<mac>/binding`, `POST /device/bind`, `POST /device/unbind` |
-| **毛绒球呼吸灯** | `POST /device/esp32/announce`, `GET /device/esp32/list`, `POST /device/esp32/bind`, `POST /device/esp32/unbind`, `GET\|POST /device/<device_id>/cmd` |
+| **ESP32（毛绒球 + 星星）** | `POST /device/esp32/announce`, `GET /device/esp32/list`, `POST /device/esp32/bind`, `POST /device/esp32/unbind`, `GET\|POST /device/<device_id>/cmd`（长轮询 + 白名单；星星走同一 `cmd` + `WS /xiaozhi/ws`） |
 
 ### 5.3 鉴权 & 权限
 
@@ -611,9 +650,9 @@ sequenceDiagram
 - ESP32 端 `Cloud.c` 两种都能解析。
 - hold 上限 60 s，下限 0 s；ESP32 客户端默认 25 s。
 
-### 5.4.1 Path A：星星机器人（xiaozhi-esp32）自建语音云（**无 OTA**）
+### 5.4.1 Path A：星星机器人（xiaozhi-esp32）— 记录后的语音陪伴核心（自建语音云，**无 OTA**）
 
-本仓库内 `xiaozhi-esp32-2.2.4` 可与 **同一套 Flask** 对接，替代官方小智云。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus → 百度短语音 ASR → Kimi → edge-tts → 下行 Opus**（不再依赖 OpenAI）。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
+本仓库内 `xiaozhi-esp32-2.2.4` 与 **同一套 Flask** 对接，替代官方小智云，构成「家长写完观察 → 孩子侧立刻有星星开口」的**主路径**，不是可选增强。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus → 百度短语音 ASR → Kimi → edge-tts → 下行 Opus**（不再依赖 OpenAI）。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
 
 | 组件 | 说明 |
 |------|------|
@@ -811,7 +850,7 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
 | GET | `/webhook` | child=1 可匿名 | 返回最新 `{bpm, alert, timestamp}` |
 | POST | `/webhook` | 见 §5.3 | 写心率（手环 / 模拟器 / App 都用这个） |
 | GET | `/history` | 同上 | 最近 20 条 |
-| POST | `/submit_log` | 同上 | 写记录 + Kimi 建议 |
+| POST | `/submit_log` | 同上 | 写记录 + Kimi 建议 + **星星 `xiaozhi_invoke_chat` 入队** |
 | GET | `/footprint/today` | 同上 | 今日记录 + 趋势 |
 | GET | `/weekly_report/latest` | 同上 | 最近周报 |
 | GET | `/weekly_report/history` | 同上 | 历史列表 |
@@ -819,10 +858,11 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
 | GET | `/device/<mac>/binding` | 选 | 查手环绑定 |
 | POST | `/device/bind` / `unbind` | 是 | 手环绑/解 |
 | POST | `/device/esp32/announce` | 否 | ESP32 上电自报 |
-| GET | `/device/esp32/list` | 是 | 列我可见的毛绒球呼吸灯（未绑 + 已绑给我家） |
-| POST | `/device/esp32/bind` / `unbind` | 是 | 毛绒球呼吸灯绑/解 |
-| GET | `/device/<device_id>/cmd?wait=N` | 否 | ESP32 长轮询拉指令 |
+| GET | `/device/esp32/list` | 是 | 列我可见的 ESP32（毛绒球 / 星星，未绑 + 已绑给我家） |
+| POST | `/device/esp32/bind` / `unbind` | 是 | ESP32 绑/解（`kind` 区分毛绒球与 xiaozhi） |
+| GET | `/device/<device_id>/cmd?wait=N` | 否 | ESP32 长轮询拉指令（毛绒球 + 星星） |
 | POST | `/device/<device_id>/cmd` | 是 | App 推指令（action 白名单 + 范围校验） |
+| WS | `/xiaozhi/ws` | 可选 Bearer（`XIAOZHI_WEBSOCKET_TOKEN`） | 星星语音上下行（Opus），见 §5.4.1 |
 
 `X-Child-Id` header 用于读写所有"按孩子"的数据；未带时默认 `1`。
 
@@ -931,6 +971,7 @@ flutter run    # 真机推荐，模拟器没有 BLE
 ### 8.5 已知限制 & 待办
 
 - 目前只支持小米手环6，后续可能会添加更多的硬件。
+- 目前只支持安卓APP，后续可能会开发IOS APP。
 - ESP32硬件板子只支持微雪ESP32-S3-LCD和星智CUBE聊天机器人。
 - 安卓系统不允许程序读取手机当前 WiFi 密码，配网页面**必须手动输入**密码。
 - 周报守护线程目前硬编码 `child_id=1`；多孩子家庭需要手动 `POST /weekly_report/generate`。
