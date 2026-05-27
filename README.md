@@ -877,7 +877,7 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
    ```
    无顶层 `requirements.txt`，以上依赖与 `app.py` import 一致即可。
 
-2. **密钥与配置（不要写进仓库）**  
+2. **密钥与配置**  
    - 复制模板：`cp server/.env.example ~/.config/adhd-monitor.env`  
    - 编辑 `~/.config/adhd-monitor.env`，填入真实 `MOONSHOT_API_KEY` 等；`chmod 600 ~/.config/adhd-monitor.env`。  
    - `server/ecosystem.config.js` 会读取该文件并注入到 PM2 子进程；也可用环境变量 `ADHD_ENV_FILE` 指向其它路径。  
@@ -948,20 +948,7 @@ flutter pub get
 flutter run    # 真机推荐，模拟器没有 BLE
 ```
 
-**真机使用前必填**：
-- `lib/screens/home_screen.dart::_miBand6AuthKey` 替换成你的小米手环 6 的 32 位 hex auth key（从 Mi Fit / Zepp Life 抓包获取）。
-- 登录页填写云端服务器 IP/域名。
-
-### 8.4 端到端冒烟测试清单
-
-1. 服务器起来后，`curl http://<host>:11760/webhook` 应返回 `{bpm:0, alert:false, …}`。
-2. App 登录 / 注册 / 创建孩子 → 顶栏菜单"配网毛绒球呼吸灯"。
-3. ESP32 板子开机后 BLE 广播 `ADHD_XXXX`，扫到 → 输入家用 WiFi → 看到 "✅ 设备已绑定到当前孩子"。
-4. ESP32 LCD 黑屏待命；服务器日志能看到 `POST /device/esp32/announce` 与持续的 `GET /device/.../cmd` long-poll。
-5. App 点"引导孩子正念呼吸"→ ESP32 LCD 进入全屏呼吸 + 背光呼吸，WS2812 同时进入蓝色呼吸与 10 秒倒计时。
-6. 关闭呼吸页 → ESP32 灯灭、屏黑。
-
-### 8.5 已知限制 & 待办
+### 8.4 已知限制 & 待办
 
 - 目前只支持小米手环6，后续可能会添加更多的硬件。
 - 目前只支持安卓APP，后续可能会开发IOS APP。
