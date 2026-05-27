@@ -547,14 +547,7 @@ WS2812 单点（GPIO38），整灯 G 通道整体衰减 70%（实物绿芯偏亮
 - **黑屏待命**：`app_main` 里调 `Set_Backlight(0)`，LVGL 渲染循环保持运行但不创建可见场景；云端收到 `breathing_start` 后才创建全屏琥珀呼吸 overlay。
 - **琥珀色全屏 overlay**：动画进行中把 disp refr timer 调到 50 ms（20 fps）省 CPU，结束恢复 30 ms。
 
-### 4.7 板载传感器
-
-- **QMI8658 (I²C)**：`QMI8658_Loop` 只读加速度计三轴，`Accel.xyz` 给 LVGL Onboard 面板显示。
-- **电池**：ADC1 oneshot + 曲线/线性两套 calibration fallback；`BAT_analogVolts = mV*3/(1000*Measurement_offset)`，**未做电量百分比映射**。
-- **SDMMC**：1-wire 模式挂载到 `/sdcard`，`format_if_mount_failed=true`，`SDCard_Size` 暴露到 UI。
-- **BOOT 键**：5 ms tick 的 multi\_button 状态机，支持单击 / 双击 / 长按；`Simulated_Gesture` 把这三个事件翻译成 LVGL 指针事件（无触摸面板的替代方案）。
-
-### 4.8 依赖
+### 4.7 依赖
 
 ```yaml
 # main/idf_component.yml
@@ -650,7 +643,7 @@ sequenceDiagram
 - ESP32 端 `Cloud.c` 两种都能解析。
 - hold 上限 60 s，下限 0 s；ESP32 客户端默认 25 s。
 
-### 5.4.1 Path A：星星机器人（xiaozhi-esp32）— 记录后的语音陪伴核心（自建语音云，**无 OTA**）
+### 5.4.1 星星机器人（xiaozhi-esp32）— 记录后的语音陪伴核心（自建语音云，调用百度智能短语音和Edge TTS来完成语音和文字的转换）
 
 本仓库内 `xiaozhi-esp32-2.2.4` 与 **同一套 Flask** 对接，替代官方小智云，构成「家长写完观察 → 孩子侧立刻有星星开口」的**主路径**，不是可选增强。**整条链路不依赖任何 OTA / 激活服务器**：固件在 `menuconfig` 中直接配置 WebSocket URL，启动时把它写进 `websocket` NVS 命名空间，然后跳过 `CheckAssetsVersion` / `CheckNewVersion` 全流程，直接用 `WebsocketProtocol` 连上服务器的 **`/xiaozhi/ws`**。语音链路为 **上行 Opus → 百度短语音 ASR → Kimi → edge-tts → 下行 Opus**（不再依赖 OpenAI）。家长 **`POST /submit_log`** 成功后，服务器会对当前孩子名下、且 `esp32_devices.kind` 含 **`xiaozhi`** 的设备自动入队 **`xiaozhi_invoke_chat`**；固件侧 `adhd_remote_cmd` 任务长轮询 **`GET /device/<MAC>/cmd?wait=55`**，收到命令后调用 **`WakeWordInvoke`** 打开音频通道。
 
@@ -677,7 +670,7 @@ sequenceDiagram
    - 配网成功 → `esp_restart()` → xiaozhi 自带的 `WifiManager` 用 NVS 中的凭据接管 STA → 长轮询 `/device/<MAC>/cmd` + 走 `/xiaozhi/ws`；
    - 「让星星机器人重新配网」下发 `reset_provisioning` 命令 → `adhd_prov_ble_reset_and_reboot()` 清掉 wifi NVS（包括 xiaozhi `SsidManager` 用的 `wifi` 命名空间）→ 重启重新进入 BLE 配网。
 
-烧录后无需任何 OTA URL 配置——设备每次启动都用 Kconfig 中的值覆盖 NVS `websocket` 命名空间，并直接走 WebSocket 协议。
+烧录后——设备每次启动都用 Kconfig 中的值覆盖 NVS `websocket` 命名空间，并直接走 WebSocket 协议。
 
 **对话行为与省电 / 容错**：
 
@@ -885,7 +878,6 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
    - 复制模板：`cp server/.env.example ~/.config/adhd-monitor.env`  
    - 编辑 `~/.config/adhd-monitor.env`，填入真实 `MOONSHOT_API_KEY` 等；`chmod 600 ~/.config/adhd-monitor.env`。  
    - `server/ecosystem.config.js` 会读取该文件并注入到 PM2 子进程；也可用环境变量 `ADHD_ENV_FILE` 指向其它路径。  
-   - **请勿**在 `server/.env.example` 中填写真实 key（该文件会随仓库公开）。
 
    可选环境变量（与 `app.py` 一致）：
    - `MOONSHOT_API_KEY`（必填，Kimi）
@@ -952,8 +944,6 @@ DeviceBinding { String macAddress; int? boundChildId; String? nickname; bool isB
 flutter pub get
 flutter run    # 真机推荐，模拟器没有 BLE
 ```
-
-启动时若使用 Android 模拟器联调服务器，`SessionStore.defaultServerHost` 改成 `10.0.2.2`，或在登录页直接填。
 
 **真机使用前必填**：
 - `lib/screens/home_screen.dart::_miBand6AuthKey` 替换成你的小米手环 6 的 32 位 hex auth key（从 Mi Fit / Zepp Life 抓包获取）。
