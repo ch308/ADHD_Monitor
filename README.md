@@ -3,7 +3,9 @@
 面向 ADHD（注意缺陷多动障碍）与自闭症谱系家庭的"边缘+云"陪伴方案。
 小米手环采集心率与压力，Flutter App 在父母手机端实时展示并触发陪伴流程，
 ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道具，
-腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发；可选接入 **星星机器人（xiaozhi-esp32）** 自建语音与远程唤醒（Path A，见 §5.4.1）。
+腾讯云 Flask 服务负责数据落盘、AI 单次建议、AI 周报，以及 App↔ESP32 的命令转发；
+接入 **星星机器人（xiaozhi-esp32）** 自建语音与远程唤醒（Path A，见 §5.4.1）；
+父母吐槽内容push到小红书发布。
 
 ---
 
@@ -242,6 +244,7 @@ flowchart LR
 ```
 
 App 的 `WeeklyReportPage` 走 `GET /weekly_report/latest` 取最近一周的全文，404 当作"暂未生成"。
+家长吐槽内容push至小红书。
 
 ---
 
@@ -927,10 +930,8 @@ flutter run    # 真机推荐，模拟器没有 BLE
 
 ### 8.5 已知限制 & 待办
 
+- 目前只支持小米手环6，后续可能会添加更多的硬件。
+- ESP32硬件板子只支持微雪ESP32-S3-LCD和星智CUBE聊天机器人。
 - 安卓系统不允许程序读取手机当前 WiFi 密码，配网页面**必须手动输入**密码。
-- BLE 配网现走 security 0（**未加密**）。IDF 6.x 默认禁用 sec0、推荐 sec2(SRP6a)；本项目 sdkconfig 显式
-  `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_0=y` 把 sec0 编进固件。在不可信环境部署前需要升级到 sec1
-  （曲线 25519 + AES-256-CTR）或 sec2（SRP6a），相应需要在 Flutter 端实现对应密码学握手。
 - 周报守护线程目前硬编码 `child_id=1`；多孩子家庭需要手动 `POST /weekly_report/generate`。
-- `lib/User.txt` 是历史 logcat 残留，可删。
-- Moonshot API Key 仅放在仓库外 `~/.config/adhd-monitor.env`（或 `ADHD_ENV_FILE`）；若 key 曾进入 git 历史或聊天，应在控制台**轮换**并吊销旧 key。
+- 家长吐槽内容生成不能自动push到小红书，目前小红书没有提供这样的接口。
