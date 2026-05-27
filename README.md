@@ -1,4 +1,4 @@
-# ADHD\_Monitor — 多动症/自闭症儿童陪伴系统
+# 星星守护者 — 特殊儿童陪伴系统
 
 ![系统示意图：手机 App 为中枢；毛绒球向 App 实时传输心率/压力；毛绒球与手环数据同步与预警推送；家长侧记录后向星星设备推送 AI 建议，并启动星星机器人（xiaozhi）的 AI 聊天对话模式](docs/images/README-system-overview.png)
 
