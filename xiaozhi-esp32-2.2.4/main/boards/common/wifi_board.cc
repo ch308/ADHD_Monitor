@@ -193,9 +193,9 @@ void WifiBoard::StartWifiConfigMode() {
     // hands credentials over, then esp_restart()s so WifiManager picks them up
     // on the next boot.
     Application::GetInstance().Schedule([]() {
-        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE,
-                                         "ADHD_Monitor BLE 配网中…",
-                                         "gear", Lang::Sounds::OGG_WIFICONFIG);
+        Application::GetInstance().Alert(Lang::Strings::WAITING_WIFI_CONFIG,
+                                         Lang::Strings::WAITING_WIFI_CONFIG,
+                                         "winking", Lang::Sounds::OGG_WIFICONFIG);
     });
     adhd_prov_ble_start_blocking();
 #endif

@@ -5,6 +5,7 @@
 #include <freertos/event_groups.h>
 #include <freertos/task.h>
 #include <esp_timer.h>
+#include <sdkconfig.h>
 
 #include <string>
 #include <mutex>
@@ -186,6 +187,11 @@ private:
     bool IsSessionStopCommand(const std::string& text) const;
     void TerminateCurrentSession(const char* reason, bool notify_server);
     void EnterSleepPowerSaveMode(const char* reason, bool notify_server);
+
+#if CONFIG_ADHD_KIDS_UI
+    void RefreshKidsDisplay();
+    static const char* SoftEmotionForKids(const char* emotion);
+#endif
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

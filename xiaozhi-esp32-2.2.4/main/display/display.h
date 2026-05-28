@@ -31,6 +31,8 @@ public:
     virtual ~Display();
 
     virtual void SetStatus(const char* status);
+    virtual void SetWelcomeTitle(const char* title);
+    virtual void SetCenterStatus(const char* status);
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetEmotion(const char* emotion);

@@ -13,6 +13,8 @@
 #include "assets/lang_config.h"
 #include "jpg/image_to_jpeg.h"
 
+#include <sdkconfig.h>
+
 #define TAG "Display"
 
 LvglDisplay::LvglDisplay() {
@@ -22,7 +24,9 @@ LvglDisplay::LvglDisplay() {
             LvglDisplay *display = static_cast<LvglDisplay*>(arg);
             DisplayLockGuard lock(display);
             lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
+#if !CONFIG_ADHD_KIDS_UI
             lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
+#endif
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -55,6 +59,12 @@ LvglDisplay::~LvglDisplay() {
     if (status_label_ != nullptr) {
         lv_obj_del(status_label_);
     }
+    if (welcome_label_ != nullptr) {
+        lv_obj_del(welcome_label_);
+    }
+    if (center_status_label_ != nullptr) {
+        lv_obj_del(center_status_label_);
+    }
     if (mute_label_ != nullptr) {
         lv_obj_del(mute_label_);
     }
@@ -70,6 +80,10 @@ LvglDisplay::~LvglDisplay() {
 }
 
 void LvglDisplay::SetStatus(const char* status) {
+#if CONFIG_ADHD_KIDS_UI
+    SetCenterStatus(status);
+    return;
+#endif
     if (!setup_ui_called_) {
         ESP_LOGW(TAG, "SetStatus('%s') called before SetupUI() - message will be lost!", status);
     }
@@ -84,6 +98,38 @@ void LvglDisplay::SetStatus(const char* status) {
     lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 
+    last_status_update_time_ = std::chrono::system_clock::now();
+}
+
+void LvglDisplay::SetWelcomeTitle(const char* title) {
+#if !CONFIG_ADHD_KIDS_UI
+    return;
+#endif
+    if (!setup_ui_called_) {
+        ESP_LOGW(TAG, "SetWelcomeTitle('%s') called before SetupUI() - message will be lost!", title);
+    }
+    DisplayLockGuard lock(this);
+    if (welcome_label_ == nullptr) {
+        return;
+    }
+    lv_label_set_text(welcome_label_, title);
+}
+
+void LvglDisplay::SetCenterStatus(const char* status) {
+#if !CONFIG_ADHD_KIDS_UI
+    SetStatus(status);
+    return;
+#endif
+    if (!setup_ui_called_) {
+        ESP_LOGW(TAG, "SetCenterStatus('%s') called before SetupUI() - message will be lost!", status);
+    }
+    DisplayLockGuard lock(this);
+    if (center_status_label_ == nullptr) {
+        return;
+    }
+    lv_label_set_text(center_status_label_, status);
+    lv_obj_remove_flag(center_status_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
     last_status_update_time_ = std::chrono::system_clock::now();
 }
 
@@ -104,7 +150,11 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
     }
     lv_label_set_text(notification_label_, notification);
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
+#if CONFIG_ADHD_KIDS_UI
+    // Center status stays visible; notification overlays the top status bar only.
+#else
     lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+#endif
 
     esp_timer_stop(notification_timer_);
     ESP_ERROR_CHECK(esp_timer_start_once(notification_timer_, duration_ms * 1000));
@@ -132,13 +182,12 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         }
     }
 
-    // Update time
+#if !CONFIG_ADHD_KIDS_UI
+    // Update time (kids UI keeps center status as WiFi / state text, not a clock)
     if (app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {
-            // Set status to clock "HH:MM"
             time_t now = time(NULL);
             struct tm* tm = localtime(&now);
-            // Check if the we have already set the time
             if (tm->tm_year >= 2025 - 1900) {
                 char time_str[16];
                 strftime(time_str, sizeof(time_str), "%H:%M", tm);
@@ -148,6 +197,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
             }
         }
     }
+#endif
 
     esp_pm_lock_acquire(pm_lock_);
     // Update battery icon

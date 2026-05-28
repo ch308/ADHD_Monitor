@@ -17,7 +17,9 @@ public:
     LvglDisplay();
     virtual ~LvglDisplay();
 
-    virtual void SetStatus(const char* status);
+    virtual void SetStatus(const char* status) override;
+    virtual void SetWelcomeTitle(const char* title) override;
+    virtual void SetCenterStatus(const char* status) override;
     virtual void ShowNotification(const char* notification, int duration_ms = 3000);
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image);
@@ -31,6 +33,8 @@ protected:
 
     lv_obj_t *network_label_ = nullptr;
     lv_obj_t *status_label_ = nullptr;
+    lv_obj_t *welcome_label_ = nullptr;
+    lv_obj_t *center_status_label_ = nullptr;
     lv_obj_t *notification_label_ = nullptr;
     lv_obj_t *mute_label_ = nullptr;
     lv_obj_t *battery_label_ = nullptr;

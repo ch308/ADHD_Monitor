@@ -969,6 +969,14 @@ menu "ADHD Monitor integration"
         help
             Optional. Sent as `Authorization: Bearer <token>` during the WS handshake.
             Must match the server XIAOZHI_WEBSOCKET_TOKEN env var (or both be empty).
+
+    config ADHD_KIDS_UI
+        bool "Kids-friendly display (welcome banner + center status)"
+        default y
+        help
+            When enabled, the LCD shows a fixed welcome title at the top,
+            kid-friendly center status text (provisioning / WiFi / listening /
+            speaking), and skips the idle clock overlay on the status line.
 endmenu
 
 endmenu

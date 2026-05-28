@@ -54,6 +54,11 @@
         "HELLO_MY_FRIEND": "你好，我的朋友！",
         "CONNECTION_SUCCESSFUL": "连接成功",
         "FLIGHT_MODE_OFF": "飞行模式已关闭",
-        "FLIGHT_MODE_ON": "飞行模式已开启"
+        "FLIGHT_MODE_ON": "飞行模式已开启",
+        "WELCOME_TITLE": "星星机器人欢迎你",
+        "WAITING_WIFI_CONFIG": "等待配网中",
+        "LISTENING_KIDS": "聆听中",
+        "SPEAKING_KIDS": "说话中",
+        "CONNECTED_WIFI": "已连接 %s"
     }
 }

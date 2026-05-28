@@ -17,6 +17,7 @@
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
+#include <sdkconfig.h>
 
 #define TAG "Application"
 
@@ -103,6 +104,10 @@ void Application::Initialize() {
     // Setup the display
     auto display = board.GetDisplay();
     display->SetupUI();
+#if CONFIG_ADHD_KIDS_UI
+    display->SetWelcomeTitle(Lang::Strings::WELCOME_TITLE);
+    RefreshKidsDisplay();
+#endif
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
 
@@ -161,14 +166,22 @@ void Application::Initialize() {
             case NetworkEvent::Connected: {
                 last_connected_network_ = data;
                 ESP_LOGW(TAG, "==== Application: WiFi 已连上 SSID: %s ====", data.c_str());
+#if CONFIG_ADHD_KIDS_UI
+                RefreshKidsDisplay();
+#else
                 std::string msg = Lang::Strings::CONNECTED_TO;
                 msg += data;
                 display->ShowNotification(msg.c_str(), 30000);
+#endif
                 audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
                 break;
             }
             case NetworkEvent::Disconnected:
+#if CONFIG_ADHD_KIDS_UI
+                last_connected_network_.clear();
+                RefreshKidsDisplay();
+#endif
                 xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_DISCONNECTED);
                 break;
             case NetworkEvent::WifiConfigModeEnter:
@@ -385,6 +398,9 @@ void Application::HandleNetworkConnectedEvent() {
     // Update the status bar immediately to show the network state
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar(true);
+#if CONFIG_ADHD_KIDS_UI
+    RefreshKidsDisplay();
+#endif
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
@@ -398,6 +414,9 @@ void Application::HandleNetworkDisconnectedEvent() {
     // Update the status bar immediately to show the network state
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar(true);
+#if CONFIG_ADHD_KIDS_UI
+    RefreshKidsDisplay();
+#endif
 }
 
 void Application::HandleActivationDoneEvent() {
@@ -727,7 +746,11 @@ void Application::InitializeProtocol() {
             auto emotion = cJSON_GetObjectItem(root, "emotion");
             if (cJSON_IsString(emotion)) {
                 Schedule([display, emotion_str = std::string(emotion->valuestring)]() {
+#if CONFIG_ADHD_KIDS_UI
+                    display->SetEmotion(SoftEmotionForKids(emotion_str.c_str()));
+#else
                     display->SetEmotion(emotion_str.c_str());
+#endif
                 });
             }
         } else if (strcmp(type->valuestring, "mcp") == 0) {
@@ -810,8 +833,18 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
 void Application::Alert(const char* status, const char* message, const char* emotion, const std::string_view& sound) {
     ESP_LOGW(TAG, "Alert [%s] %s: %s", emotion, status, message);
     auto display = Board::GetInstance().GetDisplay();
+#if CONFIG_ADHD_KIDS_UI
+    display->SetWelcomeTitle(Lang::Strings::WELCOME_TITLE);
+    if (message != nullptr && message[0] != '\0') {
+        display->SetCenterStatus(message);
+    } else {
+        display->SetCenterStatus(status);
+    }
+    display->SetEmotion(SoftEmotionForKids(emotion));
+#else
     display->SetStatus(status);
     display->SetEmotion(emotion);
+#endif
     display->SetChatMessage("system", message);
     if (!sound.empty()) {
         audio_service_.PlaySound(sound);
@@ -821,9 +854,14 @@ void Application::Alert(const char* status, const char* message, const char* emo
 void Application::DismissAlert() {
     if (GetDeviceState() == kDeviceStateIdle) {
         auto display = Board::GetInstance().GetDisplay();
+#if CONFIG_ADHD_KIDS_UI
+        display->SetChatMessage("system", "");
+        RefreshKidsDisplay();
+#else
         display->SetStatus(Lang::Strings::STANDBY);
         display->SetEmotion("neutral");
         display->SetChatMessage("system", "");
+#endif
     }
 }
 
@@ -1030,6 +1068,81 @@ void Application::OnStateChanged(DeviceState old_state, DeviceState new_state) {
     xEventGroupSetBits(event_group_, MAIN_EVENT_STATE_CHANGED);
 }
 
+#if CONFIG_ADHD_KIDS_UI
+const char* Application::SoftEmotionForKids(const char* emotion) {
+    if (emotion == nullptr || emotion[0] == '\0') {
+        return "happy";
+    }
+    if (strcmp(emotion, "angry") == 0 || strcmp(emotion, "crying") == 0) {
+        return "surprised";
+    }
+    if (strcmp(emotion, "sad") == 0) {
+        return "thinking";
+    }
+    return emotion;
+}
+
+void Application::RefreshKidsDisplay() {
+    auto display = Board::GetInstance().GetDisplay();
+    display->SetWelcomeTitle(Lang::Strings::WELCOME_TITLE);
+
+    const EventBits_t net_bits = xEventGroupGetBits(event_group_);
+    const bool network_connected = (net_bits & MAIN_EVENT_NETWORK_CONNECTED) != 0;
+
+    const char* emotion = "neutral";
+    std::string center;
+
+    if (sleep_power_save_mode_) {
+        center = "休眠省电中";
+        emotion = "sleepy";
+    } else {
+        switch (state_machine_.GetState()) {
+            case kDeviceStateWifiConfiguring:
+                center = Lang::Strings::WAITING_WIFI_CONFIG;
+                emotion = "winking";
+                break;
+            case kDeviceStateListening:
+                center = Lang::Strings::LISTENING_KIDS;
+                emotion = "thinking";
+                break;
+            case kDeviceStateSpeaking:
+                center = Lang::Strings::SPEAKING_KIDS;
+                emotion = "happy";
+                break;
+            case kDeviceStateConnecting:
+                center = Lang::Strings::CONNECTING;
+                emotion = "neutral";
+                break;
+            case kDeviceStateIdle:
+                if (network_connected && !last_connected_network_.empty()) {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
+                    center = buf;
+                    emotion = "relaxed";
+                } else {
+                    center = Lang::Strings::WAITING_WIFI_CONFIG;
+                    emotion = "winking";
+                }
+                break;
+            default:
+                if (network_connected && !last_connected_network_.empty()) {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
+                    center = buf;
+                    emotion = "happy";
+                } else {
+                    center = Lang::Strings::WAITING_WIFI_CONFIG;
+                    emotion = "winking";
+                }
+                break;
+        }
+    }
+
+    display->SetCenterStatus(center.c_str());
+    display->SetEmotion(emotion);
+}
+#endif
+
 void Application::HandleStateChangedEvent() {
     DeviceState new_state = state_machine_.GetState();
     clock_ticks_ = 0;
@@ -1042,22 +1155,28 @@ void Application::HandleStateChangedEvent() {
     switch (new_state) {
         case kDeviceStateUnknown:
         case kDeviceStateIdle:
+#if !CONFIG_ADHD_KIDS_UI
             display->SetStatus(sleep_power_save_mode_ ? "休眠省电中" : Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
+#endif
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
             sleep_power_save_mode_ = false;
+#if !CONFIG_ADHD_KIDS_UI
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
+#endif
             break;
         case kDeviceStateListening:
             sleep_power_save_mode_ = false;
+#if !CONFIG_ADHD_KIDS_UI
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+#endif
             session_termination_requested_ = false;
             auto_stop_voice_seen_ = false;
             auto_stop_listen_started_ms_ = esp_timer_get_time() / 1000;
@@ -1098,7 +1217,9 @@ void Application::HandleStateChangedEvent() {
             }
             break;
         case kDeviceStateSpeaking:
+#if !CONFIG_ADHD_KIDS_UI
             display->SetStatus(Lang::Strings::SPEAKING);
+#endif
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
@@ -1121,6 +1242,13 @@ void Application::HandleStateChangedEvent() {
             // Do nothing
             break;
     }
+
+#if CONFIG_ADHD_KIDS_UI
+    if (new_state == kDeviceStateUnknown || new_state == kDeviceStateIdle) {
+        display->ClearChatMessages();
+    }
+    RefreshKidsDisplay();
+#endif
 }
 
 void Application::Schedule(std::function<void()>&& callback) {

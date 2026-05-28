@@ -76,6 +76,11 @@ CONFIG_LV_USE_WIN=n
 CONFIG_LV_BUILD_EXAMPLES=n
 CONFIG_LV_BUILD_DEMOS=n
 
+# Hardware: 星智 CUBE 1.54 TFT WiFi 版。
+# Keep this in defaults so a fresh `idf.py reconfigure` does not fall back to
+# BOARD_TYPE_BREAD_COMPACT_WIFI, which drives an I2C OLED instead of this SPI TFT.
+CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI=y
+
 # ADHD Monitor 星星机器人 BLE WiFi provisioning (Path A).
 # Without these the firmware silently falls back to USE_HOTSPOT_WIFI_PROVISIONING
 # (its Kconfig default), the BLE branch in wifi_board.cc never compiles, and
@@ -100,4 +105,7 @@ CONFIG_ADHD_MONITOR_CMD_PORT=11760
 CONFIG_ADHD_MONITOR_BYPASS_OTA=y
 CONFIG_ADHD_MONITOR_WS_URL="ws://124.223.53.33:11760/xiaozhi/ws"
 CONFIG_ADHD_MONITOR_WS_TOKEN=""
+
+# 星星机器人儿童友好屏幕：顶部欢迎语 + 中间状态 + 表情（不显示空闲时钟）
+CONFIG_ADHD_KIDS_UI=y
 

@@ -11,10 +11,14 @@
 #include "power_manager.h"
 
 #include <esp_log.h>
+#include <esp_err.h>
+#include <esp_heap_caps.h>
 #include <esp_lcd_panel_vendor.h>
 
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define TAG "XINGZHI_CUBE_1_54TFT_WIFI"
 
@@ -145,9 +149,48 @@ private:
         ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(panel_, DISPLAY_SWAP_XY));
         ESP_ERROR_CHECK(esp_lcd_panel_mirror(panel_, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y));
         ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel_, true));
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
 
         display_ = new SpiLcdDisplay(panel_io_, panel_, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, 
             DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
+    }
+
+    void RunDisplaySelfTest() {
+        ESP_LOGI(TAG, "LCD self-test: backlight=100%%, panel on, RGBW color fill");
+        ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel_, true));
+        GetBacklight()->SetBrightness(100);
+        vTaskDelay(pdMS_TO_TICKS(150));
+
+        const int stripe_height = 40;
+        uint16_t* stripe = static_cast<uint16_t*>(heap_caps_malloc(
+            DISPLAY_WIDTH * stripe_height * sizeof(uint16_t), MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+        if (stripe == nullptr) {
+            ESP_LOGE(TAG, "LCD self-test: failed to allocate DMA stripe buffer");
+            return;
+        }
+
+        // RGB565 test colors: red, green, blue, white. If only the backlight turns on,
+        // the SPI path or LCD controller init is still suspect.
+        const uint16_t colors[] = {0xF800, 0x07E0, 0x001F, 0xFFFF};
+        for (uint16_t color : colors) {
+            for (int i = 0; i < DISPLAY_WIDTH * stripe_height; ++i) {
+                stripe[i] = color;
+            }
+            for (int y = 0; y < DISPLAY_HEIGHT; y += stripe_height) {
+                const int y_end = (y + stripe_height > DISPLAY_HEIGHT) ? DISPLAY_HEIGHT : (y + stripe_height);
+                esp_err_t err = esp_lcd_panel_draw_bitmap(panel_, 0, y, DISPLAY_WIDTH, y_end, stripe);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "LCD self-test: draw failed at y=%d err=%s", y, esp_err_to_name(err));
+                    heap_caps_free(stripe);
+                    return;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(250));
+        }
+
+        heap_caps_free(stripe);
+        GetBacklight()->RestoreBrightness();
+        ESP_LOGI(TAG, "LCD self-test finished");
     }
 
 public:
@@ -160,7 +203,7 @@ public:
         InitializeSpi();
         InitializeButtons();
         InitializeSt7789Display();
-        GetBacklight()->RestoreBrightness();
+        RunDisplaySelfTest();
     }
 
     virtual AudioCodec* GetAudioCodec() override {

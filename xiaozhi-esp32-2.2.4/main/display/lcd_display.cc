@@ -16,6 +16,8 @@
 
 #include "board.h"
 
+#include <sdkconfig.h>
+
 #define TAG "LcdDisplay"
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
@@ -835,7 +837,11 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(emoji_box_, 0, 0);
     lv_obj_set_style_border_width(emoji_box_, 0, 0);
+#if CONFIG_ADHD_KIDS_UI
+    lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, -28);
+#else
     lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
+#endif
 
     emoji_label_ = lv_label_create(emoji_box_);
     lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
@@ -923,6 +929,26 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
+
+#if CONFIG_ADHD_KIDS_UI
+    lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+
+    welcome_label_ = lv_label_create(screen);
+    lv_obj_set_width(welcome_label_, LV_HOR_RES * 0.9);
+    lv_obj_set_style_text_align(welcome_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(welcome_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_long_mode(welcome_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(welcome_label_, Lang::Strings::WELCOME_TITLE);
+    lv_obj_align(welcome_label_, LV_ALIGN_TOP_MID, 0, text_font->line_height + lvgl_theme->spacing(6));
+
+    center_status_label_ = lv_label_create(screen);
+    lv_obj_set_width(center_status_label_, LV_HOR_RES * 0.85);
+    lv_obj_set_style_text_align(center_status_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(center_status_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_long_mode(center_status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_text(center_status_label_, Lang::Strings::WAITING_WIFI_CONFIG);
+    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, 0, text_font->line_height + lvgl_theme->spacing(12));
+#endif
 
 #if CONFIG_USE_MULTILINE_CHAT_MESSAGE
     /* Bottom bar - auto height, grows upward with wrapped text */

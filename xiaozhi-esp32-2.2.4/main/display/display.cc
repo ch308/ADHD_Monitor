@@ -24,6 +24,14 @@ void Display::SetStatus(const char* status) {
     ESP_LOGW(TAG, "SetStatus: %s", status);
 }
 
+void Display::SetWelcomeTitle(const char* title) {
+    ESP_LOGW(TAG, "SetWelcomeTitle: %s", title);
+}
+
+void Display::SetCenterStatus(const char* status) {
+    ESP_LOGW(TAG, "SetCenterStatus: %s", status);
+}
+
 void Display::ShowNotification(const std::string &notification, int duration_ms) {
     ShowNotification(notification.c_str(), duration_ms);
 }
