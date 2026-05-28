@@ -1,0 +1,11 @@
+# Copy to esp_idf_path.txt (same folder as the .bat scripts).
+# One active line: path to export.bat, relative to ADHD_Monitor repo root OR absolute.
+#
+# Bundled / vendored IDF inside repo:
+esp-idf\export.bat
+#
+# Sibling checkout (example):
+# ..\esp\v6.0.1\esp-idf\export.bat
+#
+# Absolute path also works:
+# C:\esp\v6.0.1\esp-idf\export.bat
