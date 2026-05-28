@@ -12,7 +12,15 @@
       "Bash(C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe *)",
       "Bash(cmd *)",
       "WebFetch(domain:124.223.53.33)",
-      "Bash(idf.py fullclean *)"
+      "Bash(idf.py fullclean *)",
+      "Bash(cmd.exe /c \"rmdir /s /q C:\\\\etc\\\\adhd_monitor\\\\xiaozhi-esp32-2.2.4\\\\build\")",
+      "Bash(cmd.exe //c \"findstr /v /c:\\\\\"-specs=C:/etc/adhd_monitor/xiaozhi-esp32-2.2.4/build/specs/picolibc.specs\\\\\" C:\\\\etc\\\\adhd_monitor\\\\xiaozhi-esp32-2.2.4\\\\build\\\\toolchain\\\\asmflags > C:\\\\etc\\\\adhd_monitor\\\\xiaozhi-esp32-2.2.4\\\\build\\\\toolchain\\\\asmflags.tmp && move /y C:\\\\etc\\\\adhd_monitor\\\\xiaozhi-esp32-2.2.4\\\\build\\\\toolchain\\\\asmflags.tmp C:\\\\etc\\\\adhd_monitor\\\\xiaozhi-esp32-2.2.4\\\\build\\\\toolchain\\\\asmflags && echo.>> C:\\\\etc\\\\adhd_monitor\\\\xiaozhi-esp32-2.2.4\\\\build\\\\toolchain\\\\asmflags\")",
+      "Bash(powershell.exe -ExecutionPolicy Bypass -File \"C:\\\\etc\\\\adhd_monitor\\\\fix_build_paths.ps1\")",
+      "Bash(\"C:/Program Files/Git/bin/bash.exe\" -c \"rm -rf /c/etc/adhd_monitor/ESP32-S3-LCD-1.47B/build\")",
+      "Bash(cmd.exe /c \"echo test\")",
+      "Bash(idf.py build *)",
+      "Bash(\"C:/Program Files/Git/bin/bash.exe\" -c \"echo hello\")",
+      "Bash(cmd.exe /c \"rmdir /s /q c:\\\\etc\\\\adhd_monitor\\\\ESP32-S3-LCD-1.47B\\\\build\")"
     ]
   }
 }
