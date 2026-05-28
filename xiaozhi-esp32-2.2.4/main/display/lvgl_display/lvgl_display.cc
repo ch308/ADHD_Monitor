@@ -24,7 +24,7 @@ LvglDisplay::LvglDisplay() {
             LvglDisplay *display = static_cast<LvglDisplay*>(arg);
             DisplayLockGuard lock(display);
             lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
-#if !CONFIG_ADHD_KIDS_UI
+#ifndef CONFIG_ADHD_KIDS_UI
             lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
 #endif
         },
@@ -80,7 +80,7 @@ LvglDisplay::~LvglDisplay() {
 }
 
 void LvglDisplay::SetStatus(const char* status) {
-#if CONFIG_ADHD_KIDS_UI
+#ifdef CONFIG_ADHD_KIDS_UI
     SetCenterStatus(status);
     return;
 #endif
@@ -102,7 +102,7 @@ void LvglDisplay::SetStatus(const char* status) {
 }
 
 void LvglDisplay::SetWelcomeTitle(const char* title) {
-#if !CONFIG_ADHD_KIDS_UI
+#ifndef CONFIG_ADHD_KIDS_UI
     return;
 #endif
     if (!setup_ui_called_) {
@@ -116,7 +116,7 @@ void LvglDisplay::SetWelcomeTitle(const char* title) {
 }
 
 void LvglDisplay::SetCenterStatus(const char* status) {
-#if !CONFIG_ADHD_KIDS_UI
+#ifndef CONFIG_ADHD_KIDS_UI
     SetStatus(status);
     return;
 #endif
@@ -150,7 +150,7 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
     }
     lv_label_set_text(notification_label_, notification);
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
-#if CONFIG_ADHD_KIDS_UI
+#ifdef CONFIG_ADHD_KIDS_UI
     // Center status stays visible; notification overlays the top status bar only.
 #else
     lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
@@ -182,7 +182,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         }
     }
 
-#if !CONFIG_ADHD_KIDS_UI
+#ifndef CONFIG_ADHD_KIDS_UI
     // Update time (kids UI keeps center status as WiFi / state text, not a clock)
     if (app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {

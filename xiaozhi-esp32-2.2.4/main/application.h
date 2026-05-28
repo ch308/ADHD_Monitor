@@ -188,7 +188,7 @@ private:
     void TerminateCurrentSession(const char* reason, bool notify_server);
     void EnterSleepPowerSaveMode(const char* reason, bool notify_server);
 
-#if CONFIG_ADHD_KIDS_UI
+#ifdef CONFIG_ADHD_KIDS_UI
     void RefreshKidsDisplay();
     static const char* SoftEmotionForKids(const char* emotion);
 #endif

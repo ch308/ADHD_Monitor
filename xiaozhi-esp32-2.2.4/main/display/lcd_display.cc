@@ -837,7 +837,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0);
     lv_obj_set_style_pad_all(emoji_box_, 0, 0);
     lv_obj_set_style_border_width(emoji_box_, 0, 0);
-#if CONFIG_ADHD_KIDS_UI
+#ifdef CONFIG_ADHD_KIDS_UI
     lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, -28);
 #else
     lv_obj_align(emoji_box_, LV_ALIGN_CENTER, 0, 0);
@@ -930,7 +930,7 @@ void LcdDisplay::SetupUI() {
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
     lv_obj_align(status_label_, LV_ALIGN_CENTER, 0, 0);
 
-#if CONFIG_ADHD_KIDS_UI
+#ifdef CONFIG_ADHD_KIDS_UI
     lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
 
     welcome_label_ = lv_label_create(screen);

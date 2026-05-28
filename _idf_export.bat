@@ -20,8 +20,8 @@ if not defined EXPORT_BAT if defined IDF_PATH (
   if defined EXPORT_BAT goto :activate
 )
 
-if not defined EXPORT_BAT if exist "%REPO_ROOT%esp_idf_path.txt" (
-  for /f "usebackq eol=# tokens=* delims=" %%L in ("%REPO_ROOT%esp_idf_path.txt") do (
+if not defined EXPORT_BAT if exist "%REPO_ROOT%\esp_idf_path.txt" (
+  for /f "usebackq eol=# tokens=* delims=" %%L in ("%REPO_ROOT%\esp_idf_path.txt") do (
     if not defined EXPORT_BAT if not "%%L"=="" call :resolve_path "%%L"
   )
 )
@@ -54,7 +54,7 @@ for %%D in (C D E F) do if not defined EXPORT_BAT if exist "%%D:\esp\" (
 if not defined EXPORT_BAT (
   echo [%SCRIPT_NAME%] ERROR: Could not find ESP-IDF export.bat.
   echo.
-  echo Create %REPO_ROOT%esp_idf_path.txt with one line, for example:
+  echo Create %REPO_ROOT%\esp_idf_path.txt with one line, for example:
   echo   esp-idf\export.bat
   echo   ..\..\esp\v6.0.1\esp-idf\export.bat
   echo Or set ESP_IDF_EXPORT_BAT before running the script.
