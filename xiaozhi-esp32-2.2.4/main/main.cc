@@ -14,7 +14,6 @@
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_ops.h>
-#include "display/Vernon_ST7789T.h"
 
 static const char *TAG = "LCD_TEST";
 
@@ -80,11 +79,11 @@ extern "C" void app_main(void)
     // 4. Init ST7789T panel using the custom Vernon driver (matches working code)
     ESP_LOGI(TAG, "Init ST7789T driver...");
     esp_lcd_panel_handle_t panel = NULL;
-    esp_lcd_panel_dev_st7789t_config_t panel_config = {};
+    esp_lcd_panel_dev_config_t panel_config = {};
     panel_config.reset_gpio_num     = PIN_RST;
-    panel_config.rgb_endian         = LCD_RGB_ELEMENT_ORDER_BGR;
+    panel_config.rgb_ele_order      = LCD_RGB_ELEMENT_ORDER_BGR;
     panel_config.bits_per_pixel     = 16;
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789t(io_handle, &panel_config, &panel));
+    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &panel));
 
     ESP_ERROR_CHECK(esp_lcd_panel_reset(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));

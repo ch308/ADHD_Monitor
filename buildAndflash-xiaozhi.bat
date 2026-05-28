@@ -63,7 +63,9 @@ if /i "%MODE%"=="monitor" (
 set "EXPECTED_BOARD=CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI=y"
 
 if not exist "%CD%\sdkconfig" (
-  echo [%SCRIPT_NAME%] sdkconfig missing, running set-target esp32s3...
+  echo [%SCRIPT_NAME%] sdkconfig missing, running fullclean and set-target esp32s3...
+  idf.py fullclean
+  if errorlevel 1 exit /b 1
   idf.py set-target esp32s3
   if errorlevel 1 exit /b 1
   echo.
@@ -71,19 +73,15 @@ if not exist "%CD%\sdkconfig" (
 
 findstr /x /c:"%EXPECTED_BOARD%" "%CD%\sdkconfig" >nul 2>&1
 if errorlevel 1 (
-  echo [%SCRIPT_NAME%] ERROR: Wrong board in sdkconfig.
-  echo [%SCRIPT_NAME%] Required: %EXPECTED_BOARD%
+  echo [%SCRIPT_NAME%] WARNING: Wrong board in sdkconfig, auto-cleaning and reconfiguring...
+  idf.py fullclean
+  if errorlevel 1 exit /b 1
+  del /q "%CD%\sdkconfig"
+  idf.py set-target esp32s3
+  if errorlevel 1 exit /b 1
+  idf.py reconfigure
+  if errorlevel 1 exit /b 1
   echo.
-  echo [%SCRIPT_NAME%] Fix once ^(from repo root^):
-  echo   cd %PROJECT_REL%
-  echo   idf.py fullclean
-  echo   del sdkconfig
-  echo   idf.py set-target esp32s3
-  echo   idf.py reconfigure
-  echo   cd ..
-  echo   buildAndflash-xiaozhi.bat -p COM5
-  echo.
-  exit /b 1
 )
 
 findstr /x /c:"CONFIG_ADHD_KIDS_UI=y" "%CD%\sdkconfig" >nul 2>&1
@@ -92,6 +90,11 @@ if errorlevel 1 (
   echo [%SCRIPT_NAME%] Run: idf.py reconfigure   or add CONFIG_ADHD_KIDS_UI=y
   echo.
 )
+
+echo [%SCRIPT_NAME%] Running: idf.py reconfigure
+idf.py reconfigure
+if errorlevel 1 exit /b 1
+echo.
 
 echo [%SCRIPT_NAME%] Running: idf.py %* build flash
 idf.py %* build flash

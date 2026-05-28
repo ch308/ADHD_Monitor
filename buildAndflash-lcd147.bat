@@ -60,11 +60,18 @@ if /i "%MODE%"=="monitor" (
 )
 
 if not exist "%CD%\sdkconfig" (
-  echo [%SCRIPT_NAME%] sdkconfig missing, running set-target esp32s3...
+  echo [%SCRIPT_NAME%] sdkconfig missing, running fullclean and set-target esp32s3...
+  idf.py fullclean
+  if errorlevel 1 exit /b 1
   idf.py set-target esp32s3
   if errorlevel 1 exit /b 1
   echo.
 )
+
+echo [%SCRIPT_NAME%] Running: idf.py reconfigure
+idf.py reconfigure
+if errorlevel 1 exit /b 1
+echo.
 
 echo [%SCRIPT_NAME%] Running: idf.py %* build flash
 idf.py %* build flash

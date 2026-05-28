@@ -11,7 +11,8 @@
       "Bash(ssh *)",
       "Bash(C:\\\\Program Files\\\\Git\\\\bin\\\\bash.exe *)",
       "Bash(cmd *)",
-      "WebFetch(domain:124.223.53.33)"
+      "WebFetch(domain:124.223.53.33)",
+      "Bash(idf.py fullclean *)"
     ]
   }
 }
