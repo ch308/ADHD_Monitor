@@ -8,6 +8,15 @@ import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+const Color _xhsCanvas = Color(0xFFFBF7F1);
+const Color _xhsSurface = Color(0xFFFFFCF7);
+const Color _xhsBorder = Color(0xFFE9DED0);
+const Color _xhsInk = Color(0xFF283238);
+const Color _xhsMuted = Color(0xFF76806F);
+const Color _xhsSage = Color(0xFF5F8F7A);
+const Color _xhsRose = Color(0xFFD95F7A);
+const Color _xhsCoral = Color(0xFFE87962);
+
 class XiaohongshuDraftPage extends StatefulWidget {
   const XiaohongshuDraftPage({
     super.key,
@@ -226,7 +235,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFFE91E63),
+              backgroundColor: _xhsRose,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: const Text('去小红书'),
@@ -237,28 +246,42 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
 
     if (confirmed != true || !mounted) return;
 
-    // 3. 尝试通过 URL Scheme 唤起小红书（iOS & Android 通用）
-    const xhsScheme = 'xhsdiscover://';
-    // Android 备用：Intent URI（直接调 Package）
-    const xhsAndroidIntent =
-        'intent://#Intent;package=com.xingin.xhs;action=android.intent.action.MAIN;end';
+    // 3. 已安装 App 时优先直达小红书；失败才进入官网兜底。
+    final launchCandidates = Platform.isAndroid
+        ? const <({String url, LaunchMode mode})>[
+            (
+              url:
+                  'intent://#Intent;action=android.intent.action.MAIN;category=android.intent.category.LAUNCHER;package=com.xingin.xhs;end',
+              mode: LaunchMode.externalApplication,
+            ),
+            (
+              url:
+                  'intent://home#Intent;scheme=xhsdiscover;package=com.xingin.xhs;end',
+              mode: LaunchMode.externalApplication,
+            ),
+            (
+              url: 'xhsdiscover://home',
+              mode: LaunchMode.externalNonBrowserApplication,
+            ),
+          ]
+        : const <({String url, LaunchMode mode})>[
+            (
+              url: 'xhsdiscover://',
+              mode: LaunchMode.externalNonBrowserApplication,
+            ),
+          ];
 
-    bool launched = false;
-
-    try {
-      launched = await launchUrl(
-        Uri.parse(xhsScheme),
-        mode: LaunchMode.externalApplication,
-      );
-    } catch (_) {}
-
-    if (!launched) {
+    var launched = false;
+    for (final candidate in launchCandidates) {
       try {
         launched = await launchUrl(
-          Uri.parse(xhsAndroidIntent),
-          mode: LaunchMode.externalApplication,
+          Uri.parse(candidate.url),
+          mode: candidate.mode,
         );
-      } catch (_) {}
+      } catch (_) {
+        launched = false;
+      }
+      if (launched) break;
     }
 
     if (!launched && mounted) {
@@ -286,7 +309,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                 );
               },
               style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFFE91E63),
+                backgroundColor: _xhsRose,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               child: const Text('打开小红书官网'),
@@ -392,10 +415,13 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: _xhsCanvas,
       appBar: AppBar(
-        title: const Text('小红书树洞草稿'),
-        backgroundColor: const Color(0xFFE91E63),
-        foregroundColor: Colors.white,
+        title: const Text('发布前编辑'),
+        backgroundColor: _xhsCanvas,
+        foregroundColor: _xhsInk,
+        elevation: 0,
+        scrolledUnderElevation: 0,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -451,22 +477,41 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   children: [
+                    const Text(
+                      '小红书树洞草稿',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w800,
+                        color: _xhsInk,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      '已根据刚才的行为记录生成，可先润色再发布。',
+                      style: TextStyle(
+                        fontSize: 13,
+                        height: 1.45,
+                        color: _xhsMuted,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
                     // ── 生成依据：展示原始行为记录，便于家长核验 ──
                     Card(
+                      color: _xhsSurface,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        side: const BorderSide(color: Color(0xFFEEF0F8)),
+                        borderRadius: BorderRadius.circular(16),
+                        side: const BorderSide(color: _xhsBorder),
                       ),
                       child: ExpansionTile(
                         leading: const Icon(Icons.document_scanner_outlined,
-                            color: Color(0xFF5B67CA), size: 22),
+                            color: _xhsSage, size: 22),
                         title: const Text(
                           '生成依据（点击展开核验）',
                           style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF5B67CA)),
+                              color: _xhsSage),
                         ),
                         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                         expandedCrossAxisAlignment: CrossAxisAlignment.start,
@@ -474,7 +519,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                           _SourceRow(
                             label: '行为记录',
                             value: widget.observation,
-                            valueColor: const Color(0xFF1E2235),
+                            valueColor: _xhsInk,
                           ),
                           const SizedBox(height: 8),
                           _SourceRow(
@@ -494,10 +539,11 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                     const SizedBox(height: 10),
                     // ── 隐私提示 ──
                     Card(
-                      color: Colors.pink.shade50,
+                      color: const Color(0xFFFFF0EA),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                        borderRadius: BorderRadius.circular(16),
+                        side: BorderSide(color: _xhsCoral.withValues(alpha: 0.22)),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.all(14),
@@ -505,13 +551,13 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Icon(Icons.privacy_tip_outlined,
-                                color: Colors.pink.shade400),
+                              color: _xhsCoral),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 _privacyNotice,
                                 style: TextStyle(
-                                  color: Colors.pink.shade900,
+                                  color: const Color(0xFF8A493E),
                                   height: 1.45,
                                   fontSize: 13,
                                 ),
@@ -527,19 +573,45 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _titleController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: '标题',
-                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: _xhsSurface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsBorder),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsBorder),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsRose, width: 1.5),
+                        ),
                       ),
                       maxLines: 2,
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: _contentController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: '正文',
                         alignLabelWithHint: true,
-                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: _xhsSurface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsBorder),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsBorder),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsRose, width: 1.5),
+                        ),
                         // X2: 小红书正文 1000 字限制，显示字数提示
                         counterText: '',
                       ),
@@ -560,9 +632,22 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _tagsController,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: '标签，用空格分隔',
-                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: _xhsSurface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsBorder),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsBorder),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: const BorderSide(color: _xhsRose, width: 1.5),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -572,7 +657,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                       icon: const Icon(Icons.open_in_new_rounded),
                       label: const Text('去小红书发布'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFFE91E63),
+                        backgroundColor: _xhsRose,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 15),
                         shape: RoundedRectangleBorder(
@@ -589,8 +674,8 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
                             icon: const Icon(Icons.copy_rounded, size: 18),
                             label: const Text('仅复制'),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFE91E63),
-                              side: const BorderSide(color: Color(0xFFE91E63)),
+                              foregroundColor: _xhsRose,
+                              side: BorderSide(color: _xhsRose.withValues(alpha: 0.55)),
                               padding: const EdgeInsets.symmetric(vertical: 13),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(12)),
@@ -636,13 +721,13 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
         // 区域标题行
         Row(
           children: [
-            const Icon(Icons.image_outlined, size: 16, color: Color(0xFF5B67CA)),
+            const Icon(Icons.image_outlined, size: 16, color: _xhsSage),
             const SizedBox(width: 6),
             const Text('AI 配图',
                 style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF5B67CA))),
+                    color: _xhsSage)),
             const Spacer(),
             if (_imageBytes != null && !_generatingImage)
               TextButton.icon(
@@ -663,18 +748,18 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
           Container(
             height: 200,
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
+              color: _xhsSurface,
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.grey.shade200),
+              border: Border.all(color: _xhsBorder),
             ),
             child: const Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(color: Color(0xFF5B67CA)),
+                  CircularProgressIndicator(color: _xhsSage),
                   SizedBox(height: 12),
-                  Text('AI 正在绘图，约 10–20 秒…',
-                      style: TextStyle(color: Colors.black54, fontSize: 13)),
+                  Text('AI 正在绘图，约 10-20 秒...',
+                      style: TextStyle(color: _xhsMuted, fontSize: 13)),
                 ],
               ),
             ),
@@ -695,7 +780,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
             icon: const Icon(Icons.ios_share, size: 18),
             label: const Text('保存 / 分享配图'),
             style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF5B67CA),
+              backgroundColor: _xhsSage,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(vertical: 12),
               shape:
@@ -726,8 +811,8 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
             icon: const Icon(Icons.auto_awesome_rounded, size: 18),
             label: const Text('生成 AI 配图'),
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF5B67CA),
-              side: const BorderSide(color: Color(0xFF5B67CA)),
+              foregroundColor: _xhsSage,
+              side: BorderSide(color: _xhsSage.withValues(alpha: 0.55)),
               padding: const EdgeInsets.symmetric(vertical: 13),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12)),

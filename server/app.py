@@ -650,27 +650,33 @@ def fetch_xiaohongshu_draft(observation, advice, condition_type, bpm=None):
     """把一条家长记录改写成可编辑的小红书树洞草稿，默认不直接发布。"""
     label = "自闭症谱系" if condition_type == "autism" else "ADHD"
     bpm_desc = "当时心率偏高" if bpm not in (None, "", 0, 0.0) else "当时孩子状态有些紧绷"
+    behavior_scene = re.sub(r"\s+", " ", str(observation or "")).strip()
+    behavior_scene = behavior_scene[:120]
     system = (
         "你是帮助特殊儿童家长写小红书树洞帖的中文编辑。"
         "目标是保护隐私、降低诊断化表达、保留真实处境和共鸣感，方便类似情况的家长交流。"
         "不得编造学校、城市、姓名、医院、班级、具体年龄、精确时间地点等隐私信息。"
+        "你写出来的内容要像家长在深夜认真整理自己的心情，不像健康科普、AI 总结或产品文案。"
     )
     prompt = (
         "请把下面这条家长现场记录改写成一篇可编辑的小红书草稿。\n"
         f"孩子主要支持方向：{label}\n"
         f"状态背景：{bpm_desc}\n"
-        f"家长原始观察：{observation}\n"
+        f"家长原始观察：{behavior_scene}\n"
         f"当时给家长的建议摘要：{advice or '无'}\n\n"
         "要求：\n"
         "0. 【核心要求，优先级最高】文章必须以家长原始观察描述的那个具体行为情景为主线展开，"
         "   不能替换成别的情景、不能架空泛化为「孩子状态有些紧绷」之类的模糊描述；"
         "   行为动作、情绪反应、当时场景（如写作业、大叫、来回踱步等）必须保留在正文中。\n"
-        "1. 只隐去可识别个人身份的隐私：不出现姓名、学校名、住址、医院名、设备型号、"
+        "1. 标题必须点出这次记录里的具体行为或场景，不要写成泛泛的「今天又被拉扯」。\n"
+        "2. 正文第一段就要写出这次行为：可以自然改写，但读者必须一眼看出和原始观察有关。\n"
+        "3. 用第一人称写，允许出现家长的犹豫、自责、心疼、努力稳住自己的过程；"
+        "   不要使用「首先/其次/建议/干预」这类机械分点表达。\n"
+        "4. 只隐去可识别个人身份的隐私：不出现姓名、学校名、住址、医院名、设备型号、"
         "   精确心率数值、具体日期时间。孩子的行为本身不属于隐私，不能删除或泛化。\n"
-        "2. 语气像真实家长树洞/轻吐槽/求交流，不要像医学报告，不要诊断孩子。\n"
-        "3. 可以增加少量生活化描写（地点改为「家里/外出」等泛化说法），但不能编造新的敏感事实。\n"
-        "4. 结尾邀请有类似经历的家长交流，可以引用建议摘要中对家长有帮助的那个思路。\n"
-        "5. 返回严格 JSON：{\"title\":\"...\",\"content\":\"...\",\"tags\":[\"...\",\"...\"]}。"
+        "5. 可以增加少量生活化描写（地点改为「家里/外出」等泛化说法），但不能编造新的敏感事实。\n"
+        "6. 结尾邀请有类似经历的家长交流，可以把建议摘要改写成一句温柔的自我提醒。\n"
+        "7. 返回严格 JSON：{\"title\":\"...\",\"content\":\"...\",\"tags\":[\"...\",\"...\"]}。"
     )
     try:
         response = _kimi_chat_create(
@@ -690,6 +696,8 @@ def fetch_xiaohongshu_draft(observation, advice, condition_type, bpm=None):
             tags_raw = parsed.get("tags") or []
             tags = [str(t).strip().lstrip("#") for t in tags_raw if str(t).strip()]
             if title and content:
+                if behavior_scene and behavior_scene[:12] not in content:
+                    content = f"刚才记录下来的那一幕是：{behavior_scene}。\n\n{content}"
                 return {
                     "title": title[:80],
                     "content": content[:1200],
@@ -698,12 +706,14 @@ def fetch_xiaohongshu_draft(observation, advice, condition_type, bpm=None):
     except Exception as e:
         print(f"Kimi 小红书草稿生成错误: {e}")
 
-    fallback_title = "今天又被孩子的状态拉扯了一下"
+    scene = behavior_scene or "孩子刚才的反应让我有点措手不及"
+    fallback_title = f"记录一下刚才那一幕：{scene[:24]}"
     fallback_content = (
-        "今天想来这里树洞一下。孩子刚才明显有些紧绷，我也差点跟着着急起来。"
-        "后来我试着先把声音放轻，把眼前的事拆成很小的一步，先陪孩子缓一缓。"
-        "养育这样的孩子，很多时候不是不爱，也不是不努力，而是真的需要一边摸索一边稳住自己。"
-        "有没有类似情况的家长？你们通常会怎么陪孩子度过这种时刻，想听听大家的经验。"
+        f"今天想来这里树洞一下。刚才我记录到的是：{scene}。"
+        "看到孩子卡在那个状态里，我第一反应其实也会慌，会担心自己是不是又没接住。"
+        "后来我提醒自己先别急着讲道理，声音放轻一点，把眼前的事拆小一点，先陪孩子把这一阵缓过去。"
+        "养育这样的孩子，很多时候不是不爱，也不是不努力，而是大人和孩子都在学着慢一点。"
+        "有没有类似经历的家长？你们遇到这种具体场景时，会怎么陪孩子走出来？"
     )
     return {
         "title": fallback_title,
