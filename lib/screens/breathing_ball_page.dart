@@ -80,9 +80,9 @@ class _BreathingBallPageState extends State<BreathingBallPage>
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Color(0xFF1A237E),
-              Color(0xFF311B92),
-              Color(0xFF0D0D0D),
+              Color(0xFF1C1B3A),
+              Color(0xFF141228),
+              Color(0xFF0A0914),
             ],
           ),
         ),
@@ -150,22 +150,22 @@ class _BreathingBallPageState extends State<BreathingBallPage>
                             shape: BoxShape.circle,
                             gradient: const RadialGradient(
                               colors: [
-                                Color(0xFFBBDEFB),
-                                Color(0xFF7986CB),
+                                Color(0xFFB2EBE9),
+                                Color(0xFF4ECDC4),
                               ],
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.lightBlueAccent
-                                    .withValues(alpha: 0.5),
-                                blurRadius: 50,
+                                color: const Color(0xFF4ECDC4)
+                                    .withValues(alpha: 0.55),
+                                blurRadius: 56,
                                 spreadRadius: 4,
                               ),
                               BoxShadow(
-                                color: Colors.lightBlueAccent
-                                    .withValues(alpha: 0.2),
-                                blurRadius: 80,
-                                spreadRadius: 8,
+                                color: const Color(0xFF4ECDC4)
+                                    .withValues(alpha: 0.25),
+                                blurRadius: 90,
+                                spreadRadius: 10,
                               ),
                             ],
                           ),

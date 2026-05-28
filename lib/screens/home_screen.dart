@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show max;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
@@ -91,6 +92,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   bool _speechInitializing = false;
   bool _speechListening = false;
   String _speechBaseText = '';
+
+  // H7: 图表数据加载失败是否显示提示
+  bool _chartLoadFailed = false;
+
+  // 定时器：拉取状态 / 刷新历史
+  Timer? _statusTimer;
+  Timer? _historyTimer;
 
   static const double _alertBpm = 120;
 
@@ -196,13 +204,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
 
     // 每 3 秒从云服务器拉取一次最新的模拟心率
-    Timer.periodic(Duration(seconds: 3), (timer) => fetchStatus());
+    _statusTimer = Timer.periodic(Duration(seconds: 3), (timer) => fetchStatus());
 
     // 启动时加载历史心率数据
     fetchHistory();
 
     // 每 5 秒刷新历史心率数据
-    Timer.periodic(Duration(seconds: 5), (timer) => fetchHistory());
+    _historyTimer = Timer.periodic(Duration(seconds: 5), (timer) => fetchHistory());
 
     // 蓝牙手环引导：监听适配器状态，开启即尝试静默连接
     _bootstrapMiBand();
@@ -459,12 +467,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         _syncMacToCloudService();
         unawaited(_checkAndResolveBinding());
         break;
-      case MiBandStage.authFailed:
+              case MiBandStage.authFailed:
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red.shade700,
-            duration: const Duration(seconds: 4),
-            content: const Text('❌ 手环安全握手失败，请检查 Auth Key'),
+            duration: const Duration(seconds: 6),
+            content: const Text('❌ 手环安全握手失败。请检查代码中的 _miBand6AuthKey 是否换成了你的手环真实 Key（每只手环唯一，可从 Zepp Life App 获取）'),
           ),
         );
         break;
@@ -696,6 +704,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     if (_speechInitializing) return;
     _speechInitializing = true;
     try {
+      // 开麦前先停 TTS，避免音频焦点冲突导致 STT 无法获取麦克风
+      await _flutterTts.stop();
+      // 确保旧 STT 会话彻底释放，防止 Android error_busy
+      await _speechToText.stop();
+
       if (!_speechReady) {
         _speechReady = await _speechToText.initialize(
           onStatus: (status) {
@@ -708,36 +721,78 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           onError: (error) {
             if (!mounted) return;
             setState(() => _speechListening = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('语音识别失败：${error.errorMsg}')),
-            );
+            _speechReady = false; // 任何错误都重置，下次重新 initialize
+            _speechToText.stop();
+            if (error.errorMsg.contains('busy')) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('语音识别繁忙，请稍等片刻再试'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            } else {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('语音识别出错：${error.errorMsg}')),
+              );
+            }
           },
         );
       }
       if (!_speechReady) {
         if (!mounted) return;
+        // 区分「权限拒绝」和「设备不支持」，给出明确引导
+        final hasPermission = await _speechToText.hasPermission;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('当前设备暂不支持语音输入')),
+          SnackBar(
+            content: Text(
+              hasPermission
+                  ? '当前设备暂不支持语音输入'
+                  : '需要麦克风权限才能使用语音输入，请在系统设置中开启',
+            ),
+          ),
         );
         return;
       }
 
       _speechBaseText = _recordController.text.trim();
-      await _speechToText.listen(
-        localeId: 'zh_CN',
-        listenFor: const Duration(seconds: 60),
-        pauseFor: const Duration(seconds: 4),
-        partialResults: true,
-        onResult: (result) {
-          if (!mounted) return;
-          final words = result.recognizedWords.trim();
-          final prefix = _speechBaseText.isEmpty ? '' : '$_speechBaseText ';
-          _recordController.text = '$prefix$words'.trim();
-          _recordController.selection = TextSelection.collapsed(
-            offset: _recordController.text.length,
+      // 问题修复：listen() 返回 false 表示启动失败，不能设 _speechListening = true
+      bool started = false;
+      try {
+        started = await _speechToText.listen(
+          localeId: 'zh_CN',
+          listenFor: const Duration(seconds: 60),
+          pauseFor: const Duration(seconds: 5),
+          partialResults: true,
+          onResult: (result) {
+            if (!mounted) return;
+            final words = result.recognizedWords.trim();
+            final prefix =
+                _speechBaseText.isEmpty ? '' : '$_speechBaseText ';
+            _recordController.text = '$prefix$words'.trim();
+            _recordController.selection = TextSelection.collapsed(
+              offset: _recordController.text.length,
+            );
+          },
+        );
+      } catch (e) {
+        // listen() 内部抛出异常时重置状态，避免进入坏状态
+        _speechReady = false;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('语音启动失败，请重试：$e')),
           );
-        },
-      );
+        }
+        return;
+      }
+      if (!started) {
+        _speechReady = false;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('语音识别启动失败，请重试')),
+          );
+        }
+        return;
+      }
       if (mounted) setState(() => _speechListening = true);
     } finally {
       _speechInitializing = false;
@@ -749,6 +804,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     _breathingController.dispose();
     _recordController.dispose();
     vibrationTimer?.cancel();
+    _statusTimer?.cancel();
+    _historyTimer?.cancel();
     unawaited(_healingPlayer.dispose());
     _flutterTts.stop(); // 停止语音播报
     unawaited(_speechToText.stop());
@@ -1138,10 +1195,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
       if (response.statusCode == 200) {
         List<dynamic> data = json.decode(response.body);
-        // 只保留最近 20 条历史数据，避免图表过度稀疏或过长
         final recentData =
             data.length > 20 ? data.sublist(data.length - 20) : data;
         setState(() {
+          _chartLoadFailed = false;
           chartTimestamps =
               recentData.map((e) => e['time']?.toString() ?? '').toList();
           chartData = recentData.asMap().entries.map((e) {
@@ -1154,6 +1211,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     } catch (e) {
       debugPrint('图表数据获取失败: $e');
+      // H7: 图表加载失败时显示提示
+      if (mounted && chartData.isEmpty) {
+        setState(() => _chartLoadFailed = true);
+      }
     }
   }
 
@@ -1194,7 +1255,18 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         // 检查是否需要停止报警（2分钟超时）
         if (isAlerting && alertStartTime != null) {
           Duration elapsed = DateTime.now().difference(alertStartTime!);
-          if (elapsed.inMinutes >= 2) {
+          // H6: 报警 2 分钟自动停止前短暂提示用户
+        if (elapsed.inSeconds >= 105 && elapsed.inSeconds < 111) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('报警即将自动结束，心率已至少在 2 分钟内未再超限'),
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+        }
+        if (elapsed.inMinutes >= 2) {
             setState(() {
               isAlerting = false;
               isDismissed = false;
@@ -1262,10 +1334,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     fontWeight: FontWeight.w500)),
             const SizedBox(height: 12),
             _OptionCard(
-              icon: Icons.spa_outlined,
+              icon: Icons.spa_rounded,
               label: '引导孩子正念呼吸',
               subtitle: '呼吸球 + 疗愈纯音 + 轻抚震动',
-              color: const Color(0xFF00897B),
+              color: const Color(0xFF26A69A),
               onTap: () async {
                 await _presentBreathingBallPage();
                 if (mounted) {
@@ -1278,10 +1350,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             ),
             const SizedBox(height: 8),
             _OptionCard(
-              icon: Icons.psychology_outlined,
+              icon: Icons.psychology_rounded,
               label: '多动症 · 记录当前行为',
               subtitle: '描述行为，获取 AI 建议',
-              color: const Color(0xFFF57C00),
+              color: const Color(0xFFF5A623),
               onTap: () => setState(() {
                 _selectedConditionType = 'adhd';
                 _selectedConditionLabel = '多动症';
@@ -1290,10 +1362,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             ),
             const SizedBox(height: 8),
             _OptionCard(
-              icon: Icons.volunteer_activism_outlined,
+              icon: Icons.volunteer_activism_rounded,
               label: '自闭症 · 记录当前行为',
               subtitle: '描述行为，获取 AI 建议',
-              color: const Color(0xFF3949AB),
+              color: const Color(0xFF5B67CA),
               onTap: () => setState(() {
                 _selectedConditionType = 'autism';
                 _selectedConditionLabel = '自闭症';
@@ -1309,9 +1381,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Card(
-        elevation: 2,
-        shadowColor: Colors.black12,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEEF0F8)),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -1325,11 +1400,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     decoration: BoxDecoration(
                       gradient: LinearGradient(colors: [
                         _selectedConditionType == 'adhd'
-                            ? const Color(0xFFFF9800)
-                            : const Color(0xFF5C6BC0),
+                            ? const Color(0xFFF5A623)
+                            : const Color(0xFF5B67CA),
                         _selectedConditionType == 'adhd'
-                            ? const Color(0xFFF57C00)
-                            : const Color(0xFF3949AB),
+                            ? const Color(0xFFE8960F)
+                            : const Color(0xFF7B87E8),
                       ]),
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -1380,8 +1455,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(
                         color: _selectedConditionType == 'adhd'
-                            ? const Color(0xFFFF9800)
-                            : const Color(0xFF5C6BC0),
+                            ? const Color(0xFFF5A623)
+                            : const Color(0xFF5B67CA),
                         width: 2),
                   ),
                   contentPadding:
@@ -1425,12 +1500,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       onPressed: _recordSubmitting ? null : _submitRecord,
                       style: FilledButton.styleFrom(
                         backgroundColor: _selectedConditionType == 'adhd'
-                            ? const Color(0xFFFF9800)
-                            : const Color(0xFF5C6BC0),
+                            ? const Color(0xFFF5A623)
+                            : const Color(0xFF5B67CA),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(14)),
                       ),
                       child: _recordSubmitting
                           ? const SizedBox(
@@ -1549,9 +1624,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Card(
-        elevation: 3,
-        shadowColor: Colors.black26,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEEF0F8)),
+        ),
         clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1561,7 +1638,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Color(0xFF7C4DFF), Color(0xFF536DFE)],
+                  colors: [Color(0xFF5B67CA), Color(0xFF7B87E8)],
                 ),
               ),
               child: Row(
@@ -1606,7 +1683,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         side: const BorderSide(color: Color(0xFFE91E63)),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(14)),
                       ),
                       onPressed: _openXiaohongshuDraft,
                     ),
@@ -1618,11 +1695,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       icon: const Icon(Icons.check_circle_outline, size: 18),
                       label: const Text('收到，回到待机'),
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF536DFE),
+                        backgroundColor: const Color(0xFF5B67CA),
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(14)),
                       ),
                       onPressed: () => setState(() {
                         _kimiAdvice = null;
@@ -1771,33 +1848,33 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final isAlertMode = isAlerting && !isDismissed;
 
     return Scaffold(
-      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text('ADHD 专注精灵',
-            style: TextStyle(fontWeight: FontWeight.w600, letterSpacing: 1)),
-        backgroundColor: Colors.transparent,
+        title: AnimatedDefaultTextStyle(
+          duration: const Duration(milliseconds: 400),
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 17,
+            color: isAlertMode ? const Color(0xFFFF7F72) : const Color(0xFF1E2235),
+            letterSpacing: 0.3,
+          ),
+          child: const Text('ADHD 专注精灵'),
+        ),
+        backgroundColor: const Color(0xFFF8F9FE),
         elevation: 0,
-        flexibleSpace: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: isAlertMode
-                  ? [const Color(0xFFE53935), const Color(0xFFFF6D6D)]
-                  : [const Color(0xFF3949AB), const Color(0xFF5C6BC0)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (isAlertMode ? Colors.red : Colors.indigo)
-                    .withValues(alpha: 0.3),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
-            ],
+        scrolledUnderElevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            color: isAlertMode ? const Color(0xFFFFD9D6) : const Color(0xFFEEF0F8),
+            height: 1,
           ),
         ),
         actions: [
           PopupMenuButton<String>(
             tooltip: '家庭协作',
-            icon: const Icon(Icons.menu, color: Colors.white),
+            icon: Icon(Icons.menu_rounded,
+                color: isAlertMode ? const Color(0xFFFF7F72) : const Color(0xFF5B67CA)),
             onSelected: (v) async {
               if (v == 'logout') widget.onLogout?.call();
               if (v == 'invite') await _showInviteMemberDialog();
@@ -1812,9 +1889,20 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'xiaozhi_bind') await _showXiaozhiBindDialog();
             },
             itemBuilder: (ctx) => [
+              // H4: 分组标题
+              const PopupMenuItem(
+                enabled: false,
+                height: 32,
+                child: Text('家庭协作', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+              ),
               const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
               const PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
               const PopupMenuDivider(),
+              const PopupMenuItem(
+                enabled: false,
+                height: 32,
+                child: Text('手环管理', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+              ),
               PopupMenuItem(
                 value: 'band_bind',
                 enabled: !_bindingActionInProgress,
@@ -1830,6 +1918,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 child: Text('设置压力报警阈值'),
               ),
               const PopupMenuDivider(),
+              const PopupMenuItem(
+                enabled: false,
+                height: 32,
+                child: Text('设备管理', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+              ),
               const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
               const PopupMenuItem(value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
               const PopupMenuItem(
@@ -1849,7 +1942,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.insights_outlined, color: Colors.white),
+            icon: Icon(Icons.insights_rounded,
+                color: isAlertMode ? const Color(0xFFFF7F72) : const Color(0xFF5B67CA)),
             tooltip: '历史足迹',
             onPressed: () {
               Navigator.of(context).push<void>(
@@ -1863,7 +1957,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             },
           ),
           IconButton(
-            icon: const Icon(Icons.auto_stories_outlined, color: Colors.white),
+            icon: Icon(Icons.auto_stories_outlined,
+                color: isAlertMode ? const Color(0xFFFF7F72) : const Color(0xFF5B67CA)),
             tooltip: 'AI 报告',
             onPressed: () {
               Navigator.of(context).push<void>(
@@ -1878,18 +1973,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           ),
         ],
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: isAlertMode
-                ? [const Color(0xFFFFF0F0), const Color(0xFFFCE4E4),
-                   const Color(0xFFFFF5F5)]
-                : [const Color(0xFFF5F7FF), const Color(0xFFEEF0FF),
-                   const Color(0xFFF8F9FF)],
-          ),
-        ),
+      body: AnimatedContainer(
+        duration: const Duration(milliseconds: 500),
+        color: isAlertMode ? const Color(0xFFFFF4F3) : const Color(0xFFF8F9FE),
         child: SafeArea(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
@@ -1928,28 +2014,28 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         shape: BoxShape.circle,
                         gradient: RadialGradient(
                           colors: isAlertMode
-                              ? [const Color(0xFFFF8A80), const Color(0xFFE53935)]
+                              ? [const Color(0xFFFF9D8B), const Color(0xFFFF7F72)]
                               : isDismissed
-                                  ? [const Color(0xFF81C784), const Color(0xFF4CAF50)]
-                                  : [const Color(0xFF90CAF9), const Color(0xFF42A5F5)],
+                                  ? [const Color(0xFF80EDE7), const Color(0xFF4ECDC4)]
+                                  : [const Color(0xFF8B95E8), const Color(0xFF5B67CA)],
                         ),
                         boxShadow: [
                           BoxShadow(
                             color: isAlertMode
-                                ? const Color(0xFFFF5252).withValues(alpha: 0.5)
+                                ? const Color(0xFFFF7F72).withValues(alpha: 0.45)
                                 : isDismissed
-                                    ? const Color(0xFF4CAF50).withValues(alpha: 0.4)
-                                    : const Color(0xFF42A5F5).withValues(alpha: 0.4),
-                            blurRadius: 30,
-                            spreadRadius: 6,
+                                    ? const Color(0xFF4ECDC4).withValues(alpha: 0.4)
+                                    : const Color(0xFF5B67CA).withValues(alpha: 0.35),
+                            blurRadius: 32,
+                            spreadRadius: 4,
                           ),
                           BoxShadow(
                             color: isAlertMode
-                                ? const Color(0xFFFF5252).withValues(alpha: 0.25)
+                                ? const Color(0xFFFF7F72).withValues(alpha: 0.2)
                                 : isDismissed
-                                    ? const Color(0xFF4CAF50).withValues(alpha: 0.2)
-                                    : const Color(0xFF42A5F5).withValues(alpha: 0.2),
-                            blurRadius: 50,
+                                    ? const Color(0xFF4ECDC4).withValues(alpha: 0.15)
+                                    : const Color(0xFF5B67CA).withValues(alpha: 0.15),
+                            blurRadius: 56,
                             spreadRadius: 12,
                           ),
                         ],
@@ -1975,14 +2061,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 AnimatedDefaultTextStyle(
                   duration: const Duration(milliseconds: 400),
                   style: TextStyle(
-                    fontSize: 42,
+                    fontSize: 48,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -1,
+                    letterSpacing: -2,
                     color: isAlertMode
-                        ? const Color(0xFFD32F2F)
-                        : const Color(0xFF303F9F),
+                        ? const Color(0xFFFF7F72)
+                        : const Color(0xFF5B67CA),
                   ),
-                  child: Text('$bpm'),
+                  child: Text(bpm > 0 ? bpm.toStringAsFixed(0) : '--'),
                 ),
                 const Text(
                   'BPM',
@@ -2001,22 +2087,29 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: isAlertMode
-                        ? const Color(0xFFFFCDD2).withValues(alpha: 0.7)
+                        ? const Color(0xFFFFEEED)
                         : isDismissed
-                            ? const Color(0xFFC8E6C9).withValues(alpha: 0.7)
-                            : const Color(0xFFE8EAF6).withValues(alpha: 0.7),
-                    borderRadius: BorderRadius.circular(20),
+                            ? const Color(0xFFE8FAF8)
+                            : const Color(0xFFEEF0FB),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: isAlertMode
+                          ? const Color(0xFFFFBFBA)
+                          : isDismissed
+                              ? const Color(0xFF4ECDC4)
+                              : const Color(0xFFCDD0F0),
+                    ),
                   ),
                   child: Text(
-                    isDismissed ? '已确认警报' : message,
+                    isDismissed ? '已确认，请选择下一步' : message,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: FontWeight.w500,
                       color: isAlertMode
-                          ? const Color(0xFFB71C1C)
+                          ? const Color(0xFFE8614A)
                           : isDismissed
-                              ? const Color(0xFF2E7D32)
-                              : const Color(0xFF283593),
+                              ? const Color(0xFF26A69A)
+                              : const Color(0xFF5B67CA),
                     ),
                   ),
                 ),
@@ -2024,11 +2117,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   const Padding(
                     padding: EdgeInsets.only(top: 16),
                     child: Text(
-                      '点击上方精灵确认报警',
+                      '轻触上方图标，确认已知晓',
                       style: TextStyle(
-                          color: Colors.black38,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w400),
+                          color: const Color(0xFFFF7F72).withValues(alpha: 0.75),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500),
                     ),
                   ),
                 const SizedBox(height: 20),
@@ -2178,13 +2271,42 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             : value >= _stressAlertThreshold
                 ? Colors.orange
                 : Colors.green;
-    final subtitle = value == null
-        ? '正在通过心率变化计算压力值（约需 5 秒数据）'
-        : '更新时间：${stressUpdatedAt != null ? _formatTime(stressUpdatedAt!) : '--'}\n'
-            '压力算法：优先使用手环 stress；拿不到时按心率基线抬升、变异度、上升趋势估算。\n'
-            '阈值请从右上角菜单「设置压力报警阈值」调整。';
-    return Tooltip(
-      message: subtitle,
+    // H5: 用点击弹出底部说明替代 Tooltip（移动端 Tooltip 需长按才能触发，不友好）
+    return GestureDetector(
+      onTap: () {
+        final detail = value == null
+            ? '正在通过心率变化计算压力值（约需 5 秒数据）'
+            : '更新时间：${stressUpdatedAt != null ? _formatTime(stressUpdatedAt!) : '--'}\n\n'
+                '压力算法：优先使用手环 stress；拿不到时按心率基线抬升、变异度、上升趋势估算。\n\n'
+                '阈值请从右上角菜单「设置压力报警阈值」调整。';
+        showModalBottomSheet<void>(
+          context: context,
+          shape: const RoundedRectangleBorder(
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          builder: (ctx) => Padding(
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Icon(Icons.psychology_alt_outlined, color: color.shade600),
+                  const SizedBox(width: 8),
+                  Text('压力值说明',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: color.shade700)),
+                ]),
+                const SizedBox(height: 12),
+                Text(detail,
+                    style: const TextStyle(fontSize: 14, height: 1.6)),
+              ],
+            ),
+          ),
+        );
+      },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
@@ -2209,6 +2331,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 color: color.shade700,
               ),
             ),
+            const SizedBox(width: 4),
+            Icon(Icons.info_outline, size: 13, color: color.shade400),
           ],
         ),
       ),
@@ -2219,9 +2343,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Card(
-        elevation: 3,
-        shadowColor: Colors.black26,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEEF0F8)),
+        ),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(8, 16, 16, 16),
           child: Column(
@@ -2232,7 +2358,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 child: Row(
                   children: [
                     Icon(Icons.show_chart_rounded,
-                        size: 20, color: Colors.indigo.shade300),
+                        size: 20, color: const Color(0xFF5B67CA)),
                     const SizedBox(width: 6),
                     const Text(
                       '心率趋势',
@@ -2256,7 +2382,15 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               SizedBox(
                 height: 240,
                 width: double.infinity,
-                child: LineChart(
+                child: chartData.isEmpty
+                    ? Center(
+                        child: Text(
+                          _chartLoadFailed ? '心率数据加载失败\n请检查网络连接' : '暂无心率数据',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                        ),
+                      )
+                    : LineChart(
                   LineChartData(
                     lineBarsData: [
                       LineChartBarData(
@@ -2264,17 +2398,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         isCurved: true,
                         curveSmoothness: 0.3,
                         color: isAlert
-                            ? const Color(0xFFE57373)
-                            : const Color(0xFF5C6BC0),
-                        barWidth: 3,
+                            ? const Color(0xFFFF7F72)
+                            : const Color(0xFF5B67CA),
+                        barWidth: 2.5,
                         dotData: FlDotData(
                           show: chartData.length <= 10,
                           getDotPainter: (spot, _, __, ___) =>
                               FlDotCirclePainter(
                             radius: 3,
                             color: isAlert
-                                ? const Color(0xFFE57373)
-                                : const Color(0xFF5C6BC0),
+                                ? const Color(0xFFFF7F72)
+                                : const Color(0xFF5B67CA),
                             strokeWidth: 1.5,
                             strokeColor: Colors.white,
                           ),
@@ -2286,12 +2420,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                             end: Alignment.bottomCenter,
                             colors: [
                               (isAlert
-                                      ? const Color(0xFFE57373)
-                                      : const Color(0xFF5C6BC0))
-                                  .withValues(alpha: 0.3),
+                                      ? const Color(0xFFFF7F72)
+                                      : const Color(0xFF5B67CA))
+                                  .withValues(alpha: 0.25),
                               (isAlert
-                                      ? const Color(0xFFE57373)
-                                      : const Color(0xFF5C6BC0))
+                                      ? const Color(0xFFFF7F72)
+                                      : const Color(0xFF5B67CA))
                                   .withValues(alpha: 0.02),
                             ],
                           ),
@@ -2336,7 +2470,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       },
                     ),
                     minY: 50,
-                    maxY: 120,
+                    // H2: 动态计算 maxY，至少覆盖报警遨値 + 20，防止峰値被截断
+                    maxY: max(
+                      chartData.isEmpty ? _alertBpm : chartData.map((s) => s.y).reduce(max),
+                      _alertBpm,
+                    ) + 20,
                     minX: 0,
                     maxX: chartData.isNotEmpty ? chartData.last.x : 0,
                     titlesData: FlTitlesData(

@@ -29,6 +29,9 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   final _nameReg = TextEditingController();
   bool _busy = false;
   String? _err;
+  // L1: 密码显示/隐藏开关
+  bool _obscurePassLogin = true;
+  bool _obscurePassReg = true;
 
   @override
   void initState() {
@@ -63,13 +66,26 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     if (s.contains('SocketException') ||
         s.contains('Connection refused') ||
         s.contains('Failed host lookup') ||
-        s.contains('Network is unreachable')) {
+        s.contains('Network is unreachable') ||
+        s.contains('TimeoutException')) {
       return '无法连接服务器 ${_host()}:11760。\n'
           '请检查：① 手机/电脑与服务器网络是否互通；② 云主机安全组与本机防火墙是否放行 TCP 11760；'
           '③ 服务器上是否已运行 Flask（监听 0.0.0.0:11760）；'
           '④ Android 模拟器访问本机请填 10.0.2.2。';
     }
     return s;
+  }
+
+  // L4: 从服务器响应体中提取可读的错误信息
+  String _parseServerError(String body, String fallback) {
+    try {
+      final decoded = json.decode(body);
+      if (decoded is Map) {
+        final msg = decoded['message'] ?? decoded['error'] ?? decoded['detail'];
+        if (msg != null && msg.toString().isNotEmpty) return msg.toString();
+      }
+    } catch (_) {}
+    return fallback;
   }
 
   Map<String, String> _jsonHeaders([String? bearer]) {
@@ -85,7 +101,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     var r = await http.get(
       Uri.parse('$base/my/children'),
       headers: _jsonHeaders(token),
-    );
+    ).timeout(const Duration(seconds: 10));
     if (r.statusCode != 200) {
       throw Exception('拉取孩子列表失败 ${r.statusCode}');
     }
@@ -96,7 +112,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         Uri.parse('$base/my/children'),
         headers: _jsonHeaders(token),
         body: json.encode({'nickname': '我的孩子'}),
-      );
+      ).timeout(const Duration(seconds: 10));
       if (cr.statusCode != 200) {
         throw Exception('创建默认孩子失败 ${cr.statusCode}');
       }
@@ -108,6 +124,17 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   }
 
   Future<void> _doLogin() async {
+    // L2: 客户端表单验证
+    final user = _userLogin.text.trim();
+    final pass = _passLogin.text;
+    if (user.isEmpty) {
+      setState(() => _err = '请输入用户名');
+      return;
+    }
+    if (pass.isEmpty) {
+      setState(() => _err = '请输入密码');
+      return;
+    }
     setState(() {
       _busy = true;
       _err = null;
@@ -117,12 +144,13 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         Uri.parse('${_apiBase()}/auth/login'),
         headers: _jsonHeaders(),
         body: json.encode({
-          'username': _userLogin.text.trim().toLowerCase(),
-          'password': _passLogin.text,
+          'username': user.toLowerCase(),
+          'password': pass,
         }),
-      );
+      ).timeout(const Duration(seconds: 10));
       if (r.statusCode != 200) {
-        setState(() => _err = '登录失败：${r.body}');
+        // L4: 解析服务端错误信息
+        setState(() => _err = _parseServerError(r.body, '用户名或密码不正确'));
         return;
       }
       final body = json.decode(r.body) as Map<String, dynamic>;
@@ -142,6 +170,21 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   }
 
   Future<void> _doRegister() async {
+    // L2: 客户端表单验证
+    final user = _userReg.text.trim();
+    final pass = _passReg.text;
+    if (user.isEmpty) {
+      setState(() => _err = '请输入用户名');
+      return;
+    }
+    if (user.length < 3) {
+      setState(() => _err = '用户名至少需要 3 位');
+      return;
+    }
+    if (pass.isEmpty) {
+      setState(() => _err = '请输入密码');
+      return;
+    }
     setState(() {
       _busy = true;
       _err = null;
@@ -151,30 +194,26 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         Uri.parse('${_apiBase()}/auth/register'),
         headers: _jsonHeaders(),
         body: json.encode({
-          'username': _userReg.text.trim().toLowerCase(),
-          'password': _passReg.text,
-          'display_name': _nameReg.text.trim().isEmpty
-              ? _userReg.text.trim()
-              : _nameReg.text.trim(),
+          'username': user.toLowerCase(),
+          'password': pass,
+          'display_name': _nameReg.text.trim().isEmpty ? user : _nameReg.text.trim(),
         }),
-      );
+      ).timeout(const Duration(seconds: 10));
       if (r.statusCode == 409) {
         setState(() => _err = '该用户名已被使用，请换一个');
         return;
       }
       if (r.statusCode != 200) {
-        setState(() => _err = '注册失败：${r.body}');
+        setState(() => _err = _parseServerError(r.body, '注册失败'));
         return;
       }
       if (!mounted) return;
       await SessionStore.saveServerHost(_host());
       if (!mounted) return;
-      _userLogin.text = _userReg.text.trim().toLowerCase();
-      _passLogin.text = _passReg.text;
-      _tabs.animateTo(0);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('注册成功，请使用同一密码登录')),
-      );
+      // L3: 注册成功后直接自动登录，无需手动切换 tab
+      _userLogin.text = user.toLowerCase();
+      _passLogin.text = pass;
+      await _doLogin();
     } catch (e) {
       setState(() => _err = _networkErrorHint(e));
     } finally {
@@ -188,12 +227,12 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
             colors: [
-              Color(0xFF1A237E),
-              Color(0xFF3949AB),
-              Color(0xFF5C6BC0),
+              Color(0xFF3B4BC8),
+              Color(0xFF5B67CA),
+              Color(0xFF8B95E8),
             ],
           ),
         ),
@@ -203,10 +242,15 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
               const SizedBox(height: 24),
               // Logo area
               Container(
-                padding: const EdgeInsets.all(16),
+                width: 80,
+                height: 80,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.12),
+                  color: Colors.white.withValues(alpha: 0.15),
                   shape: BoxShape.circle,
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.35),
+                    width: 1.5,
+                  ),
                 ),
                 child: const Icon(Icons.favorite_rounded,
                     color: Colors.white, size: 40),
@@ -216,9 +260,9 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                 'ADHD 专注精灵',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1,
+                  fontSize: 26,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.5,
                 ),
               ),
               const SizedBox(height: 4),
@@ -256,7 +300,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                           controller: _tabs,
                           indicator: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Color(0xFF3949AB), Color(0xFF5C6BC0)],
+                              colors: [Color(0xFF5B67CA), Color(0xFF7B87E8)],
                             ),
                             borderRadius: BorderRadius.circular(10),
                           ),
@@ -318,12 +362,16 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                             _buildForm(
                               username: _userLogin,
                               password: _passLogin,
+                              obscurePass: _obscurePassLogin,
+                              onToggleObscure: () => setState(() => _obscurePassLogin = !_obscurePassLogin),
                               submitLabel: '进入家庭空间',
                               onSubmit: _doLogin,
                             ),
                             _buildForm(
                               username: _userReg,
                               password: _passReg,
+                              obscurePass: _obscurePassReg,
+                              onToggleObscure: () => setState(() => _obscurePassReg = !_obscurePassReg),
                               extra: TextField(
                                 controller: _nameReg,
                                 decoration: InputDecoration(
@@ -371,6 +419,8 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   Widget _buildForm({
     required TextEditingController username,
     required TextEditingController password,
+    required bool obscurePass,
+    required VoidCallback onToggleObscure,
     Widget? extra,
     required String submitLabel,
     required VoidCallback onSubmit,
@@ -415,10 +465,21 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         const SizedBox(height: 14),
         TextField(
           controller: password,
+          obscureText: obscurePass,
           decoration: InputDecoration(
             labelText: '密码',
             prefixIcon: Icon(Icons.lock_outline,
                 color: Colors.indigo.shade300, size: 20),
+            // L1: 密码显示/隐藏切换按鈕
+            suffixIcon: IconButton(
+              icon: Icon(
+                obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                color: Colors.grey.shade400,
+                size: 20,
+              ),
+              onPressed: onToggleObscure,
+              tooltip: obscurePass ? '显示密码' : '隐藏密码',
+            ),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -436,7 +497,6 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
             filled: true,
             fillColor: Colors.grey.shade50,
           ),
-          obscureText: true,
         ),
         if (extra != null) ...[const SizedBox(height: 14), extra],
         if (_err != null) ...[
@@ -466,14 +526,14 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
           width: double.infinity,
           decoration: BoxDecoration(
             gradient: const LinearGradient(
-              colors: [Color(0xFF3949AB), Color(0xFF5C6BC0)],
+              colors: [Color(0xFF5B67CA), Color(0xFF7B87E8)],
             ),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF3949AB).withValues(alpha: 0.3),
-                blurRadius: 8,
-                offset: const Offset(0, 3),
+                color: const Color(0xFF5B67CA).withValues(alpha: 0.35),
+                blurRadius: 14,
+                offset: const Offset(0, 5),
               ),
             ],
           ),

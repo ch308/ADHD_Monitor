@@ -45,10 +45,36 @@ except ImportError as exc:
     print("xiaozhi Path A bridge disabled (missing dependency?):", exc)
 
 # Kimi 使用 OpenAI SDK 兼容接口；请在服务器环境变量中配置 MOONSHOT_API_KEY
+_moonshot_api_key = os.getenv("MOONSHOT_API_KEY", "你的_MOONSHOT_API_KEY")
+# G2: 启动时检测占位符 API Key，输出明确警告
+if _moonshot_api_key == "你的_MOONSHOT_API_KEY":
+    print(
+        "\n"
+        "========== ⚠️  MOONSHOT_API_KEY 未配置 ==========\n"
+        "检测到 MOONSHOT_API_KEY 仍为默认占位符，AI 功能将全部失效。\n"
+        "请在服务器环境变量中设置真实密钥，例如：\n"
+        "  export MOONSHOT_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx\n"
+        "或在 ecosystem.config.js 的 env 节点中配置后重启服务。\n"
+        "==================================================\n",
+        file=sys.stderr,
+    )
+
 client = OpenAI(
-    api_key=os.getenv("MOONSHOT_API_KEY", "你的_MOONSHOT_API_KEY"),
+    api_key=_moonshot_api_key,
     base_url=os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.cn/v1"),
 )
+
+# 阿里百炼 DashScope API（AI 配图功能，可选）
+_dashscope_api_key = os.getenv("DASHSCOPE_API_KEY", "你的_DASHSCOPE_API_KEY")
+if _dashscope_api_key == "你的_DASHSCOPE_API_KEY":
+    print(
+        "\n"
+        "========== ⚠️  DASHSCOPE_API_KEY 未配置（可选功能）==========\n"
+        "小红书 AI 配图功能未启用。如需使用，请登录 https://bailian.console.aliyun.com/ 获取 API Key 并设置：\n"
+        "  export DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxx\n"
+        "==========================================================\n",
+        file=sys.stderr,
+    )
 
 
 def _moonshot_chat_model() -> str:
@@ -484,6 +510,7 @@ def _heart_avg_between(
         SELECT AVG(bpm), COUNT(*)
         FROM heart_rate_history
         WHERE child_id = ? AND timestamp {lop} ? AND timestamp {hip} ?
+          AND bpm > 0
         """,
         (child_id, t_lo, t_hi),
     )
@@ -635,10 +662,14 @@ def fetch_xiaohongshu_draft(observation, advice, condition_type, bpm=None):
         f"家长原始观察：{observation}\n"
         f"当时给家长的建议摘要：{advice or '无'}\n\n"
         "要求：\n"
-        "1. 必须隐去或泛化个人隐私，不出现姓名、学校、住址、医院、设备、精确心率、具体日期。\n"
+        "0. 【核心要求，优先级最高】文章必须以家长原始观察描述的那个具体行为情景为主线展开，"
+        "   不能替换成别的情景、不能架空泛化为「孩子状态有些紧绷」之类的模糊描述；"
+        "   行为动作、情绪反应、当时场景（如写作业、大叫、来回踱步等）必须保留在正文中。\n"
+        "1. 只隐去可识别个人身份的隐私：不出现姓名、学校名、住址、医院名、设备型号、"
+        "   精确心率数值、具体日期时间。孩子的行为本身不属于隐私，不能删除或泛化。\n"
         "2. 语气像真实家长树洞/轻吐槽/求交流，不要像医学报告，不要诊断孩子。\n"
-        "3. 可以增加少量生活化描写，但不能编造新的敏感事实。\n"
-        "4. 结尾邀请有类似经历的家长交流。\n"
+        "3. 可以增加少量生活化描写（地点改为「家里/外出」等泛化说法），但不能编造新的敏感事实。\n"
+        "4. 结尾邀请有类似经历的家长交流，可以引用建议摘要中对家长有帮助的那个思路。\n"
         "5. 返回严格 JSON：{\"title\":\"...\",\"content\":\"...\",\"tags\":[\"...\",\"...\"]}。"
     )
     try:
@@ -935,6 +966,172 @@ def xiaohongshu_draft():
         "draft": draft,
         "privacy_notice": "草稿已尽量脱敏，但发布前仍建议家长再次检查姓名、学校、住址、医院等隐私信息。",
     }), 200
+
+
+def _generate_image_prompt(observation, advice, condition_type):
+    """用 Kimi 根据草稿内容生成适合 Flux 模型的英文图像提示词。"""
+    label = "autism spectrum" if condition_type == "autism" else "ADHD"
+    system = (
+        "You are an expert at writing Flux / Stable Diffusion image generation prompts "
+        "for warm parenting illustrations on Chinese social media (Xiaohongshu). "
+        "Return ONLY the prompt text, no explanation, no quotes."
+    )
+    prompt = (
+        f"Create a Flux image generation prompt for a warm illustration to accompany "
+        f"a Xiaohongshu parenting post about raising a child with {label}.\n"
+        f"Parent's observation (for context only, do NOT include identifiable details): {observation[:200]}\n\n"
+        "Requirements:\n"
+        "- Style: soft watercolor illustration, warm pastel palette (peach, lavender, sage green)\n"
+        "- Scene: parent and young child in a cozy home, nurturing and tender moment\n"
+        "- Mood: hopeful, warm, gentle — not medical, not clinical\n"
+        "- NO text, NO faces shown in detail, NO medical equipment\n"
+        "- Vertical 3:4 portrait composition\n"
+        "- Safe for all ages, suitable for public social media\n"
+        "Return ONLY the English prompt, 40–80 words."
+    )
+    try:
+        response = _kimi_chat_create(
+            model=_moonshot_chat_model(),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=150,
+        )
+        img_prompt = (response.choices[0].message.content or "").strip().strip('"\'')
+        if img_prompt:
+            return img_prompt
+    except Exception as e:
+        print(f"Kimi 图像提示词生成错误: {e}")
+    return (
+        "Warm watercolor illustration of a loving parent gently sitting beside a young child "
+        "at home, soft peach and lavender tones, window light, cozy atmosphere, "
+        "hopeful and tender mood, no faces visible, vertical portrait composition"
+    )
+
+
+def _call_dashscope_image(prompt: str) -> str:
+    """调用阿里百炼（DashScope）通义万象异步生成图像，返回 base64 字符串（PNG）。"""
+    import requests as req_lib
+    import base64
+    import time
+
+    api_url = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
+    auth_headers = {"Authorization": f"Bearer {_dashscope_api_key}"}
+    submit_headers = {
+        **auth_headers,
+        "Content-Type": "application/json",
+        "X-DashScope-Async": "enable",
+    }
+    payload = {
+        "model": "wanx2.1-t2i-turbo",
+        "input": {
+            "prompt": prompt,
+            "negative_prompt": "低质量，模糊，文字，水印，签名，人物面部特写，医疗设备，恐怖，暗色",
+        },
+        "parameters": {
+            "size": "768*1024",
+            "n": 1,
+            "style": "<watercolor>",
+        },
+    }
+
+    # Step 1: 提交异步任务
+    resp = req_lib.post(api_url, json=payload, headers=submit_headers, timeout=30)
+    resp.raise_for_status()
+    task_data = resp.json()
+    task_id = task_data.get("output", {}).get("task_id")
+    if not task_id:
+        raise ValueError(f"百炼未返回 task_id：{task_data}")
+
+    # Step 2: 轮询结果（最多 30 次 × 3 秒 = 90 秒）
+    poll_url = f"https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+    for _ in range(30):
+        time.sleep(3)
+        poll = req_lib.get(poll_url, headers=auth_headers, timeout=15)
+        poll.raise_for_status()
+        output = poll.json().get("output", {})
+        status = output.get("task_status", "")
+
+        if status == "SUCCEEDED":
+            results = output.get("results", [])
+            if not results:
+                raise ValueError("百炼任务成功但无图像结果")
+            img_url = results[0].get("url")
+            if not img_url:
+                raise ValueError("百炼未返回图像 URL")
+            img_resp = req_lib.get(img_url, timeout=30)
+            img_resp.raise_for_status()
+            return base64.b64encode(img_resp.content).decode("utf-8")
+
+        if status == "FAILED":
+            code = output.get("code", "")
+            msg = output.get("message", "未知错误")
+            raise ValueError(f"百炼图像生成失败: {code} {msg}")
+        # PENDING / RUNNING 继续等待
+
+    raise TimeoutError("百炼图像生成超时，90 秒内未完成")
+
+
+@app.route('/share/generate_image', methods=['POST'])
+def generate_image():
+    """为小红书草稿 AI 生成配图，返回 base64 PNG。
+
+    POST body（JSON）与 /share/xiaohongshu_draft 相同：
+      log_id（可选）/ observation / advice / condition_type
+    """
+    cid, err = _resolve_child_id_for_read()
+    if err is not None:
+        return err
+
+    if _dashscope_api_key == "你的_DASHSCOPE_API_KEY":
+        return jsonify({
+            "status": "error",
+            "message": "配图功能未配置：请在服务器设置环境变量 DASHSCOPE_API_KEY",
+        }), 503
+
+    data = request.json or {}
+    observation = (data.get("observation") or "").strip()
+    advice = (data.get("advice") or "").strip()
+    condition_type = (data.get("condition_type") or "adhd").strip().lower()
+
+    # 如果传了 log_id，从数据库补全字段
+    log_id = data.get("log_id")
+    if log_id is not None:
+        try:
+            conn = sqlite3.connect("adhd_data.db")
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT observation, ai_advice, condition_type "
+                "FROM parent_logs WHERE id = ? AND child_id = ?",
+                (int(log_id), cid),
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                observation, advice, condition_type = row
+        except Exception:
+            pass  # 退化到请求体字段
+
+    if not observation:
+        return jsonify({"status": "error", "message": "observation is required"}), 400
+
+    try:
+        img_prompt = _generate_image_prompt(observation, advice, condition_type)
+        img_b64 = _call_dashscope_image(img_prompt)
+        return jsonify({
+            "status": "success",
+            "image_base64": img_b64,
+            "prompt_used": img_prompt,
+        }), 200
+    except Exception as e:
+        print(f"配图生成错误: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "配图生成失败，请稍后重试",
+        }), 500
+
 
 @app.route('/history', methods=['GET'])
 def get_history():
@@ -1387,7 +1584,7 @@ def fetch_kimi_period_report(period_type: str, user_prompt: str) -> str:
         or os.getenv("WEEKLY_REPORT_MODEL")
         or "kimi-k2.5"
     ).strip() or "kimi-k2.5"
-    max_tokens = {"week": 2800, "month": 3600, "year": 4600}.get(period_type, 3200)
+    max_tokens = {"week": 2800, "month": 3200, "year": 4000}.get(period_type, 2800)
     try:
         response = _kimi_chat_create(
             model=model,
@@ -1401,7 +1598,7 @@ def fetch_kimi_period_report(period_type: str, user_prompt: str) -> str:
         return (response.choices[0].message.content or "").strip()
     except Exception as e:
         print(f"Kimi {report_label} API 错误: {e}")
-        raise
+        raise RuntimeError(f"Kimi API 调用失败（{type(e).__name__}）：{e}")
 
 
 def generate_period_report(
@@ -1645,11 +1842,11 @@ def weekly_report_history():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
-def _report_payload(row):
+def _report_payload(row, include_digest=False):
     if not row:
         return None
-    rid, child_id, period_type, period_start, period_end, summary, created_at = row
-    return {
+    rid, child_id, period_type, period_start, period_end, summary, created_at, digest_raw = row
+    result = {
         "id": rid,
         "child_id": child_id,
         "period_type": period_type,
@@ -1659,6 +1856,101 @@ def _report_payload(row):
         "summary": summary,
         "created_at": created_at,
     }
+    if include_digest and digest_raw:
+        try:
+            result["digest"] = json.loads(digest_raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return result
+
+
+@app.route("/reports/status", methods=["GET"])
+def reports_status():
+    """返回当前周期进度 + 上个已结束周期的状态，供前端渲染卡片。"""
+    cid, err = _resolve_child_id_for_read()
+    if err is not None:
+        return err
+    period_type = (request.args.get("period_type") or "week").strip().lower()
+    if period_type not in _PERIOD_LABELS:
+        return jsonify({"status": "error", "message": "invalid period_type"}), 400
+
+    now = datetime.now()
+    # 当前进行中的周期
+    cur_start, cur_end = _period_start_end_strings(period_type, now)
+    cur_end_dt = datetime.strptime(f"{cur_end} 23:59:59", "%Y-%m-%d %H:%M:%S")
+    days_remaining = max(0, (cur_end_dt - now).days)
+
+    t_lo, t_hi = _period_sql_bounds(cur_start, cur_end)
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT COUNT(DISTINCT date(timestamp)) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
+        (cid, t_lo, t_hi),
+    )
+    days_collected = cursor.fetchone()[0] or 0
+    cursor.execute(
+        "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
+        (cid, t_lo, t_hi),
+    )
+    log_count = cursor.fetchone()[0] or 0
+
+    current_period = {
+        "start": cur_start,
+        "end": cur_end,
+        "status": "in_progress",
+        "days_collected": days_collected,
+        "log_count": log_count,
+        "days_remaining": days_remaining,
+    }
+
+    # 上一个已结束的周期
+    last_anchor = _latest_completed_anchor(period_type, now)
+    last_start, last_end = _period_start_end_strings(period_type, last_anchor)
+
+    cursor.execute(
+        "SELECT id FROM period_reports WHERE child_id=? AND period_type=? AND period_start=? LIMIT 1",
+        (cid, period_type, last_start),
+    )
+    existing = cursor.fetchone()
+
+    if existing:
+        last_status = "generated"
+        last_report_id = existing[0]
+    else:
+        lt_lo, lt_hi = _period_sql_bounds(last_start, last_end)
+        cursor.execute(
+            "SELECT COUNT(*) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
+            (cid, lt_lo, lt_hi),
+        )
+        has_data = (cursor.fetchone()[0] or 0) > 0
+        cursor.execute(
+            "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
+            (cid, lt_lo, lt_hi),
+        )
+        has_logs = (cursor.fetchone()[0] or 0) > 0
+        if has_data or has_logs:
+            last_status = "ready"
+        else:
+            last_status = "no_data"
+        last_report_id = None
+
+    conn.close()
+
+    last_period = {
+        "start": last_start,
+        "end": last_end,
+        "status": last_status,
+        "report_id": last_report_id,
+    }
+
+    return jsonify({
+        "child_id": cid,
+        "period_type": period_type,
+        "period_label": _PERIOD_LABELS[period_type],
+        "current_period": current_period,
+        "last_period": last_period,
+    }), 200
 
 
 @app.route("/reports/latest", methods=["GET"])
@@ -1675,7 +1967,7 @@ def reports_latest():
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT id, child_id, period_type, period_start, period_end, summary, created_at
+            SELECT id, child_id, period_type, period_start, period_end, summary, created_at, digest_json
             FROM period_reports
             WHERE child_id = ? AND period_type = ?
             ORDER BY period_start DESC, id DESC
@@ -1687,7 +1979,7 @@ def reports_latest():
         conn.close()
         if not row:
             return jsonify({"status": "empty", "message": "暂无报告"}), 404
-        return jsonify(_report_payload(row)), 200
+        return jsonify(_report_payload(row, include_digest=True)), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 
@@ -1708,7 +2000,7 @@ def reports_history():
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT id, child_id, period_type, period_start, period_end, summary, created_at
+            SELECT id, child_id, period_type, period_start, period_end, summary, created_at, digest_json
             FROM period_reports
             WHERE child_id = ? AND period_type = ?
             ORDER BY period_start DESC
@@ -1720,9 +2012,9 @@ def reports_history():
         conn.close()
         reports = []
         for row in rows:
-            item = _report_payload(row)
+            item = _report_payload(row, include_digest=False)
             preview = item["summary"] or ""
-            item["summary_preview"] = preview[:400] + ("…" if len(preview) > 400 else "")
+            item["summary_preview"] = preview[:120] + ("…" if len(preview) > 120 else "")
             item.pop("summary", None)
             reports.append(item)
         return jsonify({"child_id": cid, "period_type": period_type, "reports": reports}), 200
@@ -1741,7 +2033,7 @@ def reports_detail(report_id):
         cursor = conn.cursor()
         cursor.execute(
             """
-            SELECT id, child_id, period_type, period_start, period_end, summary, created_at
+            SELECT id, child_id, period_type, period_start, period_end, summary, created_at, digest_json
             FROM period_reports
             WHERE id = ? AND child_id = ?
             """,
@@ -1751,7 +2043,7 @@ def reports_detail(report_id):
         conn.close()
         if not row:
             return jsonify({"status": "empty", "message": "报告不存在"}), 404
-        return jsonify(_report_payload(row)), 200
+        return jsonify(_report_payload(row, include_digest=True)), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

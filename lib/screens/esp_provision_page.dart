@@ -55,6 +55,8 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   ProvStatus _phase = ProvStatus.idle;
   List<EspProvDevice> _devices = const [];
   List<Map<String, dynamic>> _cloudDevices = const [];
+  // E1: WiFi 密码显示/隐藏开关
+  bool _obscurePass = true;
 
   /// 设备类型对应的人话标签：贯穿整个 UI（标题、提示文字、卡片）。
   String get _deviceLabel {
@@ -392,10 +394,18 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
               const SizedBox(height: 8),
               TextField(
                 controller: _passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: _obscurePass,
+                decoration: InputDecoration(
                   labelText: 'WiFi 密码',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscurePass
+                        ? Icons.visibility_off_outlined
+                        : Icons.visibility_outlined,
+                        size: 20),
+                    tooltip: _obscurePass ? '显示密码' : '隐藏密码',
+                    onPressed: () => setState(() => _obscurePass = !_obscurePass),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),

@@ -21,6 +21,7 @@ dependencies:
   flutter_foreground_task: ^7.5.2
   speech_to_text: ^7.0.0
   share_plus: ^10.1.4
+  url_launcher: ^6.3.0
 
 flutter:
   uses-material-design: true

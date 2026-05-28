@@ -41,11 +41,11 @@ class _FootprintPageState extends State<FootprintPage> {
       final response = await http.get(
         Uri.parse('http://${widget.serverIp}:11760/footprint/today'),
         headers: widget.headers,
-      );
+      ).timeout(const Duration(seconds: 10));
       if (!mounted) return;
       if (response.statusCode != 200) {
         setState(() {
-          _error = '加载失败（${response.statusCode}）';
+          _error = '加载失败（${response.statusCode})，请稍后重试';
           _loading = false;
         });
         return;
@@ -53,7 +53,7 @@ class _FootprintPageState extends State<FootprintPage> {
       final decoded = json.decode(response.body);
       if (decoded is! Map) {
         setState(() {
-          _error = '数据格式异常';
+          _error = '数据格式异常，请重试';
           _loading = false;
         });
         return;
@@ -64,8 +64,20 @@ class _FootprintPageState extends State<FootprintPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      // F2: 友好的网络错误提示
+      final s = e.toString();
+      String msg;
+      if (s.contains('SocketException') ||
+          s.contains('Connection refused') ||
+          s.contains('Failed host lookup') ||
+          s.contains('Network is unreachable') ||
+          s.contains('TimeoutException')) {
+        msg = '无法连接服务器，请检查网络连接';
+      } else {
+        msg = '加载失败，请稍后重试';
+      }
       setState(() {
-        _error = '$e';
+        _error = msg;
         _loading = false;
       });
     }
@@ -101,7 +113,7 @@ class _FootprintPageState extends State<FootprintPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('历史足迹',
+        title: const Text('今日记录',
             style: TextStyle(fontWeight: FontWeight.w600)),
         backgroundColor: Colors.transparent,
         elevation: 0,
