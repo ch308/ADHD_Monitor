@@ -22,7 +22,7 @@ set "SCRIPT_NAME=buildAndflash-lcd147"
 
 if not exist "%PROJECT_DIR%\CMakeLists.txt" (
   echo [%SCRIPT_NAME%] ERROR: project not found:
-  echo   %PROJECT_REL%  (from repo root)
+  echo   %PROJECT_REL%  ^(from repo root^)
   echo   %PROJECT_DIR%
   exit /b 1
 )
@@ -44,7 +44,7 @@ if /i "%~1"=="monitor" (
 cd /d "%PROJECT_DIR%"
 if errorlevel 1 exit /b 1
 
-call "%REPO_ROOT%_idf_export.bat"
+call "%REPO_ROOT%\_idf_export.bat"
 if errorlevel 1 exit /b 1
 
 echo [%SCRIPT_NAME%] PROJECT_DIR=%CD%
@@ -54,7 +54,7 @@ echo.
 
 if /i "%MODE%"=="monitor" (
   echo [%SCRIPT_NAME%] Starting serial monitor...
-  echo [%SCRIPT_NAME%] Expect project name: ESP32-S3-LCD-1.47B (not xiaozhi)
+  echo [%SCRIPT_NAME%] Expect project name: ESP32-S3-LCD-1.47B ^(not xiaozhi^)
   idf.py monitor %*
   exit /b %ERRORLEVEL%
 )

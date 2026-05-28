@@ -15,6 +15,7 @@ set(SOURCES "audio/audio_codec.cc"
             "led/gpio_led.cc"
             "display/display.cc"
             "display/lcd_display.cc"
+            "display/Vernon_ST7789T.c"
             "display/oled_display.cc"
             "display/lvgl_display/lvgl_display.cc"
             "display/emote_display.cc"
@@ -909,6 +910,7 @@ idf_component_register(SRCS ${SOURCES}
                         esp_driver_ledc
                         esp_driver_jpeg
                         esp_driver_ppa
+                        esp_lcd
                         esp_app_format
                         app_update
                         spi_flash

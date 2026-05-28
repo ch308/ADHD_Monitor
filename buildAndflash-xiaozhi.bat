@@ -22,7 +22,7 @@ set "SCRIPT_NAME=buildAndflash-xiaozhi"
 
 if not exist "%PROJECT_DIR%\CMakeLists.txt" (
   echo [%SCRIPT_NAME%] ERROR: project not found:
-  echo   %PROJECT_REL%  (from repo root)
+  echo   %PROJECT_REL%  ^(from repo root^)
   echo   %PROJECT_DIR%
   exit /b 1
 )
@@ -45,7 +45,7 @@ if /i "%~1"=="monitor" (
 cd /d "%PROJECT_DIR%"
 if errorlevel 1 exit /b 1
 
-call "%REPO_ROOT%_idf_export.bat"
+call "%REPO_ROOT%\_idf_export.bat"
 if errorlevel 1 exit /b 1
 
 echo [%SCRIPT_NAME%] PROJECT_DIR=%CD%
@@ -74,7 +74,7 @@ if errorlevel 1 (
   echo [%SCRIPT_NAME%] ERROR: Wrong board in sdkconfig.
   echo [%SCRIPT_NAME%] Required: %EXPECTED_BOARD%
   echo.
-  echo [%SCRIPT_NAME%] Fix once (from repo root):
+  echo [%SCRIPT_NAME%] Fix once ^(from repo root^):
   echo   cd %PROJECT_REL%
   echo   idf.py fullclean
   echo   del sdkconfig
