@@ -80,41 +80,50 @@ class _ModeChoicePage extends StatelessWidget {
     return Scaffold(
       backgroundColor: AppColors.canvas,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Spacer(),
-              const Text(
-                '请选择使用身份',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                  color: AppColors.ink,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 560),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        '请选择使用身份',
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        '家长版和教师版的数据、设备绑定与功能彼此隔离。',
+                        style: TextStyle(height: 1.5, color: AppColors.muted),
+                      ),
+                      const SizedBox(height: 24),
+                      _ModeCard(
+                        icon: Icons.family_restroom_rounded,
+                        title: '家长版',
+                        subtitle: '适合家庭使用，多名家长共同关注一个孩子。',
+                        onTap: () => onChooseMode(AppMode.parent),
+                      ),
+                      const SizedBox(height: 12),
+                      _ModeCard(
+                        icon: Icons.school_rounded,
+                        title: '教师版',
+                        subtitle: '适合课堂使用，本地监测最多 3 名学生手环。',
+                        onTap: () => onChooseMode(AppMode.teacher),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                '家长版和教师版的数据、设备绑定与功能彼此隔离。',
-                style: TextStyle(height: 1.5, color: AppColors.muted),
-              ),
-              const SizedBox(height: 24),
-              _ModeCard(
-                icon: Icons.family_restroom_rounded,
-                title: '家长版',
-                subtitle: '适合家庭使用，多名家长共同关注一个孩子。',
-                onTap: () => onChooseMode(AppMode.parent),
-              ),
-              const SizedBox(height: 12),
-              _ModeCard(
-                icon: Icons.school_rounded,
-                title: '教师版',
-                subtitle: '适合课堂使用，本地监测最多 3 名学生手环。',
-                onTap: () => onChooseMode(AppMode.teacher),
-              ),
-              const Spacer(flex: 2),
-            ],
+            ),
           ),
         ),
       ),
@@ -137,16 +146,15 @@ class _ModeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
+    return Card(
       color: AppColors.surface,
-      borderRadius: BorderRadius.circular(18),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
         side: const BorderSide(color: AppColors.border),
       ),
+      clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: Row(
