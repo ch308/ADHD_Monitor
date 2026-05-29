@@ -951,15 +951,18 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(welcome_label_, LV_OBJ_FLAG_HIDDEN);
 
     center_status_label_ = lv_label_create(screen);
-    lv_obj_set_width(center_status_label_, LV_HOR_RES * 0.9);
+    const int center_status_width = LV_HOR_RES * 9 / 10;
+    lv_obj_set_width(center_status_label_, center_status_width);
     lv_obj_set_style_text_align(center_status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(center_status_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_transform_scale(center_status_label_, 384, 0);
+    lv_obj_set_style_transform_pivot_x(center_status_label_, center_status_width / 2, 0);
+    lv_obj_set_style_transform_pivot_y(center_status_label_, text_font->line_height / 2, 0);
     lv_obj_set_style_transform_width(center_status_label_, 24, 0);
     lv_obj_set_style_transform_height(center_status_label_, 12, 0);
-    lv_label_set_long_mode(center_status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_label_set_long_mode(center_status_label_, LV_LABEL_LONG_CLIP);
     lv_label_set_text(center_status_label_, Lang::Strings::WAITING_WIFI_CONFIG);
-    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, -12, text_font->line_height + lvgl_theme->spacing(8));
+    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, 0, text_font->line_height + lvgl_theme->spacing(8));
 #endif
 
 #if CONFIG_USE_MULTILINE_CHAT_MESSAGE
