@@ -24,9 +24,7 @@ LvglDisplay::LvglDisplay() {
             LvglDisplay *display = static_cast<LvglDisplay*>(arg);
             DisplayLockGuard lock(display);
             lv_obj_add_flag(display->notification_label_, LV_OBJ_FLAG_HIDDEN);
-#ifndef CONFIG_ADHD_KIDS_UI
             lv_obj_remove_flag(display->status_label_, LV_OBJ_FLAG_HIDDEN);
-#endif
         },
         .arg = this,
         .dispatch_method = ESP_TIMER_TASK,
@@ -157,7 +155,7 @@ void LvglDisplay::ShowNotification(const char* notification, int duration_ms) {
     lv_label_set_text(notification_label_, notification);
     lv_obj_remove_flag(notification_label_, LV_OBJ_FLAG_HIDDEN);
 #ifdef CONFIG_ADHD_KIDS_UI
-    // Center status stays visible; notification overlays the top status bar only.
+    lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
 #else
     lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
 #endif
@@ -203,7 +201,11 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         DisplayLockGuard lock(this);
         if (status_label_ != nullptr) {
             lv_label_set_text(status_label_, time_str);
-            lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+            if (notification_label_ != nullptr && !lv_obj_has_flag(notification_label_, LV_OBJ_FLAG_HIDDEN)) {
+                lv_obj_add_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 #else

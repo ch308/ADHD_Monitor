@@ -959,7 +959,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_transform_height(center_status_label_, 12, 0);
     lv_label_set_long_mode(center_status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(center_status_label_, Lang::Strings::WAITING_WIFI_CONFIG);
-    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, 0, text_font->line_height + lvgl_theme->spacing(8));
+    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, -12, text_font->line_height + lvgl_theme->spacing(8));
 #endif
 
 #if CONFIG_USE_MULTILINE_CHAT_MESSAGE

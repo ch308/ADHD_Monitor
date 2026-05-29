@@ -192,6 +192,22 @@ void WifiBoard::StartWifiConfigMode() {
     // (network_provisioning + scheme_ble + sec0). Blocks until the Flutter app
     // hands credentials over, then esp_restart()s so WifiManager picks them up
     // on the next boot.
+#ifdef CONFIG_ADHD_KIDS_UI
+    if (kids_wifi_config_voice_task_ == nullptr) {
+        xTaskCreate([](void* arg) {
+            auto* board = static_cast<WifiBoard*>(arg);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            while (board->in_config_mode_) {
+                Application::GetInstance().PlaySound(Lang::Sounds::OGG_WIFICONFIG);
+                for (int i = 0; i < 30 && board->in_config_mode_; ++i) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                }
+            }
+            board->kids_wifi_config_voice_task_ = nullptr;
+            vTaskDelete(NULL);
+        }, "wifi_cfg_voice", 4096, this, 2, &kids_wifi_config_voice_task_);
+    }
+#endif
     Application::GetInstance().Schedule([]() {
         Application::GetInstance().Alert(Lang::Strings::WAITING_WIFI_CONFIG,
                                          Lang::Strings::WAITING_WIFI_CONFIG,
