@@ -182,8 +182,26 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         }
     }
 
-#ifndef CONFIG_ADHD_KIDS_UI
-    // Update time (kids UI keeps center status as WiFi / state text, not a clock)
+#ifdef CONFIG_ADHD_KIDS_UI
+    // Kids UI keeps the top center as a conventional clock while the center
+    // area remains available for welcome / WiFi / listening / speaking text.
+    {
+        time_t now = time(NULL);
+        struct tm* tm = localtime(&now);
+        char time_str[16];
+        if (tm != nullptr && tm->tm_year >= 2025 - 1900) {
+            strftime(time_str, sizeof(time_str), "%H:%M", tm);
+        } else {
+            snprintf(time_str, sizeof(time_str), "--:--");
+        }
+        DisplayLockGuard lock(this);
+        if (status_label_ != nullptr) {
+            lv_label_set_text(status_label_, time_str);
+            lv_obj_remove_flag(status_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#else
+    // Update time
     if (app.GetDeviceState() == kDeviceStateIdle) {
         if (last_status_update_time_ + std::chrono::seconds(10) < std::chrono::system_clock::now()) {
             time_t now = time(NULL);
