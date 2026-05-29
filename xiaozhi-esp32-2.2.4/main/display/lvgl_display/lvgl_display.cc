@@ -112,7 +112,13 @@ void LvglDisplay::SetWelcomeTitle(const char* title) {
     if (welcome_label_ == nullptr) {
         return;
     }
+    if (title == nullptr || title[0] == '\0') {
+        lv_label_set_text(welcome_label_, "");
+        lv_obj_add_flag(welcome_label_, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
     lv_label_set_text(welcome_label_, title);
+    lv_obj_remove_flag(welcome_label_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void LvglDisplay::SetCenterStatus(const char* status) {
@@ -192,7 +198,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         if (tm != nullptr && tm->tm_year >= 2025 - 1900) {
             strftime(time_str, sizeof(time_str), "%H:%M", tm);
         } else {
-            snprintf(time_str, sizeof(time_str), "--:--");
+            time_str[0] = '\0';
         }
         DisplayLockGuard lock(this);
         if (status_label_ != nullptr) {
@@ -271,6 +277,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
             kDeviceStateStarting,
             kDeviceStateWifiConfiguring,
             kDeviceStateListening,
+            kDeviceStateSpeaking,
             kDeviceStateActivating,
         };
         if (std::find(allowed_states.begin(), allowed_states.end(), device_state) != allowed_states.end()) {

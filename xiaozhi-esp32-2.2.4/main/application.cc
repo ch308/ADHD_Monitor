@@ -108,8 +108,13 @@ void Application::Initialize() {
     display->SetWelcomeTitle(Lang::Strings::WELCOME_TITLE);
     RefreshKidsDisplay();
 #endif
+#ifdef CONFIG_ADHD_KIDS_UI
+    // Kids UI uses the existing bottom scrolling bar for the welcome text.
+    display->SetChatMessage("system", Lang::Strings::WELCOME_TITLE);
+#else
     // Print board name/version info
     display->SetChatMessage("system", SystemInfo::GetUserAgent().c_str());
+#endif
 
     // Setup the audio service
     auto codec = board.GetAudioCodec();
@@ -1084,7 +1089,7 @@ const char* Application::SoftEmotionForKids(const char* emotion) {
 
 void Application::RefreshKidsDisplay() {
     auto display = Board::GetInstance().GetDisplay();
-    display->SetWelcomeTitle(Lang::Strings::WELCOME_TITLE);
+    display->SetWelcomeTitle("");
 
     const EventBits_t net_bits = xEventGroupGetBits(event_group_);
     const bool network_connected = (net_bits & MAIN_EVENT_NETWORK_CONNECTED) != 0;

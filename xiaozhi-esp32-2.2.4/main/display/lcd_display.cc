@@ -404,7 +404,7 @@ void LcdDisplay::SetupUI() {
 
     // Left icon
     network_label_ = lv_label_create(top_bar_);
-    lv_label_set_text(network_label_, "");
+    lv_label_set_text(network_label_, FONT_AWESOME_WIFI_SLASH);
     lv_obj_set_style_text_font(network_label_, icon_font, 0);
     lv_obj_set_style_text_color(network_label_, lvgl_theme->text_color(), 0);
 
@@ -423,7 +423,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(mute_label_, lvgl_theme->text_color(), 0);
 
     battery_label_ = lv_label_create(right_icons);
-    lv_label_set_text(battery_label_, "");
+    lv_label_set_text(battery_label_, FONT_AWESOME_BATTERY_FULL);
     lv_obj_set_style_text_font(battery_label_, icon_font, 0);
     lv_obj_set_style_text_color(battery_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_style_margin_left(battery_label_, lvgl_theme->spacing(2), 0);
@@ -934,7 +934,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
 #ifdef CONFIG_ADHD_KIDS_UI
-    lv_label_set_text(status_label_, "--:--");
+    lv_label_set_text(status_label_, "");
 #else
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
 #endif
@@ -946,8 +946,9 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_align(welcome_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(welcome_label_, lvgl_theme->text_color(), 0);
     lv_label_set_long_mode(welcome_label_, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(welcome_label_, Lang::Strings::WELCOME_TITLE);
+    lv_label_set_text(welcome_label_, "");
     lv_obj_align(welcome_label_, LV_ALIGN_CENTER, 0, text_font->line_height + lvgl_theme->spacing(18));
+    lv_obj_add_flag(welcome_label_, LV_OBJ_FLAG_HIDDEN);
 
     center_status_label_ = lv_label_create(screen);
     lv_obj_set_width(center_status_label_, LV_HOR_RES * 0.9);
