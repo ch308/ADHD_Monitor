@@ -171,6 +171,7 @@ void Application::Initialize() {
             case NetworkEvent::Connected: {
                 last_connected_network_ = data;
                 ESP_LOGW(TAG, "==== Application: WiFi 已连上 SSID: %s ====", data.c_str());
+                xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
 #ifdef CONFIG_ADHD_KIDS_UI
                 RefreshKidsDisplay();
 #else
@@ -179,7 +180,6 @@ void Application::Initialize() {
                 display->ShowNotification(msg.c_str(), 30000);
 #endif
                 audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
-                xEventGroupSetBits(event_group_, MAIN_EVENT_NETWORK_CONNECTED);
                 break;
             }
             case NetworkEvent::Disconnected:
@@ -344,20 +344,6 @@ void Application::Run() {
             clock_ticks_++;
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
-
-#ifdef CONFIG_ADHD_KIDS_UI
-            const auto state = GetDeviceState();
-            const EventBits_t net_bits = xEventGroupGetBits(event_group_);
-            const bool waiting_wifi_config =
-                (net_bits & MAIN_EVENT_NETWORK_CONNECTED) == 0 &&
-                (state == kDeviceStateWifiConfiguring ||
-                 state == kDeviceStateStarting ||
-                 state == kDeviceStateIdle);
-            if (waiting_wifi_config && clock_ticks_ - kids_wifi_config_voice_tick_ >= 30) {
-                kids_wifi_config_voice_tick_ = clock_ticks_;
-                audio_service_.PlaySound(Lang::Sounds::OGG_WIFICONFIG);
-            }
-#endif
 
             // 真正的 endpoint 检测改用 one-shot esp_timer（OnEndpointTimer）；
             // 这里 1 Hz 只做兜底：
@@ -1105,8 +1091,9 @@ void Application::RefreshKidsDisplay() {
     auto display = Board::GetInstance().GetDisplay();
     display->SetWelcomeTitle("");
 
-    const EventBits_t net_bits = xEventGroupGetBits(event_group_);
-    const bool network_connected = (net_bits & MAIN_EVENT_NETWORK_CONNECTED) != 0;
+    // MAIN_EVENT_NETWORK_CONNECTED is cleared after HandleNetworkConnectedEvent;
+    // use last_connected_network_ as the persistent "have Wi-Fi SSID" signal.
+    const bool have_wifi_ssid = !last_connected_network_.empty();
 
     const char* emotion = "neutral";
     std::string center;
@@ -1117,8 +1104,15 @@ void Application::RefreshKidsDisplay() {
     } else {
         switch (state_machine_.GetState()) {
             case kDeviceStateWifiConfiguring:
-                center = Lang::Strings::WAITING_WIFI_CONFIG;
-                emotion = "winking";
+                if (have_wifi_ssid) {
+                    char buf[96];
+                    snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
+                    center = buf;
+                    emotion = "relaxed";
+                } else {
+                    center = Lang::Strings::WAITING_WIFI_CONFIG;
+                    emotion = "winking";
+                }
                 break;
             case kDeviceStateListening:
                 center = Lang::Strings::LISTENING_KIDS;
@@ -1133,7 +1127,7 @@ void Application::RefreshKidsDisplay() {
                 emotion = "neutral";
                 break;
             case kDeviceStateIdle:
-                if (network_connected && !last_connected_network_.empty()) {
+                if (have_wifi_ssid) {
                     char buf[96];
                     snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
                     center = buf;
@@ -1144,7 +1138,7 @@ void Application::RefreshKidsDisplay() {
                 }
                 break;
             default:
-                if (network_connected && !last_connected_network_.empty()) {
+                if (have_wifi_ssid) {
                     char buf[96];
                     snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
                     center = buf;

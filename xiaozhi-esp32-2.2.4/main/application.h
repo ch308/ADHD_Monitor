@@ -159,9 +159,6 @@ private:
     /** Source state for the transition that last fired MAIN_EVENT_STATE_CHANGED (see OnStateChanged). */
     DeviceState last_state_transition_from_{kDeviceStateUnknown};
     int clock_ticks_ = 0;
-#ifdef CONFIG_ADHD_KIDS_UI
-    int kids_wifi_config_voice_tick_ = -30;
-#endif
     TaskHandle_t activation_task_handle_ = nullptr;
 
 

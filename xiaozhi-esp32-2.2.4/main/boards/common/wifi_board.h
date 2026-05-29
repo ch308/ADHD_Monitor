@@ -10,7 +10,7 @@ class WifiBoard : public Board {
 protected:
     esp_timer_handle_t connect_timer_ = nullptr;
     bool in_config_mode_ = false;
-#if defined(CONFIG_ADHD_KIDS_UI) && defined(CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING)
+#if defined(CONFIG_ADHD_KIDS_UI)
     TaskHandle_t kids_wifi_config_voice_task_ = nullptr;
 #endif
     NetworkEventCallback network_event_callback_ = nullptr;
