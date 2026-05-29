@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../theme/app_theme.dart';
 import 'weekly_report_page.dart';
 
 /// 今日记录次数、AI 建议列表、建议前后心率粗对比（价值呈现页）
@@ -45,7 +46,7 @@ class _FootprintPageState extends State<FootprintPage> {
       if (!mounted) return;
       if (response.statusCode != 200) {
         setState(() {
-          _error = '加载失败（${response.statusCode})，请稍后重试';
+          _error = '这页内容暂时没打开成功，请稍后再试';
           _loading = false;
         });
         return;
@@ -53,7 +54,7 @@ class _FootprintPageState extends State<FootprintPage> {
       final decoded = json.decode(response.body);
       if (decoded is! Map) {
         setState(() {
-          _error = '数据格式异常，请重试';
+          _error = '这次内容没能读出来，请再试一次';
           _loading = false;
         });
         return;
@@ -72,9 +73,9 @@ class _FootprintPageState extends State<FootprintPage> {
           s.contains('Failed host lookup') ||
           s.contains('Network is unreachable') ||
           s.contains('TimeoutException')) {
-        msg = '无法连接服务器，请检查网络连接';
+        msg = '网络好像不太稳定，请确认网络后再试';
       } else {
-        msg = '加载失败，请稍后重试';
+        msg = '这页内容暂时没打开成功，请稍后再试';
       }
       setState(() {
         _error = msg;
@@ -112,26 +113,14 @@ class _FootprintPageState extends State<FootprintPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.canvas,
       appBar: AppBar(
-        title: const Text('今日记录',
+        title: const Text('今日观察',
             style: TextStyle(fontWeight: FontWeight.w600)),
-        backgroundColor: Colors.transparent,
+        backgroundColor: AppColors.canvas,
         elevation: 0,
-        flexibleSpace: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF3949AB), Color(0xFF5C6BC0)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x33000000),
-                blurRadius: 8,
-                offset: Offset(0, 2),
-              ),
-            ],
-          ),
-        ),
-        foregroundColor: Colors.white,
+        scrolledUnderElevation: 0,
+        foregroundColor: AppColors.ink,
         actions: [
           IconButton(
             icon: const Icon(Icons.auto_stories_outlined),
@@ -207,7 +196,7 @@ class _FootprintPageState extends State<FootprintPage> {
                   Row(
                     children: [
                       Icon(Icons.today_rounded,
-                          color: Colors.indigo.shade300, size: 22),
+                          color: AppColors.sage, size: 22),
                       const SizedBox(width: 8),
                       Text(
                         date.isEmpty ? '今日' : date,
@@ -248,7 +237,7 @@ class _FootprintPageState extends State<FootprintPage> {
           shadowColor: Colors.black12,
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          color: Colors.indigo.shade50,
+          color: AppColors.surface,
           child: Padding(
             padding: const EdgeInsets.all(18),
             child: Column(
@@ -257,13 +246,13 @@ class _FootprintPageState extends State<FootprintPage> {
                 Row(
                   children: [
                     Icon(Icons.date_range_rounded,
-                        color: Colors.indigo.shade400, size: 20),
+                      color: AppColors.sage, size: 20),
                     const SizedBox(width: 8),
                     Text(
                       '$date · 今日记录',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.bold,
-                            color: Colors.indigo.shade800,
+                            color: AppColors.ink,
                           ),
                     ),
                   ],
@@ -274,7 +263,7 @@ class _FootprintPageState extends State<FootprintPage> {
                   style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.w700,
-                      color: Colors.indigo.shade900),
+                      color: AppColors.ink),
                 ),
                 const SizedBox(height: 14),
                 Wrap(
@@ -423,7 +412,7 @@ class _FootprintPageState extends State<FootprintPage> {
                             'AI 建议：$advice',
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.indigo.shade800,
+                              color: AppColors.sage,
                             ),
                           ),
                           if (trendText.isNotEmpty) ...[

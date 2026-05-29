@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../theme/app_theme.dart';
+
 /// AI 周/月/年周期报告页。
 ///
 /// 保留类名 [WeeklyReportPage] 以兼容现有入口；页面内部已升级为周报、月报、年报。
@@ -173,7 +175,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
       final decoded = json.decode(response.body);
       if (decoded is! Map) {
         setState(() {
-          _error = '返回数据格式异常';
+          _error = '这份报告暂时还读不出来，请再试一次';
           _generating = false;
         });
         return;
@@ -197,7 +199,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '网络异常，请稍后重试';
+        _error = '网络好像不太稳定，请稍后再试';
         _generating = false;
       });
     }
@@ -221,7 +223,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('加载报告失败，请稍后重试'),
+          content: Text('这份报告暂时没打开成功，请稍后再试'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -243,12 +245,12 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI 深度洞察',
+        title: const Text('成长观察报告',
             style: TextStyle(fontWeight: FontWeight.w600)),
-        backgroundColor: const Color(0xFF5B67CA),
+        backgroundColor: AppColors.canvas,
         elevation: 0,
         scrolledUnderElevation: 0,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.ink,
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -257,7 +259,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
           ),
         ],
       ),
-      backgroundColor: const Color(0xFFF8F9FE),
+      backgroundColor: AppColors.canvas,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -286,8 +288,9 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
           selected: {_periodType},
           onSelectionChanged: (v) => _changePeriod(v.first),
           style: SegmentedButton.styleFrom(
-            selectedBackgroundColor: const Color(0xFF5B67CA),
+            selectedBackgroundColor: AppColors.sage,
             selectedForegroundColor: Colors.white,
+            foregroundColor: AppColors.ink,
           ),
         ),
         const SizedBox(height: 14),
@@ -523,7 +526,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
             Row(
               children: [
                 const Icon(Icons.auto_awesome_rounded,
-                    color: Color(0xFF5B67CA), size: 20),
+                  color: AppColors.sage, size: 20),
                 const SizedBox(width: 8),
                 Text(
                   '${_current.lastLabel}数据已就绪',
@@ -553,13 +556,6 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
                     : const Icon(Icons.auto_awesome_rounded, size: 18),
                 label: Text(
                     _generating ? '正在生成，请稍候…' : '生成 AI ${_current.label}'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF5B67CA),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                ),
               ),
             ),
           ],
@@ -619,7 +615,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
           child: Row(
             children: [
               const Icon(Icons.insights_rounded,
-                  size: 18, color: Color(0xFF5B67CA)),
+                  size: 18, color: AppColors.sage),
               const SizedBox(width: 6),
               Text(
                 '$start ~ $end ${_current.label}',
@@ -642,9 +638,9 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
           width: double.infinity,
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFEEF0F8)),
+            border: Border.all(color: AppColors.border),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -652,7 +648,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
               Row(
                 children: [
                   Icon(Icons.psychology_rounded,
-                      size: 18, color: Colors.deepPurple.shade300),
+                      size: 18, color: AppColors.teal),
                   const SizedBox(width: 6),
                   const Text(
                     'AI 洞察与建议',
@@ -757,9 +753,9 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFEEF0F8)),
+        border: Border.all(color: AppColors.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -767,7 +763,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
           Row(
             children: [
               const Icon(Icons.history_rounded,
-                  size: 18, color: Color(0xFF5B67CA)),
+                  size: 18, color: AppColors.sage),
               const SizedBox(width: 6),
               Text(
                 '历史${_current.label}',
@@ -793,7 +789,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
                     const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
                 decoration: BoxDecoration(
                   color: isViewing
-                      ? const Color(0xFFF3F0FF)
+                      ? AppColors.surfaceSoft
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -804,7 +800,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
                       height: 32,
                       decoration: BoxDecoration(
                         color: isViewing
-                            ? const Color(0xFF5B67CA)
+                          ? AppColors.sage
                             : const Color(0xFFE0E0E0),
                         borderRadius: BorderRadius.circular(2),
                       ),
@@ -822,7 +818,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
                                   : FontWeight.w500,
                               fontSize: 13,
                               color: isViewing
-                                  ? const Color(0xFF5B67CA)
+                                  ? AppColors.sage
                                   : const Color(0xFF1E2235),
                             ),
                           ),
@@ -872,7 +868,7 @@ class _MiniStat extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: const Color(0xFF5B67CA)),
+        Icon(icon, size: 14, color: AppColors.sage),
         const SizedBox(width: 4),
         Text(label,
             style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
