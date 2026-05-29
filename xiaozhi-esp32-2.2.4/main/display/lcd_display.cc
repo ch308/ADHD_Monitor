@@ -954,9 +954,12 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_width(center_status_label_, LV_HOR_RES * 0.9);
     lv_obj_set_style_text_align(center_status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(center_status_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_transform_scale(center_status_label_, 384, 0);
+    lv_obj_set_style_transform_width(center_status_label_, 24, 0);
+    lv_obj_set_style_transform_height(center_status_label_, 12, 0);
     lv_label_set_long_mode(center_status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_label_set_text(center_status_label_, Lang::Strings::WAITING_WIFI_CONFIG);
-    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, 0, text_font->line_height + lvgl_theme->spacing(14));
+    lv_obj_align(center_status_label_, LV_ALIGN_CENTER, 0, text_font->line_height + lvgl_theme->spacing(8));
 #endif
 
 #if CONFIG_USE_MULTILINE_CHAT_MESSAGE
@@ -985,7 +988,11 @@ void LcdDisplay::SetupUI() {
 #else
     /* Top layer: Bottom bar - fixed height at bottom */
     bottom_bar_ = lv_obj_create(screen);
+#ifdef CONFIG_ADHD_KIDS_UI
+    lv_obj_set_size(bottom_bar_, LV_HOR_RES, text_font->line_height * 2 + lvgl_theme->spacing(8));
+#else
     lv_obj_set_size(bottom_bar_, LV_HOR_RES, text_font->line_height + lvgl_theme->spacing(8));
+#endif
     lv_obj_set_style_radius(bottom_bar_, 0, 0);
     lv_obj_set_style_bg_color(bottom_bar_, lvgl_theme->background_color(), 0);
     lv_obj_set_style_text_color(bottom_bar_, lvgl_theme->text_color(), 0);
@@ -1003,6 +1010,11 @@ void LcdDisplay::SetupUI() {
     lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
     lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
+#ifdef CONFIG_ADHD_KIDS_UI
+    lv_obj_set_style_transform_scale(chat_message_label_, 352, 0);
+    lv_obj_set_style_transform_width(chat_message_label_, 24, 0);
+    lv_obj_set_style_transform_height(chat_message_label_, 10, 0);
+#endif
     lv_obj_align(chat_message_label_, LV_ALIGN_CENTER, 0, 0);
 
     // Start scrolling after a delay (short text won't scroll)
