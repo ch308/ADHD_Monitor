@@ -364,8 +364,7 @@ class MiBand6Auth {
         } else {
           _setStage(
             MiBandStage.authFailed,
-            message:
-                '安全握手失败：$e\n请检查 32 位 Hex Auth Key 是否与本只手环对应。',
+            message: '这只手环暂时无法完成连接校验，请确认当前连接的是已绑定的那只手环。',
           );
         }
         // 握手失败仍然继续尝试标准 HR 订阅，方便排查（必要时上层可读 isAuthenticated）
@@ -565,8 +564,7 @@ class MiBand6Auth {
     _authCompleter = null;
 
     if (!ok) {
-      throw StateError(
-          '小米手环握手失败（超时或 Auth Key 不匹配，请检查 32 位 Hex Key）。');
+      throw StateError('小米手环连接校验未通过，请稍后重试。');
     }
   }
 

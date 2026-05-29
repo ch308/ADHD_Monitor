@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:gal/gal.dart';
 import 'package:http/http.dart' as http;
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -56,6 +57,8 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
   // AI 配图相关状态
   Uint8List? _imageBytes;
   bool _generatingImage = false;
+  bool _savingImage = false;
+  bool _imageSavedToGallery = false;
   String? _imageError;
 
   @override
@@ -106,11 +109,11 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
         String errMsg;
         final s = response.statusCode;
         if (s == 500 || s == 503) {
-          errMsg = 'AI 服务暂时不可用，请稍后重试';
+          errMsg = '现在人有点多，稍等一下再试试';
         } else if (s == 401 || s == 403) {
-          errMsg = '登录已过期，请重新登录';
+          errMsg = '登录状态已失效，请重新进入后再试';
         } else {
-          errMsg = '草稿生成失败，请稍后重试';
+          errMsg = '这次没能生成草稿，再试一次看看';
         }
         setState(() {
           _error = errMsg;
@@ -121,7 +124,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
       final decoded = json.decode(response.body);
       if (decoded is! Map) {
         setState(() {
-          _error = '数据格式异常';
+          _error = '这次返回的内容没能读出来，请再试一次';
           _loading = false;
         });
         return;
@@ -129,7 +132,7 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
       final draft = decoded['draft'];
       if (draft is! Map) {
         setState(() {
-          _error = '草稿内容为空';
+          _error = '这次还没生成出可用内容，请再试一次';
           _loading = false;
         });
         return;
@@ -156,8 +159,8 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
               s.contains('Connection refused') ||
               s.contains('Failed host lookup') ||
               s.contains('TimeoutException'))
-          ? '无法连接服务器，请检查网络连接'
-          : 'AI 服务暂时不可用，请稍后重试';
+          ? '网络好像不太稳定，请确认网络后再试'
+          : '现在暂时没能连上服务，请稍后再试';
       setState(() {
         _error = msg;
         _loading = false;
@@ -202,6 +205,12 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
       return;
     }
 
+    final imageGuide = _imageBytes == null
+        ? ''
+        : _imageSavedToGallery
+            ? '④ 配图已保存到手机相册，进入小红书后点击添加图片即可从相册选择\n\n'
+            : '④ 当前配图还未保存到手机，请先点页面里的「保存到手机」再去小红书选图\n\n';
+
     // 1. 先复制到剪贴板
     await Clipboard.setData(ClipboardData(text: text));
 
@@ -219,13 +228,14 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
             Text('文案已复制', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
           ],
         ),
-        content: const Text(
+        content: Text(
           '点击「去小红书」后：\n\n'
           '① 小红书将自动打开\n'
           '② 点击右下角 ＋ 新建笔记\n'
-          '③ 在正文区域长按 → 粘贴\n\n'
+          '③ 在正文区域长按 → 粘贴\n'
+          '$imageGuide'
           '发布前请再次检查脱敏是否完整。',
-          style: TextStyle(height: 1.6, fontSize: 14),
+          style: const TextStyle(height: 1.6, fontSize: 14),
         ),
         actions: [
           TextButton(
@@ -353,14 +363,14 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
       if (resp.statusCode == 503) {
         final body = json.decode(resp.body);
         setState(() {
-          _imageError = (body is Map ? body['message'] : null) ?? 'AI 配图功能未配置，请联系服务器管理员';
+          _imageError = (body is Map ? body['message'] : null) ?? '现在还不能生成配图，稍后再试试';
           _generatingImage = false;
         });
         return;
       }
       if (resp.statusCode != 200) {
         setState(() {
-          _imageError = '配图生成失败，请稍后重试';
+          _imageError = '这次没能画出配图，稍后再试试';
           _generatingImage = false;
         });
         return;
@@ -369,13 +379,14 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
       final b64 = decoded['image_base64'] as String?;
       if (b64 == null || b64.isEmpty) {
         setState(() {
-          _imageError = '服务器返回空图像，请重试';
+          _imageError = '这次配图没有生成完整，再试一次看看';
           _generatingImage = false;
         });
         return;
       }
       setState(() {
         _imageBytes = base64Decode(b64);
+        _imageSavedToGallery = false;
         _imageError = null;
         _generatingImage = false;
       });
@@ -386,10 +397,67 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
         _imageError = (s.contains('SocketException') ||
                 s.contains('Connection refused') ||
                 s.contains('TimeoutException'))
-            ? '无法连接服务器，请检查网络连接'
-            : '配图生成失败，请稍后重试';
+            ? '网络好像不太稳定，请确认网络后再试'
+            : '这次没能画出配图，稍后再试试';
         _generatingImage = false;
       });
+    }
+  }
+
+  String _gallerySaveName() {
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    return 'adhd_monitor_xhs_$stamp';
+  }
+
+  Future<void> _saveImageToGallery() async {
+    final bytes = _imageBytes;
+    if (bytes == null || _savingImage) return;
+
+    setState(() => _savingImage = true);
+    try {
+      final hasAccess = await Gal.hasAccess();
+      final granted = hasAccess || await Gal.requestAccess();
+      if (!granted) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('还没有相册权限，允许后就能把图片保存到手机了')),
+        );
+        return;
+      }
+
+      await Gal.putImageBytes(bytes, name: _gallerySaveName());
+      if (!mounted) return;
+
+      setState(() => _imageSavedToGallery = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('配图已保存到系统相册，可在小红书发布时从相册选图'),
+          action: SnackBarAction(
+            label: '打开相册',
+            onPressed: () => Gal.open(),
+          ),
+        ),
+      );
+    } on GalException catch (e) {
+      if (!mounted) return;
+      final message = switch (e.type) {
+        GalExceptionType.accessDenied => '还没有相册权限，允许后就能把图片保存到手机了',
+        GalExceptionType.notEnoughSpace => '手机存储空间不够了，清理一点空间后再试',
+        GalExceptionType.notSupportedFormat => '这张图片暂时没法保存，换一张再试试',
+        GalExceptionType.unexpected => '这次没保存成功，稍后再试试',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('这次没保存成功，稍后再试试')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _savingImage = false);
+      }
     }
   }
 
@@ -775,16 +843,64 @@ class _XiaohongshuDraftPageState extends State<XiaohongshuDraftPage> {
             ),
           ),
           const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: _shareImage,
-            icon: const Icon(Icons.ios_share, size: 18),
-            label: const Text('保存 / 分享配图'),
-            style: FilledButton.styleFrom(
-              backgroundColor: _xhsSage,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape:
-                  RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _savingImage ? null : _saveImageToGallery,
+                  icon: _savingImage
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Icon(
+                          _imageSavedToGallery
+                              ? Icons.check_circle_outline
+                              : Icons.download_rounded,
+                          size: 18,
+                        ),
+                  label: Text(_imageSavedToGallery ? '已保存到手机' : '保存到手机'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _xhsSage,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _shareImage,
+                  icon: const Icon(Icons.ios_share, size: 18),
+                  label: const Text('系统分享'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _xhsSage,
+                    side: BorderSide(color: _xhsSage.withValues(alpha: 0.55)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            _imageSavedToGallery
+                ? '图片已经进入系统相册，去小红书发布时可直接从相册选择。'
+                : '小红书不会自动接收这里生成的图片，请先保存到手机相册，再到小红书里手动选图。',
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade500,
+              height: 1.45,
             ),
           ),
         ],

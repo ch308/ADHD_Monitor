@@ -15,6 +15,7 @@ import '../services/cloud_service.dart';
 import '../services/esp_provision_service.dart';
 import '../services/miband_service.dart';
 import '../services/session_store.dart';
+import '../theme/app_theme.dart';
 
 class EspProvisionPage extends StatefulWidget {
   const EspProvisionPage({
@@ -344,7 +345,8 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
   Widget build(BuildContext context) {
     final bound = widget.currentBoundDeviceId;
     return Scaffold(
-      appBar: AppBar(title: Text('$_deviceLabel配网')),
+      backgroundColor: AppColors.canvas,
+      appBar: AppBar(title: Text('$_deviceLabel设置')),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -353,9 +355,8 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
             children: [
               if (bound != null && bound.isNotEmpty) _buildBoundCard(bound),
               Text(
-                '把家里的 WiFi 名和密码填好，再选下面扫到的板子；'
-                '板子第一次刷机后或者刚被"重新配网"后会自动广播 $_advPrefix… BLE。',
-                style: const TextStyle(fontSize: 13, color: Colors.black54),
+                '把家里的 WiFi 名和密码填好，再扫描附近的 $_deviceLabel。设备进入设置模式后会出现在下方列表里。',
+                style: const TextStyle(fontSize: 13, color: AppColors.muted, height: 1.45),
               ),
               const SizedBox(height: 8),
               Container(
@@ -374,7 +375,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                     Expanded(
                       child: Text(
                         '$_deviceLabel只支持 2.4GHz WiFi。'
-                        '如果你的路由器把 2.4G/5G 拆成两个 SSID，'
+                        '如果你的路由器把 2.4G/5G 拆成两个名称，'
                         '请填 2.4G 的那一个；密码再正确，5GHz 的 SSID $_deviceLabel也连不上。',
                         style: const TextStyle(fontSize: 12, color: Color(0xFF5D4000)),
                       ),
@@ -426,7 +427,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: AppColors.surfaceSoft,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(_status, style: const TextStyle(fontSize: 13)),
@@ -451,8 +452,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
             leading: const Icon(Icons.bluetooth),
             title: Text(d.advName),
             subtitle: Text(
-              'BLE 待配网  device_id=${d.deviceId}'
-              '${d.rssi != null ? "  rssi=${d.rssi}dBm" : ""}',
+              '待连接设备${d.rssi != null ? " · 信号 ${d.rssi}dBm" : ""}',
             ),
             trailing: _busy
                 ? const SizedBox(
@@ -484,12 +484,12 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
             title: Text(id),
             subtitle: Text(
               [
-                '已联网，BLE 已关闭',
+                '已联网',
                 if (childId == null)
                   '未绑定'
                 else
                   '已绑定：${nick.isEmpty ? "孩子 $childId" : nick}',
-                if (lastSeen.isNotEmpty) 'last_seen=$lastSeen',
+                if (lastSeen.isNotEmpty) '最近在线：$lastSeen',
               ].join('  ·  '),
             ),
             trailing: _busy
@@ -512,8 +512,8 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
 
     return const Center(
       child: Text(
-        '点击上方"扫描设备"开始',
-        style: TextStyle(color: Colors.black45),
+        '点击上方“扫描设备”开始',
+        style: TextStyle(color: AppColors.muted),
       ),
     );
   }

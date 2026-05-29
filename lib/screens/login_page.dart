@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../services/session_store.dart';
+import '../theme/app_theme.dart';
 
 /// 注册 / 登录后拉取「我的孩子」列表，并进入首页（默认选第一个孩子）
 class LoginPage extends StatefulWidget {
@@ -68,10 +69,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         s.contains('Failed host lookup') ||
         s.contains('Network is unreachable') ||
         s.contains('TimeoutException')) {
-      return '无法连接服务器 ${_host()}:11760。\n'
-          '请检查：① 手机/电脑与服务器网络是否互通；② 云主机安全组与本机防火墙是否放行 TCP 11760；'
-          '③ 服务器上是否已运行 Flask（监听 0.0.0.0:11760）；'
-          '④ Android 模拟器访问本机请填 10.0.2.2。';
+      return '暂时连不上家庭服务。请确认手机和服务所在设备在同一网络，服务地址填写正确，并且服务已经启动。';
     }
     return s;
   }
@@ -224,62 +222,57 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Container(
+      backgroundColor: AppColors.canvas,
+      body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              Color(0xFF3B4BC8),
-              Color(0xFF5B67CA),
-              Color(0xFF8B95E8),
-            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [AppColors.canvas, AppColors.canvasAlt],
           ),
         ),
         child: SafeArea(
           child: Column(
             children: [
               const SizedBox(height: 24),
-              // Logo area
               Container(
                 width: 80,
                 height: 80,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
+                  color: AppColors.surface,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.35),
+                    color: AppColors.border,
                     width: 1.5,
                   ),
                 ),
                 child: const Icon(Icons.favorite_rounded,
-                    color: Colors.white, size: 40),
+                    color: AppColors.sage, size: 40),
               ),
               const SizedBox(height: 12),
               const Text(
-                'ADHD 专注精灵',
+                '专注陪伴',
                 style: TextStyle(
-                  color: Colors.white,
+                  color: AppColors.ink,
                   fontSize: 26,
                   fontWeight: FontWeight.w800,
-                  letterSpacing: 0.5,
+                  letterSpacing: 0,
                 ),
               ),
               const SizedBox(height: 4),
-              Text(
+              const Text(
                 '家庭协作 · 共同守护',
                 style: TextStyle(
-                  color: Colors.white.withValues(alpha: 0.7),
+                  color: AppColors.muted,
                   fontSize: 13,
-                  letterSpacing: 1,
+                  letterSpacing: 0,
                 ),
               ),
               const SizedBox(height: 24),
-              // Main card
               Expanded(
                 child: Container(
                   decoration: const BoxDecoration(
-                    color: Colors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.only(
                       topLeft: Radius.circular(28),
                       topRight: Radius.circular(28),
@@ -288,25 +281,22 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                   child: Column(
                     children: [
                       const SizedBox(height: 8),
-                      // Tab bar
                       Container(
                         margin: const EdgeInsets.symmetric(
                             horizontal: 48, vertical: 12),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
+                          color: AppColors.surfaceSoft,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: TabBar(
                           controller: _tabs,
                           indicator: BoxDecoration(
-                            gradient: const LinearGradient(
-                              colors: [Color(0xFF5B67CA), Color(0xFF7B87E8)],
-                            ),
+                            color: AppColors.sage,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           indicatorSize: TabBarIndicatorSize.tab,
                           labelColor: Colors.white,
-                          unselectedLabelColor: Colors.black54,
+                          unselectedLabelColor: AppColors.muted,
                           labelStyle: const TextStyle(
                               fontWeight: FontWeight.w600, fontSize: 14),
                           dividerColor: Colors.transparent,
@@ -329,26 +319,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                             hintStyle: TextStyle(
                                 color: Colors.grey.shade400, fontSize: 13),
                             prefixIcon: Icon(Icons.dns_outlined,
-                                color: Colors.indigo.shade300, size: 20),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  BorderSide(color: Colors.grey.shade300),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide:
-                                  BorderSide(color: Colors.grey.shade200),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: const BorderSide(
-                                  color: Color(0xFF5C6BC0), width: 1.5),
-                            ),
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 12),
-                            filled: true,
-                            fillColor: Colors.grey.shade50,
+                                color: AppColors.sage, size: 20),
                           ),
                           autocorrect: false,
                         ),
@@ -377,26 +348,8 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                                 decoration: InputDecoration(
                                   labelText: '显示昵称（可选）',
                                   prefixIcon: Icon(Icons.badge_outlined,
-                                      color: Colors.indigo.shade300,
+                                      color: AppColors.sage,
                                       size: 20),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  enabledBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: BorderSide(
-                                        color: Colors.grey.shade200),
-                                  ),
-                                  focusedBorder: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                    borderSide: const BorderSide(
-                                        color: Color(0xFF5C6BC0), width: 1.5),
-                                  ),
-                                  contentPadding:
-                                      const EdgeInsets.symmetric(
-                                          horizontal: 14, vertical: 12),
-                                  filled: true,
-                                  fillColor: Colors.grey.shade50,
                                 ),
                               ),
                               submitLabel: '注册账号',
@@ -430,8 +383,8 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       children: [
         Text(
           '多个家长可用各自账号登录\n共同关注同一个孩子',
-          style: TextStyle(
-              color: Colors.grey.shade600, height: 1.4, fontSize: 13),
+          style: const TextStyle(
+              color: AppColors.muted, height: 1.4, fontSize: 13),
         ),
         const SizedBox(height: 18),
         TextField(
@@ -442,23 +395,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
             hintStyle:
                 TextStyle(color: Colors.grey.shade400, fontSize: 12),
             prefixIcon: Icon(Icons.person_outline,
-                color: Colors.indigo.shade300, size: 20),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey.shade200),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: Color(0xFF5C6BC0), width: 1.5),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 12),
-            filled: true,
-            fillColor: Colors.grey.shade50,
+                color: AppColors.sage, size: 20),
           ),
           autocorrect: false,
         ),
@@ -469,33 +406,17 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
           decoration: InputDecoration(
             labelText: '密码',
             prefixIcon: Icon(Icons.lock_outline,
-                color: Colors.indigo.shade300, size: 20),
+                color: AppColors.sage, size: 20),
             // L1: 密码显示/隐藏切换按鈕
             suffixIcon: IconButton(
               icon: Icon(
                 obscurePass ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                color: Colors.grey.shade400,
+                color: AppColors.muted,
                 size: 20,
               ),
               onPressed: onToggleObscure,
               tooltip: obscurePass ? '显示密码' : '隐藏密码',
             ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide: BorderSide(color: Colors.grey.shade200),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
-              borderSide:
-                  const BorderSide(color: Color(0xFF5C6BC0), width: 1.5),
-            ),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14, vertical: 12),
-            filled: true,
-            fillColor: Colors.grey.shade50,
           ),
         ),
         if (extra != null) ...[const SizedBox(height: 14), extra],
@@ -504,67 +425,38 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.red.shade50,
+              color: const Color(0xFFFFF0EA),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.red.shade200),
+              border: Border.all(color: AppColors.coral.withValues(alpha: 0.35)),
             ),
             child: Row(
               children: [
-                Icon(Icons.error_outline,
-                    color: Colors.red.shade400, size: 18),
+                const Icon(Icons.info_outline_rounded,
+                    color: AppColors.coral, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child:
-                      Text(_err!, style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+                      Text(_err!, style: const TextStyle(color: Color(0xFF8A493E), fontSize: 12, height: 1.35)),
                 ),
               ],
             ),
           ),
         ],
         const SizedBox(height: 24),
-        Container(
+        SizedBox(
           width: double.infinity,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF5B67CA), Color(0xFF7B87E8)],
-            ),
-            borderRadius: BorderRadius.circular(14),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF5B67CA).withValues(alpha: 0.35),
-                blurRadius: 14,
-                offset: const Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _busy ? null : onSubmit,
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 15),
-                child: Center(
-                  child: _busy
-                      ? const SizedBox(
-                          width: 22,
-                          height: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(
-                          submitLabel,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                ),
-              ),
-            ),
+          child: FilledButton(
+            onPressed: _busy ? null : onSubmit,
+            child: _busy
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : Text(submitLabel),
           ),
         ),
       ],

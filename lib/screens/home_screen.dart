@@ -35,6 +35,7 @@ class AdhdMonitorApp extends StatefulWidget {
     this.activeChildId = 1,
     this.onLogout,
     this.onSwitchChild,
+    this.onSwitchMode,
   });
 
   final String serverIp;
@@ -42,6 +43,7 @@ class AdhdMonitorApp extends StatefulWidget {
   final int activeChildId;
   final VoidCallback? onLogout;
   final void Function(int childId)? onSwitchChild;
+  final VoidCallback? onSwitchMode;
 
   @override
   State<AdhdMonitorApp> createState() => _AdhdMonitorAppState();
@@ -106,6 +108,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   bool _speechReady = false;
   _RecordSpeechState _speechState = _RecordSpeechState.idle;
   String _speechBaseText = '';
+  String _speechRecognizedWords = '';
+  String? _speechLocaleId;
   String? _speechStatusText;
   DateTime? _lastSpeechStopAt;
 
@@ -214,6 +218,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     super.initState();
     _syncMacToCloudService();
     _initTts(); // 初始化语音
+    unawaited(_primeSpeechRecognizer());
     // 初始化呼吸动画控制器
     _breathingController = AnimationController(
       vsync: this,
@@ -493,7 +498,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           SnackBar(
             backgroundColor: Colors.red.shade700,
             duration: const Duration(seconds: 6),
-            content: const Text('❌ 手环安全握手失败。请检查代码中的 _miBand6AuthKey 是否换成了你的手环真实 Key（每只手环唯一，可从 Zepp Life App 获取）'),
+                    content: const Text('❌ 当前无法连接这只手环。请确认孩子佩戴的是已绑定的那只手环，必要时重新绑定后再试。'),
           ),
         );
         break;
@@ -751,6 +756,76 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
   }
 
+  Future<void> _primeSpeechRecognizer() async {
+    if (await Permission.microphone.isGranted) {
+      await _prepareSpeechRecognizer();
+    }
+  }
+
+  Future<String?> _resolveSpeechLocaleId() async {
+    if (_speechLocaleId != null) return _speechLocaleId;
+
+    try {
+      final locales = await _speechToText.locales();
+      for (final locale in locales) {
+        final localeId = locale.localeId.trim();
+        final normalized = localeId.toLowerCase().replaceAll('-', '_');
+        if (normalized == 'zh_cn' || normalized.startsWith('zh_')) {
+          _speechLocaleId = localeId;
+          return _speechLocaleId;
+        }
+      }
+
+      final systemLocale = await _speechToText.systemLocale();
+      _speechLocaleId = systemLocale?.localeId;
+    } catch (_) {
+      _speechLocaleId = null;
+    }
+
+    return _speechLocaleId;
+  }
+
+  String _composeSpeechText(String words) {
+    final parts = <String>[
+      if (_speechBaseText.trim().isNotEmpty) _speechBaseText.trim(),
+      if (words.trim().isNotEmpty) words.trim(),
+    ];
+    return parts.join(' ');
+  }
+
+  void _applySpeechText(String words) {
+    final mergedText = _composeSpeechText(words);
+    if (mergedText.isEmpty) return;
+
+    _recordController.value = _recordController.value.copyWith(
+      text: mergedText,
+      selection: TextSelection.collapsed(offset: mergedText.length),
+      composing: TextRange.empty,
+    );
+  }
+
+  Future<void> _resetSpeechSession({bool waitForCooldown = false}) async {
+    var touchedSession = false;
+    try {
+      if (_speechToText.isListening) {
+        await _speechToText.stop();
+        touchedSession = true;
+      }
+    } catch (_) {}
+
+    try {
+      await _speechToText.cancel();
+      touchedSession = true;
+    } catch (_) {}
+
+    if (touchedSession) {
+      _lastSpeechStopAt = DateTime.now();
+    }
+    if (waitForCooldown && touchedSession) {
+      await _waitForSpeechCooldown();
+    }
+  }
+
   Future<bool> _prepareSpeechRecognizer() async {
     if (_speechReady) return true;
 
@@ -758,7 +833,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       onStatus: _handleSpeechStatus,
       onError: _handleSpeechError,
     );
-    if (_speechReady) return true;
+    if (_speechReady) {
+      await _resolveSpeechLocaleId();
+      return true;
+    }
 
     final hasPermission = await _speechToText.hasPermission;
     _showRecordSnack(
@@ -781,6 +859,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
     if (status == 'notListening' || status == 'done') {
       _lastSpeechStopAt = DateTime.now();
+      if (_speechRecognizedWords.trim().isNotEmpty) {
+        _applySpeechText(_speechRecognizedWords);
+      }
       if (_speechListening || _speechBusy) {
         setState(() {
           _speechState = _RecordSpeechState.idle;
@@ -796,17 +877,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final message = error.errorMsg?.toString() ?? error.toString();
     _lastSpeechStopAt = DateTime.now();
     _speechReady = false;
+    _speechLocaleId = null;
     setState(() {
       _speechState = _RecordSpeechState.idle;
       _speechStatusText = null;
     });
 
     unawaited(Future<void>.delayed(const Duration(milliseconds: 500), () async {
-      try {
-        await _speechToText.cancel();
-      } catch (_) {
-        // Ignore recognizer cleanup errors; the next start reinitializes it.
-      }
+      await _resetSpeechSession(waitForCooldown: false);
     }));
 
     if (message.contains('busy')) {
@@ -830,11 +908,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     try {
       await _speechToText.stop();
     } catch (_) {
-      try {
-        await _speechToText.cancel();
-      } catch (_) {}
+      await _resetSpeechSession(waitForCooldown: false);
     } finally {
       _lastSpeechStopAt = DateTime.now();
+      if (_speechRecognizedWords.trim().isNotEmpty) {
+        _applySpeechText(_speechRecognizedWords);
+      }
       if (mounted) {
         setState(() {
           _speechState = _RecordSpeechState.idle;
@@ -863,7 +942,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     try {
       // 开麦前先停 TTS，避免音频焦点冲突导致 STT 无法获取麦克风
       await _flutterTts.stop();
-      await _waitForSpeechCooldown();
+      await _resetSpeechSession(waitForCooldown: true);
 
       if (!await _prepareSpeechRecognizer()) {
         if (mounted) {
@@ -876,8 +955,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
 
       _speechBaseText = _recordController.text.trim();
+      _speechRecognizedWords = '';
+      final localeId = await _resolveSpeechLocaleId();
       await _speechToText.listen(
-        localeId: 'zh_CN',
+        localeId: localeId,
         listenFor: const Duration(seconds: 60),
         pauseFor: const Duration(seconds: 5),
         partialResults: true,
@@ -887,16 +968,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           final words = result.recognizedWords.trim();
           if (words.isEmpty) return;
 
-          final prefix = _speechBaseText.isEmpty ? '' : '$_speechBaseText ';
-          _recordController.text = '$prefix$words'.trim();
-          _recordController.selection = TextSelection.collapsed(
-            offset: _recordController.text.length,
-          );
+          _speechRecognizedWords = words;
+          _applySpeechText(words);
         },
       );
     } catch (e) {
       _lastSpeechStopAt = DateTime.now();
       _speechReady = false;
+      _speechLocaleId = null;
       if (mounted) {
         setState(() {
           _speechState = _RecordSpeechState.idle;
@@ -1709,7 +1788,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('网络错误：$e')));
+          .showSnackBar(const SnackBar(content: Text('网络有点不稳定，这次没有提交成功')));
       setState(() => _recordSubmitting = false);
     }
   }
@@ -2000,6 +2079,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               color: isAlertMode ? _coral : _sage),
             onSelected: (v) async {
               if (v == 'logout') widget.onLogout?.call();
+              if (v == 'switch_mode') widget.onSwitchMode?.call();
               if (v == 'invite') await _showInviteMemberDialog();
               if (v == 'switch') await _showSwitchChildDialog();
               if (v == 'band_bind') await _bindCurrentDevice();
@@ -2061,6 +2141,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 child: Text('绑定小智设备 (MAC)'),
               ),
               const PopupMenuDivider(),
+              if (widget.onSwitchMode != null)
+                const PopupMenuItem(value: 'switch_mode', child: Text('切换使用身份')),
               const PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],
           ),
@@ -2517,7 +2599,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 child: chartData.isEmpty
                     ? Center(
                         child: Text(
-                          _chartLoadFailed ? '心率数据加载失败\n请检查网络连接' : '暂无心率数据',
+                          _chartLoadFailed ? '心率数据暂时没有刷新出来\n稍后再试试' : '暂无心率数据',
                           textAlign: TextAlign.center,
                           style: const TextStyle(color: _mutedInk, fontSize: 13),
                         ),
@@ -2904,8 +2986,8 @@ class _BandStatusBanner extends StatelessWidget {
       case MiBandStage.bluetoothOff:
         return '请在手机控制中心或「设置 → 蓝牙」中开启蓝牙后再试。';
       case MiBandStage.authFailed:
-        return '安全握手失败。请确认 home_screen.dart 中 _miBand6AuthKey 是这只手环对应的 32 位 Hex Auth Key '
-            '（来自小米运动健康抓包或厂商工具，每只手环唯一）。';
+        return '当前这只手环的连接校验没有通过。通常是更换了手环，或现在连接的不是之前绑定的那一只。'
+            '请重新绑定当前手环后再试。';
       case MiBandStage.disconnected:
         return '点击「重试连接」可重新尝试发现并解锁手环。';
       case MiBandStage.error:
