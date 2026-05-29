@@ -1592,7 +1592,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                           : _sage)
                         .withValues(alpha: 0.13),
                       border: Border.all(
-                        _selectedConditionType == 'adhd'
+                        color: _selectedConditionType == 'adhd'
                         ? _amber.withValues(alpha: 0.35)
                         : _sage.withValues(alpha: 0.35),
                       ),
@@ -2327,7 +2327,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   ),
                 ),
                 if (isAlerting && !isDismissed)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 16),
                     child: Text(
                       '轻触上方图标，确认已知晓',
