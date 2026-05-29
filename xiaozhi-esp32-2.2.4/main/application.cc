@@ -345,6 +345,20 @@ void Application::Run() {
             auto display = Board::GetInstance().GetDisplay();
             display->UpdateStatusBar();
 
+#ifdef CONFIG_ADHD_KIDS_UI
+            const auto state = GetDeviceState();
+            const EventBits_t net_bits = xEventGroupGetBits(event_group_);
+            const bool waiting_wifi_config =
+                (net_bits & MAIN_EVENT_NETWORK_CONNECTED) == 0 &&
+                (state == kDeviceStateWifiConfiguring ||
+                 state == kDeviceStateStarting ||
+                 state == kDeviceStateIdle);
+            if (waiting_wifi_config && clock_ticks_ - kids_wifi_config_voice_tick_ >= 30) {
+                kids_wifi_config_voice_tick_ = clock_ticks_;
+                audio_service_.PlaySound(Lang::Sounds::OGG_WIFICONFIG);
+            }
+#endif
+
             // 真正的 endpoint 检测改用 one-shot esp_timer（OnEndpointTimer）；
             // 这里 1 Hz 只做兜底：
             //   (a) 已经听到过说话但 VAD 一直没稳定 endpoint，最长 12s 提交。
