@@ -12,16 +12,9 @@
 #include "BAT_Driver.h"
 #include "RGB.h"
 #include "Cloud.h"
-#include "sd_audio.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-/* Temporary local hardware smoke test.
- * Set to 0 (or revert this file) after testing screen backlight + SD audio.
- * Expects MP3 files under /sdcard/audio/432Hz/.
- */
-#define TEMP_LOCAL_HW_SMOKE_TEST 1
 
 void Driver_Loop(void *parameter)
 {
@@ -70,11 +63,7 @@ void app_main(void)
     /* 初始进入"黑屏待命"：背光 0，等收到云端 breathing_start 时由 Cloud.c 拉亮。
      * 触摸/UI 框架仍然跑着，便于后续在 LVGL 上画"已联网"等状态。 */
     Backlight_Init();
-#if TEMP_LOCAL_HW_SMOKE_TEST
-    Set_Backlight(90);
-#else
     Set_Backlight(0);
-#endif
 
     /* 创建呼吸 / 倒计时 RGB 任务（默认 idle，不点灯）；
      * 真正点亮的时机由 Cloud.c 收到云端命令后 RGB_Start_* 控制。 */
@@ -104,10 +93,4 @@ void app_main(void)
 
     /* 云端长轮询：会等 Wireless_State 到 CONNECTED 才开始 announce + poll */
     Cloud_Start();
-
-#if TEMP_LOCAL_HW_SMOKE_TEST
-    /* Let SD/LVGL/I2S settle, then play local SD-card music without cloud cmds. */
-    vTaskDelay(pdMS_TO_TICKS(1500));
-    sd_audio_start("432Hz");
-#endif
 }
