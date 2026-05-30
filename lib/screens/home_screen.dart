@@ -136,9 +136,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   bool _sawNoAlertSinceDismiss = true;
 
   // ── 蓝牙手环（小米手环 6 / 兼容设备）──
-  /// TODO: 替换为你从 Mi Fit / Zepp Life 抓包提取出来的真实 32 位 Hex Auth Key
-  /// （每只手环唯一；不替换的话握手会失败、收不到心率 notify）。
-  static const String _miBand6AuthKey = '1234567890abcdef1234567890abcdef';
+  /// 小米手环 6 NFC 鉴权密钥（32 位 Hex，与设备绑定；勿提交到公开仓库）。
+  /// 来源：设备详情 `detail.authKey`（MAC: EA:3B:1F:FA:1C:9B）。
+  static const String _miBand6AuthKey = '665d528be071c1ca4da3432c09a6479d';
 
   final StressCalculator _stressCalc = StressCalculator();
 
