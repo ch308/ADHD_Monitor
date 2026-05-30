@@ -309,13 +309,13 @@ class MiBand6Auth {
       if (found == null) {
         _setStage(
           MiBandStage.notFound,
-          message: '未发现小米手环 6。请确认手环靠近手机、电量充足、且未被其它 App 长连占用。',
+          message: '还没有发现小米手环 6，请确认手环靠近手机、电量充足，且没有被其他应用占用。',
         );
       }
       return found;
     } catch (e) {
       debugPrint('MiBand6Auth: scan error $e');
-      _setStage(MiBandStage.error, message: '扫描出错：$e');
+      _setStage(MiBandStage.error, message: '搜索手环时出了点问题，请稍后再试。');
       return null;
     } finally {
       await sub.cancel();
@@ -339,7 +339,7 @@ class MiBand6Auth {
         await device.connect();
       } catch (e) {
         debugPrint('MiBand6Auth: connect error $e');
-        _setStage(MiBandStage.error, message: '连接失败：$e');
+        _setStage(MiBandStage.error, message: '这次没能连上手环，请靠近后重试。');
         // 走重连，避免一次失败就放弃（OEM 偶尔 ESP-side timeout）
         _scheduleReconnect();
         rethrow;
@@ -370,8 +370,8 @@ class MiBand6Auth {
         if (e.toString().contains('未找到小米手环鉴权特征值')) {
           _setStage(
             MiBandStage.awaitingBroadcast,
-            message: '已连接设备，但未发现小米私有鉴权服务（FEE1/0009）。'
-                '将尝试标准心率广播通道；如果无法接收心率，请在小米运动健康中开启「运动心率广播」。',
+            message: '已经连上手环，但还不能直接接收心率。'
+                '我们会继续尝试；如果仍没有心率，请在小米运动健康中开启「运动心率广播」。',
           );
         } else {
           _setStage(
@@ -411,9 +411,9 @@ class MiBand6Auth {
     if (hrChar == null) {
       _setStage(
         MiBandStage.error,
-        message: '未在该设备上找到心率特征值（180D / 2A37）。',
+        message: '这只设备暂时没有提供可用的心率通道。',
       );
-      throw StateError('未在该设备上找到心率特征值（180D / 2A37）。');
+      throw StateError('这只设备暂时没有提供可用的心率通道。');
     }
 
     _hrChar = hrChar;
@@ -565,7 +565,7 @@ class MiBand6Auth {
       if (authChar != null) break;
     }
     if (authChar == null) {
-      throw StateError('未找到小米手环鉴权特征值（FEE1 / 0009）。');
+      throw StateError('未找到可用的手环校验通道。');
     }
 
     _authChar = authChar;
@@ -684,11 +684,11 @@ class MiBand6Auth {
           msg.contains('android-code: 3')) {
         _setStage(
           MiBandStage.awaitingBroadcast,
-          message: '已连接到手环，但系统拒绝开启心率 notify（GATT_WRITE_NOT_PERMITTED）。'
+          message: '已经连上手环，但手机暂时不能接收心率。'
               '请在小米运动健康中开启「运动心率广播」后重试。',
         );
       } else {
-        _setStage(MiBandStage.error, message: '订阅心率失败：$e');
+        _setStage(MiBandStage.error, message: '开始接收心率时出了点问题，请稍后再试。');
       }
       return false;
     }

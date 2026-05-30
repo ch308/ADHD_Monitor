@@ -9,11 +9,11 @@ import '../theme/app_theme.dart';
 class LoginPage extends StatefulWidget {
   const LoginPage({
     super.key,
-    required this.serverIp,
+    required this.serviceHost,
     required this.onLoggedIn,
   });
 
-  final String serverIp;
+  final String serviceHost;
   final void Function(String token, int childId) onLoggedIn;
 
   @override
@@ -22,7 +22,6 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMixin {
   late final TabController _tabs;
-  late final TextEditingController _serverHost;
   final _userLogin = TextEditingController();
   final _passLogin = TextEditingController();
   final _userReg = TextEditingController();
@@ -38,13 +37,11 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
   void initState() {
     super.initState();
     _tabs = TabController(length: 2, vsync: this);
-    _serverHost = TextEditingController(text: widget.serverIp);
   }
 
   @override
   void dispose() {
     _tabs.dispose();
-    _serverHost.dispose();
     _userLogin.dispose();
     _passLogin.dispose();
     _userReg.dispose();
@@ -53,14 +50,22 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
     super.dispose();
   }
 
-  /// 当前请求使用的主机（域名或 IP），端口固定 11760
-  String _host() {
-    final t = _serverHost.text.trim();
-    if (t.isEmpty) return widget.serverIp;
-    return t;
-  }
+  String _host() => widget.serviceHost;
 
   String _apiBase() => 'http://${_host()}:11760';
+
+  String _sanitizeUserError(String? raw, String fallback) {
+    final text = raw?.trim() ?? '';
+    if (text.isEmpty) return fallback;
+
+    final containsAddress = RegExp(
+      r'(https?://)|((\d{1,3}\.){3}\d{1,3})|(:\d{2,5})|([a-z0-9-]+\.)+[a-z]{2,}',
+      caseSensitive: false,
+    ).hasMatch(text);
+
+    if (containsAddress) return fallback;
+    return text;
+  }
 
   String _networkErrorHint(Object e) {
     final s = e.toString();
@@ -69,9 +74,9 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
         s.contains('Failed host lookup') ||
         s.contains('Network is unreachable') ||
         s.contains('TimeoutException')) {
-      return '暂时连不上家庭服务。请确认手机和服务所在设备在同一网络，服务地址填写正确，并且服务已经启动。';
+      return '暂时连不上服务，请确认网络正常后稍后再试。';
     }
-    return s;
+    return _sanitizeUserError(s, '现在暂时没能连上服务，请稍后再试。');
   }
 
   // L4: 从服务器响应体中提取可读的错误信息
@@ -80,7 +85,9 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
       final decoded = json.decode(body);
       if (decoded is Map) {
         final msg = decoded['message'] ?? decoded['error'] ?? decoded['detail'];
-        if (msg != null && msg.toString().isNotEmpty) return msg.toString();
+        if (msg != null && msg.toString().isNotEmpty) {
+          return _sanitizeUserError(msg.toString(), fallback);
+        }
       }
     } catch (_) {}
     return fallback;
@@ -307,24 +314,7 @@ class _LoginPageState extends State<LoginPage> with SingleTickerProviderStateMix
                           ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      // Server host field
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: TextField(
-                          controller: _serverHost,
-                          decoration: InputDecoration(
-                            labelText: '服务器地址',
-                            hintText: '域名或 IP（端口固定 11760）',
-                            hintStyle: TextStyle(
-                                color: Colors.grey.shade400, fontSize: 13),
-                            prefixIcon: Icon(Icons.dns_outlined,
-                                color: AppColors.sage, size: 20),
-                          ),
-                          autocorrect: false,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 12),
                       // Form content
                       Expanded(
                         child: TabBarView(

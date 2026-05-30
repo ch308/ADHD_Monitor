@@ -1,30 +1,57 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:adhd_monitor/main.dart';
+import 'package:adhd_monitor/models/parent_child_profile.dart';
+import 'package:adhd_monitor/teacher/teacher_models.dart';
+import 'package:adhd_monitor/teacher/teacher_shell.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('家长版 6-12 岁孩子档案会自动匹配 >130 / <70 阈值', () {
+    final thresholds = parentHeartRateThresholdsForAge(8);
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(thresholds.high, 130);
+    expect(thresholds.low, 70);
+    expect(thresholds.ageBandLabel, '6-12 岁');
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    final profile = ParentChildProfile(
+      childId: 1,
+      name: '小宇',
+      age: 8,
+      highThresholdBpm: thresholds.high,
+      lowThresholdBpm: thresholds.low,
+      updatedAt: DateTime(2026, 5, 30),
+    );
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    expect(profile.highThresholdBpm, 130);
+    expect(profile.lowThresholdBpm, 70);
+    expect(profile.displayName, '小宇');
+  });
+
+  test('6-12 岁学生档案会自动匹配 >130 / <70 阈值', () {
+    final thresholds = teacherHeartRateThresholdsForAge(8);
+
+    expect(thresholds.high, 130);
+    expect(thresholds.low, 70);
+    expect(thresholds.ageBandLabel, '6-12 岁');
+
+    final student = TeacherStudent(
+      id: 's-1',
+      name: '小宇',
+      age: 8,
+      thresholdBpm: thresholds.high,
+      lowThresholdBpm: thresholds.low,
+      createdAt: DateTime(2026, 5, 30),
+    );
+
+    expect(
+      teacherStudentThresholdSummary(student),
+      '自动提醒线：过高 >130 / 过低 <70 次/分钟',
+    );
+    expect(teacherRapidRiseRuleSummary, '额外规则：5 分钟内较基线升高 30% 也会提醒');
+  });
+
+  test('三类告警文案符合教师端显示和本地记录预期', () {
+    expect(teacherAlertEventLabel('highHeartRate'), '心率持续偏高');
+    expect(teacherAlertEventLabel('lowHeartRate'), '心率持续偏低');
+    expect(teacherAlertEventLabel('rapidRiseHeartRate'), '心率短时骤升');
   });
 }

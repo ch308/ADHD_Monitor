@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'teacher_models.dart';
@@ -8,6 +9,9 @@ class TeacherLocalStore {
   static const _kStudents = 'teacher_students_json';
   static const _kTeacherBand = 'teacher_band_binding_json';
   static const _kAlertEvents = 'teacher_alert_events_json';
+  static const _kTeacherBandAuthPrefix = 'teacher_band_auth_';
+  static const _kStudentBandAuthPrefix = 'teacher_student_band_auth_';
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   static Future<List<TeacherStudent>> getStudents() async {
     final prefs = await SharedPreferences.getInstance();
@@ -16,18 +20,68 @@ class TeacherLocalStore {
 
     final decoded = json.decode(raw);
     if (decoded is! List) return const <TeacherStudent>[];
-    return decoded
+    final students = decoded
         .whereType<Map>()
         .map((item) => TeacherStudent.fromJson(Map<String, dynamic>.from(item)))
         .where((student) => student.id.isNotEmpty)
         .toList();
+    var migratedAny = false;
+    final hydrated = await Future.wait(
+      students.map((student) async {
+        final migrated = await _migrateStudentAuthKey(student);
+        if (!identical(migrated, student)) {
+          migratedAny = true;
+        }
+        final secureKey = await _secureStorage.read(
+          key: '$_kStudentBandAuthPrefix${student.id}',
+        );
+        return migrated.copyWith(
+          bandAuthHexKey: secureKey?.isNotEmpty == true
+              ? secureKey
+              : migrated.bandAuthHexKey,
+        );
+      }),
+    );
+    if (migratedAny) {
+      await prefs.setString(
+        _kStudents,
+        json.encode(
+          hydrated
+              .map((student) => student.copyWith(bandAuthHexKey: null).toJson())
+              .toList(),
+        ),
+      );
+    }
+    return hydrated;
   }
 
   static Future<void> saveStudents(List<TeacherStudent> students) async {
     final prefs = await SharedPreferences.getInstance();
+    final existing = await getStudents();
+    final nextIds = students.map((student) => student.id).toSet();
+    for (final removed in existing.where((student) => !nextIds.contains(student.id))) {
+      await _secureStorage.delete(key: '$_kStudentBandAuthPrefix${removed.id}');
+    }
+
+    for (final student in students) {
+      final secureKey = '$_kStudentBandAuthPrefix${student.id}';
+      final authKey = student.bandAuthHexKey?.trim();
+      if (authKey == null || authKey.isEmpty) {
+        await _secureStorage.delete(key: secureKey);
+      } else {
+        await _secureStorage.write(key: secureKey, value: authKey);
+      }
+    }
+
     await prefs.setString(
       _kStudents,
-      json.encode(students.map((student) => student.toJson()).toList()),
+      json.encode(
+        students
+            .map(
+              (student) => student.copyWith(bandAuthHexKey: null).toJson(),
+            )
+            .toList(),
+      ),
     );
   }
 
@@ -38,19 +92,41 @@ class TeacherLocalStore {
 
     final decoded = json.decode(raw);
     if (decoded is! Map) return null;
-    final binding = TeacherBandBinding.fromJson(
+    final binding = await _migrateTeacherBandAuthKey(
+      TeacherBandBinding.fromJson(
       Map<String, dynamic>.from(decoded),
+      ),
     );
-    return binding.remoteId.isEmpty ? null : binding;
+    if ((binding.authHexKey ?? '').isEmpty) {
+      await prefs.setString(
+        _kTeacherBand,
+        json.encode(binding.copyWith(authHexKey: null).toJson()),
+      );
+    }
+    final secureKey = await _secureStorage.read(key: _kTeacherBandAuthPrefix);
+    final hydrated = binding.copyWith(
+      authHexKey: secureKey?.isNotEmpty == true ? secureKey : binding.authHexKey,
+    );
+    return hydrated.remoteId.isEmpty ? null : hydrated;
   }
 
   static Future<void> saveTeacherBand(TeacherBandBinding? binding) async {
     final prefs = await SharedPreferences.getInstance();
     if (binding == null) {
       await prefs.remove(_kTeacherBand);
+      await _secureStorage.delete(key: _kTeacherBandAuthPrefix);
       return;
     }
-    await prefs.setString(_kTeacherBand, json.encode(binding.toJson()));
+    final authKey = binding.authHexKey?.trim();
+    if (authKey == null || authKey.isEmpty) {
+      await _secureStorage.delete(key: _kTeacherBandAuthPrefix);
+    } else {
+      await _secureStorage.write(key: _kTeacherBandAuthPrefix, value: authKey);
+    }
+    await prefs.setString(
+      _kTeacherBand,
+      json.encode(binding.copyWith(authHexKey: null).toJson()),
+    );
   }
 
   static Future<List<TeacherAlertEvent>> getAlertEvents() async {
@@ -75,5 +151,24 @@ class TeacherLocalStore {
       _kAlertEvents,
       json.encode(next.map((item) => item.toJson()).toList()),
     );
+  }
+
+  static Future<TeacherStudent> _migrateStudentAuthKey(TeacherStudent student) async {
+    final authKey = student.bandAuthHexKey?.trim();
+    if (authKey == null || authKey.isEmpty) return student;
+    await _secureStorage.write(
+      key: '$_kStudentBandAuthPrefix${student.id}',
+      value: authKey,
+    );
+    return student.copyWith(bandAuthHexKey: null);
+  }
+
+  static Future<TeacherBandBinding> _migrateTeacherBandAuthKey(
+    TeacherBandBinding binding,
+  ) async {
+    final authKey = binding.authHexKey?.trim();
+    if (authKey == null || authKey.isEmpty) return binding;
+    await _secureStorage.write(key: _kTeacherBandAuthPrefix, value: authKey);
+    return binding.copyWith(authHexKey: null);
   }
 }

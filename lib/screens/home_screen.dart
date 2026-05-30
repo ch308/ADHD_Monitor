@@ -8,17 +8,17 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:vibration/vibration.dart';
 
 import '../models/band_stress_data.dart';
 import '../models/device_binding.dart';
 import '../models/heart_rate_data.dart';
+import '../models/parent_child_profile.dart';
 import '../services/cloud_service.dart';
 import '../services/esp_provision_service.dart' show EspProvKind;
 import '../services/foreground_task_service.dart';
 import '../services/miband_service.dart';
+import '../services/parent_child_profile_store.dart';
 import '../services/session_store.dart';
 import '../services/stress_calculator.dart';
 import 'breathing_ball_page.dart';
@@ -49,8 +49,6 @@ class AdhdMonitorApp extends StatefulWidget {
   State<AdhdMonitorApp> createState() => _AdhdMonitorAppState();
 }
 
-enum _RecordSpeechState { idle, preparing, listening, stopping }
-
 const Color _warmCanvas = Color(0xFFFBF7F1);
 const Color _warmSurface = Color(0xFFFFFCF7);
 const Color _warmSurfaceAlt = Color(0xFFF5EFE7);
@@ -62,6 +60,7 @@ const Color _teal = Color(0xFF4B9B94);
 const Color _amber = Color(0xFFE7A84E);
 const Color _coral = Color(0xFFE87962);
 const Color _rose = Color(0xFFD95F7A);
+const List<String> _parentGenderOptions = <String>['男', '女', '其他', '不便说明'];
 
 // 增加TickerProviderStateMixin以支持动画
 class _AdhdMonitorAppState extends State<AdhdMonitorApp>
@@ -104,19 +103,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   String? _selectedConditionType; // null=显示选择按钮 'adhd'/'autism'=显示表单
   String? _selectedConditionLabel;
   bool _recordSubmitting = false;
-  final stt.SpeechToText _speechToText = stt.SpeechToText();
-  bool _speechReady = false;
-  _RecordSpeechState _speechState = _RecordSpeechState.idle;
-  String _speechBaseText = '';
-  String _speechRecognizedWords = '';
-  String? _speechLocaleId;
-  String? _speechStatusText;
-  DateTime? _lastSpeechStopAt;
-
-  bool get _speechListening => _speechState == _RecordSpeechState.listening;
-  bool get _speechBusy =>
-      _speechState == _RecordSpeechState.preparing ||
-      _speechState == _RecordSpeechState.stopping;
 
   // H7: 图表数据加载失败是否显示提示
   bool _chartLoadFailed = false;
@@ -125,7 +111,16 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   Timer? _statusTimer;
   Timer? _historyTimer;
 
-  static const double _alertBpm = 120;
+    static const int _defaultHeartRateHighThreshold = 120;
+    static const int _defaultHeartRateLowThreshold = 70;
+    static const Duration _heartRateRapidRiseWindow = Duration(minutes: 5);
+
+    double get _alertBpm =>
+      (_childProfile?.highThresholdBpm ?? _defaultHeartRateHighThreshold)
+        .toDouble();
+
+    int get _lowAlertBpm =>
+      _childProfile?.lowThresholdBpm ?? _defaultHeartRateLowThreshold;
 
   /// 家长手动消除报警后，再次进入「全量报警」前的一段抑制窗口（防抖动），
   /// 与「设备侧已恢复为非报警」二选一即可解除——避免固定死等 2 分钟错过后续真实升高。
@@ -182,6 +177,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
   /// 防止 stress 值在阈值附近抖动反复触发：当前是否已经因 stress 触发过
   bool _stressAlertTriggered = false;
+  bool _heartRateAlertTriggered = false;
+  String? _activeAlertReason;
+  ParentChildProfile? _childProfile;
+  final List<_ParentHeartRateSnapshot> _recentHeartRateHistory =
+      <_ParentHeartRateSnapshot>[];
 
   Map<String, String> _apiHeaders({bool jsonBody = true}) {
     final h = <String, String>{'X-Child-Id': '${widget.activeChildId}'};
@@ -221,7 +221,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     super.initState();
     _syncMacToCloudService();
     _initTts(); // 初始化语音
-    unawaited(_primeSpeechRecognizer());
     // 初始化呼吸动画控制器
     _breathingController = AnimationController(
       vsync: this,
@@ -251,6 +250,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     unawaited(_restoreBoundEsp32());
     unawaited(_restoreBoundXiaozhi());
     unawaited(_restoreStressThreshold());
+    unawaited(_restoreParentChildProfile());
   }
 
   @override
@@ -262,6 +262,26 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       _cloudService.serverHost = widget.serverIp;
       _syncMacToCloudService();
     }
+    if (oldWidget.activeChildId != widget.activeChildId) {
+      _recentHeartRateHistory.clear();
+      _heartRateAlertTriggered = false;
+      _stressAlertTriggered = false;
+      setState(() {
+        _childProfile = null;
+        _boundEsp32DeviceId = null;
+        _boundXiaozhiDeviceId = null;
+      });
+      unawaited(_restoreBoundEsp32());
+      unawaited(_restoreBoundXiaozhi());
+      unawaited(_restoreStressThreshold());
+      unawaited(_restoreParentChildProfile());
+    }
+  }
+
+  Future<void> _restoreParentChildProfile() async {
+    final profile = await ParentChildProfileStore.getProfile(widget.activeChildId);
+    if (!mounted) return;
+    setState(() => _childProfile = profile);
   }
 
   Future<void> _restoreStressThreshold() async {
@@ -317,6 +337,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       return;
     }
     _stressAlertTriggered = true;
+    _startParentAlert('压力持续偏高，请及时关注');
+    debugPrint('Stress=$stress >= $_stressAlertThreshold → alert');
+  }
+
+  void _startParentAlert(String reason) {
     setState(() {
       isAlerting = true;
       alertStartTime = DateTime.now();
@@ -329,11 +354,255 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       _kimiAdviceLabel = null;
       _rearmSuppressedUntil = null;
       _sawNoAlertSinceDismiss = true;
+      _activeAlertReason = reason;
+      vibrationTimer?.cancel();
       vibrationTimer = Timer.periodic(const Duration(seconds: 5), (_) {
         _alarmPulseTick();
       });
     });
-    debugPrint('Stress=$stress >= $_stressAlertThreshold → alert');
+  }
+
+  int? _recordHeartRateBaseline(int bpm, DateTime timestamp) {
+    _recentHeartRateHistory.add(
+      _ParentHeartRateSnapshot(recordedAt: timestamp, bpm: bpm),
+    );
+    _recentHeartRateHistory.removeWhere(
+      (sample) => timestamp.difference(sample.recordedAt) > _heartRateRapidRiseWindow,
+    );
+    if (_recentHeartRateHistory.length < 2) return null;
+    final baseline = _recentHeartRateHistory.first;
+    if (timestamp.difference(baseline.recordedAt) < const Duration(minutes: 1)) {
+      return null;
+    }
+    return baseline.bpm;
+  }
+
+  void _maybeTriggerHeartRateAlert(
+    int bpm,
+    DateTime timestamp, {
+    bool serverSuggestedAlert = false,
+  }) {
+    final baseline = _recordHeartRateBaseline(bpm, timestamp);
+    final highThreshold = _alertBpm.round();
+    final lowThreshold = _lowAlertBpm;
+    final rapidRiseThreshold = baseline == null ? null : (baseline * 1.3).ceil();
+    final high = bpm >= highThreshold;
+    final low = bpm <= lowThreshold;
+    final rapidRise = rapidRiseThreshold != null && bpm >= rapidRiseThreshold;
+    final recovered = bpm < highThreshold - 5 && bpm > lowThreshold + 5 && !rapidRise;
+
+    if (recovered && _heartRateAlertTriggered) {
+      _heartRateAlertTriggered = false;
+    }
+
+    if (!high && !low && !rapidRise && !serverSuggestedAlert) {
+      return;
+    }
+    if (_heartRateAlertTriggered && !serverSuggestedAlert) return;
+    if (isAlerting || _flowInProgress) {
+      _heartRateAlertTriggered = true;
+      return;
+    }
+    if (_rearmSuppressedUntil != null &&
+        DateTime.now().isBefore(_rearmSuppressedUntil!) &&
+        !_sawNoAlertSinceDismiss) {
+      _heartRateAlertTriggered = true;
+      return;
+    }
+
+    _heartRateAlertTriggered = true;
+    if (rapidRise) {
+      _startParentAlert('心率在 5 分钟内较基线骤升，请及时关注');
+      return;
+    }
+    if (low) {
+      _startParentAlert('心率持续偏低，请及时关注');
+      return;
+    }
+    if (high || serverSuggestedAlert) {
+      _startParentAlert('心率持续偏高，请及时关注');
+    }
+  }
+
+  Future<void> _showParentChildProfileDialog() async {
+    final profile = _childProfile;
+    final nameController = TextEditingController(text: profile?.name ?? '');
+    final nicknameController = TextEditingController(text: profile?.nickname ?? '');
+    final ageController = TextEditingController(text: profile?.age?.toString() ?? '');
+    final personalityController = TextEditingController(text: profile?.personality ?? '');
+    final interestsController = TextEditingController(text: profile?.interests ?? '');
+    final categoryController = TextEditingController(text: profile?.category ?? '');
+    final noteController = TextEditingController(text: profile?.note ?? '');
+    var selectedGender = (profile?.gender?.trim().isNotEmpty ?? false)
+        ? profile!.gender!.trim()
+        : null;
+
+    final result = await showDialog<ParentChildProfile>(
+      context: context,
+      builder: (ctx) {
+        String? errorText;
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            final age = int.tryParse(ageController.text.trim());
+            final thresholds = parentHeartRateThresholdsForAge(age);
+            return AlertDialog(
+              title: const Text('录入孩子资料'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      decoration: const InputDecoration(labelText: '孩子姓名，可选'),
+                    ),
+                    TextField(
+                      controller: nicknameController,
+                      decoration: const InputDecoration(labelText: '小名，可选'),
+                    ),
+                    TextField(
+                      controller: ageController,
+                      keyboardType: TextInputType.number,
+                      onChanged: (_) => setDialogState(() => errorText = null),
+                      decoration: const InputDecoration(labelText: '年龄'),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedGender,
+                      decoration: const InputDecoration(labelText: '性别，可选'),
+                      items: _parentGenderOptions
+                          .map((item) => DropdownMenuItem<String>(value: item, child: Text(item)))
+                          .toList(),
+                      onChanged: (value) => setDialogState(() => selectedGender = value),
+                    ),
+                    TextField(
+                      controller: categoryController,
+                      decoration: const InputDecoration(
+                        labelText: '类别',
+                        hintText: '如多动症、自闭症、发育迟缓等',
+                      ),
+                    ),
+                    TextField(
+                      controller: personalityController,
+                      decoration: const InputDecoration(labelText: '性格，可选'),
+                    ),
+                    TextField(
+                      controller: interestsController,
+                      decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _warmSurface,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: _warmBorder),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '自动提醒线',
+                            style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
+                          ),
+                          const SizedBox(height: 6),
+                          Text('${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}'),
+                          const SizedBox(height: 4),
+                          Text('过高提醒：>${thresholds.high} 次/分钟'),
+                          Text('过低提醒：<${thresholds.low} 次/分钟'),
+                        ],
+                      ),
+                    ),
+                    TextField(
+                      controller: noteController,
+                      maxLines: 2,
+                      decoration: const InputDecoration(labelText: '补充说明，可选'),
+                    ),
+                    if (errorText != null) ...[
+                      const SizedBox(height: 10),
+                      Text(errorText!, style: const TextStyle(color: _coral)),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    final ageValue = int.tryParse(ageController.text.trim());
+                    if (ageValue == null || ageValue < 0) {
+                      setDialogState(() {
+                        errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。';
+                      });
+                      return;
+                    }
+                    final thresholds = parentHeartRateThresholdsForAge(ageValue);
+                    Navigator.pop(
+                      ctx,
+                      ParentChildProfile(
+                        childId: widget.activeChildId,
+                        name: nameController.text.trim().isEmpty
+                            ? null
+                            : nameController.text.trim(),
+                        nickname: nicknameController.text.trim().isEmpty
+                            ? null
+                            : nicknameController.text.trim(),
+                        age: ageValue,
+                        gender: selectedGender?.trim().isEmpty ?? true
+                            ? null
+                            : selectedGender!.trim(),
+                        personality: personalityController.text.trim().isEmpty
+                            ? null
+                            : personalityController.text.trim(),
+                        interests: interestsController.text.trim().isEmpty
+                            ? null
+                            : interestsController.text.trim(),
+                        category: categoryController.text.trim().isEmpty
+                            ? null
+                            : categoryController.text.trim(),
+                        note: noteController.text.trim().isEmpty
+                            ? null
+                            : noteController.text.trim(),
+                        highThresholdBpm: thresholds.high,
+                        lowThresholdBpm: thresholds.low,
+                        updatedAt: DateTime.now(),
+                      ),
+                    );
+                  },
+                  child: const Text('保存'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    nameController.dispose();
+    nicknameController.dispose();
+    ageController.dispose();
+    personalityController.dispose();
+    interestsController.dispose();
+    categoryController.dispose();
+    noteController.dispose();
+
+    if (result == null || !mounted) return;
+    await ParentChildProfileStore.saveProfile(result);
+    setState(() {
+      _childProfile = result;
+      _heartRateAlertTriggered = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '已保存孩子资料，当前心率提醒线为 >${result.highThresholdBpm} / <${result.lowThresholdBpm}',
+        ),
+      ),
+    );
   }
 
   void _applyStressThreshold(int next, {bool evaluateCurrent = true}) {
@@ -464,8 +733,19 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('手环测试失败：$e')));
+        final s = e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              (s.contains('SocketException') ||
+                      s.contains('Connection refused') ||
+                      s.contains('Failed host lookup') ||
+                      s.contains('TimeoutException'))
+                  ? '手环测试没有完成，请确认网络和蓝牙状态后再试'
+                  : '手环测试暂时没有成功，请确认手环靠近手机后再试',
+            ),
+          ),
+        );
       }
     } finally {
       if (paused) {
@@ -499,7 +779,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
     setState(() {
       bpm = newY;
-      isAlert = newY >= _alertBpm;
+      isAlert = newY >= _alertBpm || newY <= _lowAlertBpm;
       chartData = trimmed
           .asMap()
           .entries
@@ -519,6 +799,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         stressUpdatedAt = sample.timestamp;
       }
     });
+    _maybeTriggerHeartRateAlert(sample.bpm, sample.timestamp);
     if (calculatedStress != null) {
       _maybeTriggerStressAlert(calculatedStress);
     }
@@ -685,11 +966,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       if (!mounted) return;
       if (ok) {
         await SessionStore.removeBoundMac(widget.activeChildId);
-        _deviceBinding = DeviceBinding.unbound(mac);
+        await _miBandService.disconnect();
+        await ForegroundTaskService.stop();
+        _lastBandStageForToast = MiBandStage.disconnected;
+        _cloudService.macAddress = null;
+        setState(() {
+          _deviceBinding = null;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Color(0xFFF57C00),
-            content: Text('手环已解绑'),
+            content: Text('手环已解绑，已停止实时接收'),
           ),
         );
       } else {
@@ -778,13 +1065,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     if (_inCompanionRegulationMode()) {
       return '🧘 陪伴调节中（心率仍偏高，已暂停反复震动与语音）';
     }
-    return '🚨 孩子可能处于焦虑状态';
+    return '🚨 ${_activeAlertReason ?? '孩子可能需要关注'}';
   }
 
   void _alarmPulseTick() {
     if (_inCompanionRegulationMode()) return;
     Vibration.vibrate(pattern: [0, 500, 200, 500]);
-    unawaited(_speak('孩子可能处于焦虑状态，请及时关注'));
+    unawaited(_speak(_activeAlertReason ?? '孩子可能需要关注，请及时关注'));
   }
 
   void _showRecordSnack(String message, {SnackBarAction? action}) {
@@ -792,265 +1079,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), action: action),
     );
-  }
-
-  Future<bool> _ensureSpeechPermission() async {
-    final status = await Permission.microphone.request();
-    if (status.isGranted) return true;
-
-    if (status.isPermanentlyDenied) {
-      _showRecordSnack(
-        '麦克风权限已关闭，请在系统设置中开启后再试',
-        action: SnackBarAction(
-          label: '去设置',
-          onPressed: () => unawaited(openAppSettings()),
-        ),
-      );
-    } else {
-      _showRecordSnack('需要麦克风权限才能使用语音输入');
-    }
-    return false;
-  }
-
-  Future<void> _waitForSpeechCooldown() async {
-    final stoppedAt = _lastSpeechStopAt;
-    if (stoppedAt == null) return;
-
-    final elapsed = DateTime.now().difference(stoppedAt);
-    const cooldown = Duration(milliseconds: 900);
-    if (elapsed < cooldown) {
-      await Future.delayed(cooldown - elapsed);
-    }
-  }
-
-  Future<void> _primeSpeechRecognizer() async {
-    if (await Permission.microphone.isGranted) {
-      await _prepareSpeechRecognizer();
-    }
-  }
-
-  Future<String?> _resolveSpeechLocaleId() async {
-    if (_speechLocaleId != null) return _speechLocaleId;
-
-    try {
-      final locales = await _speechToText.locales();
-      for (final locale in locales) {
-        final localeId = locale.localeId.trim();
-        final normalized = localeId.toLowerCase().replaceAll('-', '_');
-        if (normalized == 'zh_cn' || normalized.startsWith('zh_')) {
-          _speechLocaleId = localeId;
-          return _speechLocaleId;
-        }
-      }
-
-      final systemLocale = await _speechToText.systemLocale();
-      _speechLocaleId = systemLocale?.localeId;
-    } catch (_) {
-      _speechLocaleId = null;
-    }
-
-    return _speechLocaleId;
-  }
-
-  String _composeSpeechText(String words) {
-    final parts = <String>[
-      if (_speechBaseText.trim().isNotEmpty) _speechBaseText.trim(),
-      if (words.trim().isNotEmpty) words.trim(),
-    ];
-    return parts.join(' ');
-  }
-
-  void _applySpeechText(String words) {
-    final mergedText = _composeSpeechText(words);
-    if (mergedText.isEmpty) return;
-
-    _recordController.value = _recordController.value.copyWith(
-      text: mergedText,
-      selection: TextSelection.collapsed(offset: mergedText.length),
-      composing: TextRange.empty,
-    );
-  }
-
-  Future<void> _resetSpeechSession({bool waitForCooldown = false}) async {
-    var touchedSession = false;
-    try {
-      if (_speechToText.isListening) {
-        await _speechToText.stop();
-        touchedSession = true;
-      }
-    } catch (_) {}
-
-    try {
-      await _speechToText.cancel();
-      touchedSession = true;
-    } catch (_) {}
-
-    if (touchedSession) {
-      _lastSpeechStopAt = DateTime.now();
-    }
-    if (waitForCooldown && touchedSession) {
-      await _waitForSpeechCooldown();
-    }
-  }
-
-  Future<bool> _prepareSpeechRecognizer() async {
-    if (_speechReady) return true;
-
-    _speechReady = await _speechToText.initialize(
-      onStatus: _handleSpeechStatus,
-      onError: _handleSpeechError,
-    );
-    if (_speechReady) {
-      await _resolveSpeechLocaleId();
-      return true;
-    }
-
-    final hasPermission = await _speechToText.hasPermission;
-    _showRecordSnack(
-      hasPermission
-          ? '当前设备暂不支持语音输入，请确认已安装可用的语音识别服务'
-          : '需要麦克风权限才能使用语音输入，请在系统设置中开启',
-    );
-    return false;
-  }
-
-  void _handleSpeechStatus(String status) {
-    if (!mounted) return;
-    if (status == 'listening') {
-      setState(() {
-        _speechState = _RecordSpeechState.listening;
-        _speechStatusText = '正在听写，点击麦克风可停止';
-      });
-      return;
-    }
-
-    if (status == 'notListening' || status == 'done') {
-      _lastSpeechStopAt = DateTime.now();
-      if (_speechRecognizedWords.trim().isNotEmpty) {
-        _applySpeechText(_speechRecognizedWords);
-      }
-      if (_speechListening || _speechBusy) {
-        setState(() {
-          _speechState = _RecordSpeechState.idle;
-          _speechStatusText = null;
-        });
-      }
-    }
-  }
-
-  void _handleSpeechError(dynamic error) {
-    if (!mounted) return;
-
-    final message = error.errorMsg?.toString() ?? error.toString();
-    _lastSpeechStopAt = DateTime.now();
-    _speechReady = false;
-    _speechLocaleId = null;
-    setState(() {
-      _speechState = _RecordSpeechState.idle;
-      _speechStatusText = null;
-    });
-
-    unawaited(Future<void>.delayed(const Duration(milliseconds: 500), () async {
-      await _resetSpeechSession(waitForCooldown: false);
-    }));
-
-    if (message.contains('busy')) {
-      _showRecordSnack('语音服务正在释放，请停顿一秒后再试');
-    } else if (message.contains('no_match')) {
-      _showRecordSnack('没有听清楚，请靠近手机再说一次');
-    } else {
-      _showRecordSnack('语音识别出错，请重试：$message');
-    }
-  }
-
-  Future<void> _stopRecordSpeech() async {
-    if (_speechState == _RecordSpeechState.idle) return;
-    if (mounted) {
-      setState(() {
-        _speechState = _RecordSpeechState.stopping;
-        _speechStatusText = '正在停止语音输入...';
-      });
-    }
-
-    try {
-      await _speechToText.stop();
-    } catch (_) {
-      await _resetSpeechSession(waitForCooldown: false);
-    } finally {
-      _lastSpeechStopAt = DateTime.now();
-      if (_speechRecognizedWords.trim().isNotEmpty) {
-        _applySpeechText(_speechRecognizedWords);
-      }
-      if (mounted) {
-        setState(() {
-          _speechState = _RecordSpeechState.idle;
-          _speechStatusText = null;
-        });
-      }
-    }
-  }
-
-  Future<void> _toggleRecordSpeech() async {
-    if (_speechListening) {
-      await _stopRecordSpeech();
-      return;
-    }
-
-    if (_speechBusy) return;
-    if (!await _ensureSpeechPermission()) return;
-
-    if (mounted) {
-      setState(() {
-        _speechState = _RecordSpeechState.preparing;
-        _speechStatusText = '正在启动语音输入...';
-      });
-    }
-
-    try {
-      // 开麦前先停 TTS，避免音频焦点冲突导致 STT 无法获取麦克风
-      await _flutterTts.stop();
-      await _resetSpeechSession(waitForCooldown: true);
-
-      if (!await _prepareSpeechRecognizer()) {
-        if (mounted) {
-          setState(() {
-            _speechState = _RecordSpeechState.idle;
-            _speechStatusText = null;
-          });
-        }
-        return;
-      }
-
-      _speechBaseText = _recordController.text.trim();
-      _speechRecognizedWords = '';
-      final localeId = await _resolveSpeechLocaleId();
-      await _speechToText.listen(
-        localeId: localeId,
-        listenFor: const Duration(seconds: 60),
-        pauseFor: const Duration(seconds: 5),
-        partialResults: true,
-        cancelOnError: false,
-        onResult: (result) {
-          if (!mounted) return;
-          final words = result.recognizedWords.trim();
-          if (words.isEmpty) return;
-
-          _speechRecognizedWords = words;
-          _applySpeechText(words);
-        },
-      );
-    } catch (e) {
-      _lastSpeechStopAt = DateTime.now();
-      _speechReady = false;
-      _speechLocaleId = null;
-      if (mounted) {
-        setState(() {
-          _speechState = _RecordSpeechState.idle;
-          _speechStatusText = null;
-        });
-      }
-      _showRecordSnack('语音启动失败，请重试：$e');
-    }
   }
 
   @override
@@ -1062,7 +1090,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     _historyTimer?.cancel();
     unawaited(_healingPlayer.dispose());
     _flutterTts.stop(); // 停止语音播报
-    unawaited(_speechToText.stop());
     _btAdapterSub?.cancel();
     _bandHrSub?.cancel();
     _bandStressSub?.cancel();
@@ -1465,8 +1492,19 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('唤醒出错：$e')));
+        final s = e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              (s.contains('SocketException') ||
+                      s.contains('Connection refused') ||
+                      s.contains('Failed host lookup') ||
+                      s.contains('TimeoutException'))
+                  ? '暂时没能唤醒星星，请确认网络后再试'
+                  : '星星暂时没有被唤醒，请稍后再试',
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _xiaozhiParentWakeBusy = false);
@@ -1574,28 +1612,18 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             !isAlerting &&
             !_flowInProgress &&
             canRearmAfterDismiss) {
-          setState(() {
-            isAlerting = true;
-            alertStartTime = DateTime.now();
-            isDismissed = false;
-            _flowInProgress = false;
-            _selectedConditionType = null;
-            _selectedConditionLabel = null;
-            _recordSubmitting = false;
-            _kimiAdvice = null;
-            _kimiAdviceLabel = null;
-            _rearmSuppressedUntil = null;
-            _sawNoAlertSinceDismiss = true;
-            // 启动周期性提醒（在陪伴调节模式下由 _alarmPulseTick 跳过）
-            vibrationTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-              _alarmPulseTick();
-            });
-          });
+          _maybeTriggerHeartRateAlert(
+            newBpm.round(),
+            DateTime.now(),
+            serverSuggestedAlert: true,
+          );
         }
 
         setState(() {
           if (useCloudBpm) bpm = newBpm;
-          isAlert = newAlert;
+          isAlert = newAlert ||
+              (useCloudBpm &&
+                  (newBpm >= _alertBpm || newBpm <= _lowAlertBpm));
           message = _resolveStatusMessage();
         });
       }
@@ -1724,27 +1752,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 decoration: InputDecoration(
                   hintText: '孩子现在在做什么？（如：写作业、大叫、来回踱步）',
                   hintStyle: const TextStyle(color: Color(0xFFA49B8F)),
-                  suffixIcon: _speechBusy
-                      ? const Padding(
-                          padding: EdgeInsets.all(14),
-                          child: SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        )
-                      : IconButton(
-                          tooltip: _speechListening ? '停止语音输入' : '语音输入',
-                          onPressed: _recordSubmitting
-                              ? null
-                              : _toggleRecordSpeech,
-                          icon: Icon(
-                            _speechListening ? Icons.mic : Icons.mic_none,
-                            color: _speechListening
-                                ? _coral
-                                : _mutedInk,
-                          ),
-                        ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: const BorderSide(color: _warmBorder),
@@ -1770,18 +1777,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 autofocus: true,
                 textInputAction: TextInputAction.done,
               ),
-              if (_speechStatusText != null) ...[
-                const SizedBox(height: 6),
-                Text(
-                  _speechStatusText!,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _speechListening
-                        ? _coral
-                        : _mutedInk,
-                  ),
-                ),
-              ],
               const SizedBox(height: 12),
               Row(
                 children: [
@@ -1835,9 +1830,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   Future<void> _submitRecord() async {
-    if (_speechListening) {
-      await _stopRecordSpeech();
-    }
     final text = _recordController.text.trim();
     if (text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1854,27 +1846,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         Uri.parse('http://${widget.serverIp}:11760/submit_log'),
         headers: _apiHeaders(),
         body: json.encode({
-          'bpm': submittedBpm,
-          'observation': text,
-          'condition_type': submittedConditionType,
-        }),
-      );
-      if (!mounted) return;
-      if (response.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('提交失败：${response.statusCode}')),
-        );
-        setState(() => _recordSubmitting = false);
-        return;
-      }
-      final data = json.decode(response.body);
-      final advice = data is Map && data['advice'] != null
-          ? data['advice'].toString()
-          : '暂无建议';
-      final logId = data is Map ? int.tryParse('${data['log_id']}') : null;
-      setState(() {
-        _kimiAdvice = advice;
-        _kimiAdviceLabel = submittedConditionLabel;
         _lastRecordLogId = logId;
         _lastRecordObservation = text;
         _lastRecordConditionType = submittedConditionType;
@@ -2019,6 +1990,80 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
   }
 
+  Widget _buildParentChildProfileCard() {
+    final profile = _childProfile;
+    final thresholds = profile == null
+        ? parentHeartRateThresholdsForAge(null)
+        : parentHeartRateThresholdsForAge(profile.age);
+    final title = profile == null ? '孩子资料未完善' : '${profile.displayName} 的提醒线';
+    final subtitle = profile == null
+        ? '录入年龄后，会自动配置心率过高和过低提醒线。'
+        : '${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}';
+    final chips = <String>[
+      if (profile?.age != null) '${profile!.age} 岁',
+      if ((profile?.gender ?? '').trim().isNotEmpty) profile!.gender!.trim(),
+      if ((profile?.category ?? '').trim().isNotEmpty) profile!.category!.trim(),
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Card(
+        color: _warmSurface,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: _warmBorder),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: _sage.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.child_care_rounded, color: _sage),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: _ink,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '$subtitle\n过高 >${_alertBpm.toInt()} / 过低 <$_lowAlertBpm 次/分钟',
+                      style: const TextStyle(color: _mutedInk, height: 1.35, fontSize: 12),
+                    ),
+                    if (chips.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        chips.join(' · '),
+                        style: const TextStyle(color: _mutedInk, fontSize: 12),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: _showParentChildProfileDialog,
+                child: Text(profile == null ? '录入' : '编辑'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _showSwitchChildDialog() async {
     final t = widget.authToken;
     if (t == null || t.isEmpty) return;
@@ -2061,8 +2106,19 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       if (chosen != null) widget.onSwitchChild?.call(chosen);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        final s = e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              (s.contains('SocketException') ||
+                      s.contains('Connection refused') ||
+                      s.contains('Failed host lookup') ||
+                      s.contains('TimeoutException'))
+                  ? '暂时没能获取孩子列表，请确认网络后再试'
+                  : '孩子列表暂时没有加载出来，请稍后再试',
+            ),
+          ),
+        );
       }
     }
   }
@@ -2134,13 +2190,24 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('失败：${r.body}')),
+          const SnackBar(content: Text('邀请暂时没有成功，请稍后再试')),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('$e')));
+        final s = e.toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              (s.contains('SocketException') ||
+                      s.contains('Connection refused') ||
+                      s.contains('Failed host lookup') ||
+                      s.contains('TimeoutException'))
+                  ? '暂时没能发出邀请，请确认网络后再试'
+                  : '邀请暂时没有成功，请稍后再试',
+            ),
+          ),
+        );
       }
     }
   }
@@ -2179,14 +2246,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         ),
         actions: [
           PopupMenuButton<String>(
-            tooltip: '家庭协作',
-            icon: Icon(Icons.menu_rounded,
-              color: isAlertMode ? _coral : _sage),
+            icon: Icon(Icons.menu_rounded, color: isAlertMode ? _coral : _sage),
             onSelected: (v) async {
-              if (v == 'logout') widget.onLogout?.call();
-              if (v == 'switch_mode') widget.onSwitchMode?.call();
-              if (v == 'invite') await _showInviteMemberDialog();
               if (v == 'switch') await _showSwitchChildDialog();
+              if (v == 'child_profile') await _showParentChildProfileDialog();
+              if (v == 'invite') await _showInviteMemberDialog();
               if (v == 'band_bind') await _bindCurrentDevice();
               if (v == 'band_unbind') await _unbindCurrentDevice();
               if (v == 'stress_threshold') await _showStressThresholdDialog();
@@ -2196,15 +2260,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'xiaozhi_prov') await _openXiaozhiProvisionPage();
               if (v == 'xiaozhi_reset') await _resetXiaozhiProvisioning();
               if (v == 'xiaozhi_bind') await _showXiaozhiBindDialog();
+              if (v == 'switch_mode') widget.onSwitchMode?.call();
+              if (v == 'logout') widget.onLogout?.call();
             },
             itemBuilder: (ctx) => [
-              // H4: 分组标题
               const PopupMenuItem(
                 enabled: false,
                 height: 32,
                 child: Text('家庭协作', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
+              const PopupMenuItem(value: 'child_profile', child: Text('录入孩子资料')),
               const PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
               const PopupMenuDivider(),
               const PopupMenuItem(
@@ -2239,18 +2305,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               ),
               const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
               const PopupMenuItem(value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
-              const PopupMenuItem(
-                value: 'xiaozhi_prov',
-                child: Text('配网星星机器人'),
-              ),
-              const PopupMenuItem(
-                value: 'xiaozhi_reset',
-                child: Text('让星星机器人重新配网'),
-              ),
-              const PopupMenuItem(
-                value: 'xiaozhi_bind',
-                child: Text('绑定小智设备 (MAC)'),
-              ),
+              const PopupMenuItem(value: 'xiaozhi_prov', child: Text('配网星星机器人')),
+              const PopupMenuItem(value: 'xiaozhi_reset', child: Text('让星星机器人重新配网')),
+              const PopupMenuItem(value: 'xiaozhi_bind', child: Text('绑定小智设备 (MAC)')),
               const PopupMenuDivider(),
               if (widget.onSwitchMode != null)
                 const PopupMenuItem(value: 'switch_mode', child: Text('切换使用身份')),
@@ -2329,6 +2386,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 const SizedBox(height: 12),
                 // ── 蓝牙手环连接状态条 ──
                 _buildBandStatusBanner(),
+                _buildParentChildProfileCard(),
                 // ── 心率圆环区域 ──
                 GestureDetector(
                   onTap: () {
@@ -2340,6 +2398,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         _rearmSuppressedUntil =
                             DateTime.now().add(_rearmSuppressDuration);
                         _sawNoAlertSinceDismiss = false;
+                        _activeAlertReason = null;
                         vibrationTimer?.cancel();
                         vibrationTimer = null;
                       });
@@ -2715,7 +2774,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     ),
                     const Spacer(),
                     Text(
-                      '阈值 ${_alertBpm.toInt()} BPM',
+                      '高 ${_alertBpm.toInt()} / 低 $_lowAlertBpm BPM',
                       style: TextStyle(
                           fontSize: 11,
                           color: _coral.withValues(alpha: 0.75),
@@ -2797,6 +2856,23 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                             labelResolver: (line) => '${line.y.toInt()}',
                           ),
                         ),
+                        HorizontalLine(
+                          y: _lowAlertBpm.toDouble(),
+                          color: _amber.withValues(alpha: 0.45),
+                          strokeWidth: 1.2,
+                          dashArray: [6, 4],
+                          label: HorizontalLineLabel(
+                            show: true,
+                            alignment: Alignment.bottomRight,
+                            padding: const EdgeInsets.only(right: 8, top: 4),
+                            style: TextStyle(
+                              color: Colors.orange.shade300,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            labelResolver: (line) => '${line.y.toInt()}',
+                          ),
+                        ),
                       ],
                     ),
                     gridData: FlGridData(
@@ -2804,7 +2880,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       drawVerticalLine: false,
                       horizontalInterval: 25,
                       getDrawingHorizontalLine: (value) {
-                        if ((value - _alertBpm).abs() < 0.01) {
+                        if ((value - _alertBpm).abs() < 0.01 ||
+                          (value - _lowAlertBpm).abs() < 0.01) {
                           return const FlLine(
                               color: Colors.transparent, strokeWidth: 0);
                         }
@@ -2814,7 +2891,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         );
                       },
                     ),
-                    minY: 50,
+                    minY: max(30, _lowAlertBpm - 20).toDouble(),
                     // H2: 动态计算 maxY，至少覆盖报警遨値 + 20，防止峰値被截断
                     maxY: max(
                       chartData.isEmpty ? _alertBpm : chartData.map((s) => s.y).reduce(max),

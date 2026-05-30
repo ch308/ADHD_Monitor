@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../services/miband_service.dart';
+
 class TeacherBandScanResult {
   const TeacherBandScanResult({
     required this.remoteId,
@@ -25,22 +27,36 @@ class TeacherBandVibrationResult {
   final String message;
 }
 
+class TeacherBandConnectionResult {
+  const TeacherBandConnectionResult({
+    required this.success,
+    required this.message,
+    this.status,
+    this.client,
+    this.connectedName,
+  });
+
+  final bool success;
+  final String message;
+  final MiBandStatus? status;
+  final MiBand6Auth? client;
+  final String? connectedName;
+}
+
 class TeacherBleService {
   TeacherBleService({this.deviceNameKeyword = 'Mi Smart Band 6'});
 
-  static const String _immediateAlertServiceUuid = '1802';
-  static const String _alertLevelCharUuid = '2a06';
+  static const List<String> _stressCharacteristicUuids = <String>[
+    '0000000d-0000-1000-8000-00805f9b34fb',
+    '0000000e-0000-1000-8000-00805f9b34fb',
+    '00000012-0000-1000-8000-00805f9b34fb',
+    '00002a59-0000-1000-8000-00805f9b34fb',
+  ];
 
   final String deviceNameKeyword;
-  BluetoothDevice? _teacherDevice;
 
   Future<void> dispose() async {
-    final device = _teacherDevice;
-    _teacherDevice = null;
-    if (device == null) return;
-    try {
-      await device.disconnect();
-    } catch (_) {}
+    return;
   }
 
   Future<bool> requestPermissions() async {
@@ -90,75 +106,141 @@ class TeacherBleService {
     return sorted;
   }
 
-  Future<TeacherBandVibrationResult> vibrateTeacherBand(
-    String remoteId, {
+  Future<TeacherBandConnectionResult> connectBand({
+    required String remoteId,
+    required String authHexKey,
+    int localAlertBpm = 120,
     Duration scanTimeout = const Duration(seconds: 10),
   }) async {
-    final allowed = await requestPermissions();
-    if (!allowed) {
-      return const TeacherBandVibrationResult(
+    final normalizedKey = _normalizeAuthKey(authHexKey);
+    if (normalizedKey == null) {
+      return const TeacherBandConnectionResult(
         success: false,
-        message: '还没有蓝牙权限，允许后才能测试老师手环震动',
+        message: '请输入 32 位手环连接密钥后再继续。',
+        status: MiBandStatus(
+          MiBandStage.authFailed,
+          message: '连接密钥格式不对，请检查后再试。',
+        ),
+      );
+    }
+
+    final client = MiBand6Auth(
+      authHexKey: normalizedKey,
+      localAlertBpm: localAlertBpm,
+      stressCharacteristicUuids: _stressCharacteristicUuids,
+    );
+    final allowed = await client.requestPermissions();
+    if (!allowed) {
+      await client.dispose();
+      return const TeacherBandConnectionResult(
+        success: false,
+        message: '请先允许蓝牙权限后再试。',
+        status: MiBandStatus(
+          MiBandStage.permissionDenied,
+          message: '蓝牙权限还没有打开，请先授权。',
+        ),
       );
     }
 
     final device = await _findDeviceByRemoteId(remoteId, timeout: scanTimeout);
     if (device == null) {
-      return const TeacherBandVibrationResult(
+      await client.dispose();
+      return const TeacherBandConnectionResult(
         success: false,
-        message: '没有找到这只老师手环，请让手环靠近手机后再试',
+        message: '没有找到这只手环，请让手环靠近手机后再试。',
+        status: MiBandStatus(
+          MiBandStage.notFound,
+          message: '还没有找到这只手环，请靠近手机后再试。',
+        ),
       );
     }
 
     try {
-      if (!device.isConnected) {
-        await device.connect().timeout(const Duration(seconds: 12));
-      }
-      _teacherDevice = device;
-
-      final services = await device.discoverServices().timeout(
-            const Duration(seconds: 12),
-          );
-      final alertChar = _findCharacteristic(
-        services,
-        serviceUuid: _immediateAlertServiceUuid,
-        characteristicUuid: _alertLevelCharUuid,
-      );
-      if (alertChar == null) {
-        return const TeacherBandVibrationResult(
-          success: false,
-          message: '这只手环没有开放标准震动通道，需要继续验证小米手环专用指令',
-        );
-      }
-
-      await alertChar.write(<int>[0x02], withoutResponse: false).timeout(
-            const Duration(seconds: 5),
-          );
-      await Future<void>.delayed(const Duration(milliseconds: 1200));
-      try {
-        await alertChar.write(<int>[0x00], withoutResponse: false).timeout(
-              const Duration(seconds: 5),
-            );
-      } catch (_) {}
-      return const TeacherBandVibrationResult(
+      await client.startAuthentication(device);
+      final displayName = device.platformName.trim();
+      return TeacherBandConnectionResult(
         success: true,
-        message: '已向老师手环发送测试震动，请确认手环是否震动',
+        message: '已连接到手环，可以继续测试震动或开始监测。',
+        status: client.status.value,
+        client: client,
+        connectedName: displayName.isEmpty ? null : displayName,
       );
     } catch (_) {
-      return const TeacherBandVibrationResult(
+      final status = client.status.value;
+      final message = status.message ?? '这次没能连上手环，请靠近后重试。';
+      await client.dispose();
+      return TeacherBandConnectionResult(
         success: false,
-        message: '这次没有成功连上老师手环，请靠近后再试',
+        message: message,
+        status: status,
       );
     }
+  }
+
+  Future<TeacherBandVibrationResult> vibrateConnectedBand(MiBand6Auth client) async {
+    final status = client.status.value;
+    if (!status.isConnected) {
+      return const TeacherBandVibrationResult(
+        success: false,
+        message: '手环当前还没有连好，请重新绑定后再试。',
+      );
+    }
+
+    final paused = await client.pauseHeartRateReceptionForTest();
+    if (!paused) {
+      return const TeacherBandVibrationResult(
+        success: false,
+        message: '这次还没准备好测试震动，请稍后再试。',
+      );
+    }
+
+    try {
+      final ok = await client.vibrateBandForTest(times: 3);
+      if (!ok) {
+        return const TeacherBandVibrationResult(
+          success: false,
+          message: '已经连上手环，但这次没有成功触发震动。',
+        );
+      }
+      return const TeacherBandVibrationResult(
+        success: true,
+        message: '已向手环发送 3 次测试震动，请确认是否有明显震感。',
+      );
+    } finally {
+      await client.resumeHeartRateReceptionAfterTest();
+    }
+  }
+
+  Future<TeacherBandVibrationResult> vibrateAlertBand(MiBand6Auth client) async {
+    final status = client.status.value;
+    if (!status.isConnected) {
+      return const TeacherBandVibrationResult(
+        success: false,
+        message: '老师手环当前没有连好，这次还不能发出震动提醒。',
+      );
+    }
+
+    final ok = await client.vibrateBandForTest(
+      times: 2,
+      on: const Duration(milliseconds: 420),
+      off: const Duration(milliseconds: 240),
+    );
+    if (!ok) {
+      return const TeacherBandVibrationResult(
+        success: false,
+        message: '已经连上老师手环，但这次没有成功触发告警震动。',
+      );
+    }
+    return const TeacherBandVibrationResult(
+      success: true,
+      message: '老师手环已发出告警震动。',
+    );
   }
 
   Future<BluetoothDevice?> _findDeviceByRemoteId(
     String remoteId, {
     required Duration timeout,
   }) async {
-    final current = _teacherDevice;
-    if (current != null && current.remoteId.str == remoteId) return current;
-
     for (final device in FlutterBluePlus.connectedDevices) {
       if (device.remoteId.str == remoteId) return device;
     }
@@ -197,25 +279,9 @@ class TeacherBleService {
     }
   }
 
-  BluetoothCharacteristic? _findCharacteristic(
-    List<BluetoothService> services, {
-    required String serviceUuid,
-    required String characteristicUuid,
-  }) {
-    for (final service in services) {
-      if (!_uuidMatches(service.uuid.str, serviceUuid)) continue;
-      for (final characteristic in service.characteristics) {
-        if (_uuidMatches(characteristic.uuid.str, characteristicUuid)) {
-          return characteristic;
-        }
-      }
-    }
-    return null;
-  }
-
-  bool _uuidMatches(String actual, String expectedShortUuid) {
-    final normalized = actual.toLowerCase();
-    final expected = expectedShortUuid.toLowerCase();
-    return normalized == expected || normalized.startsWith('0000$expected-');
+  String? _normalizeAuthKey(String raw) {
+    final normalized = raw.replaceAll(RegExp(r'\s+'), '').toLowerCase();
+    if (!RegExp(r'^[0-9a-f]{32}$').hasMatch(normalized)) return null;
+    return normalized;
   }
 }

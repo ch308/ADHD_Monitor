@@ -201,7 +201,7 @@ class FamilyShell extends StatefulWidget {
 }
 
 class _FamilyShellState extends State<FamilyShell> {
-  String _serverIp = SessionStore.defaultServerHost;
+  String _serviceHost = SessionStore.defaultServerHost;
 
   bool _loadingPrefs = true;
   String? _token;
@@ -221,7 +221,7 @@ class _FamilyShellState extends State<FamilyShell> {
     setState(() {
       _token = t;
       _childId = c;
-      _serverIp = h;
+      _serviceHost = h;
       _loadingPrefs = false;
     });
   }
@@ -232,7 +232,7 @@ class _FamilyShellState extends State<FamilyShell> {
     setState(() {
       _token = token;
       _childId = childId;
-      _serverIp = h;
+      _serviceHost = h;
     });
   }
 
@@ -263,7 +263,7 @@ class _FamilyShellState extends State<FamilyShell> {
       return MaterialApp(
         theme: AppTheme.light,
         home: LoginPage(
-          serverIp: _serverIp,
+          serviceHost: _serviceHost,
           onLoggedIn: _onLoggedIn,
         ),
       );
@@ -272,7 +272,7 @@ class _FamilyShellState extends State<FamilyShell> {
       theme: AppTheme.light,
       home: AdhdMonitorApp(
         key: ValueKey<int>(_childId),
-        serverIp: _serverIp,
+        serverIp: _serviceHost,
         authToken: _token,
         activeChildId: _childId,
         onLogout: _logout,

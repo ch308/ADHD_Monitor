@@ -155,7 +155,7 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
               ? '未扫到 BLE 设备，云端也没有待绑定的$_deviceLabel。\n'
                   '常见原因：① 板子已经连上 WiFi — 此时不会再广播「${_advPrefix}…」配网名，'
                   'Flutter 扫不到是正常的；请用菜单「重配」让板子重新进 BLE，或确认固件已烧录最新版并能在串口看到 adhd_cmd: announce。\n'
-                  '② 手机未开蓝牙/定位权限，或 App 里服务器地址与板子 CONFIG 不一致。'
+                '② 手机未开蓝牙/定位权限，或设备暂时没有和服务完成同步。'
               : '未扫到 BLE 广播（已联网的$_deviceLabel会关闭 BLE），但云端已有 ${cloudList.length} 台。'
                   '可从下方列表直接绑定。';
         });
@@ -167,7 +167,14 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
         _status = '扫到 ${list.length} 台待配网$_deviceLabel';
       });
     } catch (e) {
-      if (mounted) setState(() => _status = '扫描失败：$e');
+      if (!mounted) return;
+      final s = e.toString();
+      setState(() => _status = (s.contains('SocketException') ||
+              s.contains('Connection refused') ||
+              s.contains('Failed host lookup') ||
+              s.contains('TimeoutException'))
+          ? '扫描没有完成，请确认网络和蓝牙都可用后再试'
+          : '扫描暂时失败，请稍后再试');
     } finally {
       if (mounted) setState(() => _busy = false);
     }

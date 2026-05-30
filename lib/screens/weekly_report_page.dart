@@ -63,6 +63,25 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
     super.dispose();
   }
 
+  String _sanitizeReportMessage(String? raw, {String fallback = '报告暂时没有加载出来，请稍后再试'}) {
+    final input = raw?.trim() ?? '';
+    if (input.isEmpty) return fallback;
+    final hasNetworkMarkers = input.contains('SocketException') ||
+        input.contains('Connection refused') ||
+        input.contains('Failed host lookup') ||
+        input.contains('TimeoutException') ||
+        input.contains('ClientException');
+    final hasAddressMarkers = RegExp(r'(https?://|\b(?:\d{1,3}\.){3}\d{1,3}\b|:\d{2,5}\b)').hasMatch(input);
+    if (hasNetworkMarkers || hasAddressMarkers) {
+      return '暂时连不上报告服务，请确认网络后再试';
+    }
+    if (input.contains('Exception:')) {
+      final normalized = input.replaceFirst('Exception:', '').trim();
+      return normalized.isEmpty ? fallback : normalized;
+    }
+    return input;
+  }
+
   Future<void> _load() async {
     if (!mounted) return;
     setState(() {
@@ -124,7 +143,7 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '$e';
+        _error = _sanitizeReportMessage(e.toString());
         _loading = false;
       });
     }
@@ -163,11 +182,17 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
         try {
           final body = json.decode(response.body);
           if (body is Map && body['message'] != null) {
-            errMsg = '${body['message']}';
+            errMsg = _sanitizeReportMessage(
+              body['message']?.toString(),
+              fallback: '这次还没生成成功，请稍后再试',
+            );
           }
         } catch (_) {}
         setState(() {
-          _error = errMsg;
+          _error = _sanitizeReportMessage(
+            errMsg,
+            fallback: '这次还没生成成功，请稍后再试',
+          );
           _generating = false;
         });
         return;
@@ -186,7 +211,12 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(payload['message']?.toString() ?? '该周期尚未结束'),
+              content: Text(
+                _sanitizeReportMessage(
+                  payload['message']?.toString(),
+                  fallback: '该周期尚未结束',
+                ),
+              ),
               behavior: SnackBarBehavior.floating,
             ),
           );

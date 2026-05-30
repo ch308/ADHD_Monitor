@@ -18,9 +18,9 @@ dependencies:
   fl_chart: ^0.69.0
   just_audio: ^0.9.40
   shared_preferences: ^2.3.3
+  flutter_secure_storage: ^9.2.2
   flutter_foreground_task: ^7.5.2
   gal: ^2.3.2
-  speech_to_text: ^7.0.0
   share_plus: ^10.1.4
   url_launcher: ^6.3.0
 
