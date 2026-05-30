@@ -9,7 +9,7 @@ import hashlib
 import hmac
 import secrets
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from openai import OpenAI
@@ -17,6 +17,21 @@ from openai import OpenAI
 app = Flask(__name__)
 # 开启跨域支持，确保安卓手机 App 可以顺利访问
 CORS(app)
+
+
+@app.route("/time", methods=["GET"])
+def server_time():
+    """Lightweight clock source for ESP32 firmware when xiaozhi OTA is bypassed."""
+    now = datetime.now(timezone.utc)
+    local = datetime.now().astimezone()
+    offset = local.utcoffset() or timedelta(0)
+    return jsonify(
+        {
+            "status": "ok",
+            "timestamp_ms": int(now.timestamp() * 1000),
+            "timezone_offset": int(offset.total_seconds() // 60),
+        }
+    )
 
 try:
     from flask_sock import Sock

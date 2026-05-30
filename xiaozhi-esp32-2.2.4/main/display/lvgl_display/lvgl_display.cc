@@ -196,7 +196,7 @@ void LvglDisplay::UpdateStatusBar(bool update_all) {
         if (tm != nullptr && tm->tm_year >= 2025 - 1900) {
             strftime(time_str, sizeof(time_str), "%H:%M", tm);
         } else {
-            snprintf(time_str, sizeof(time_str), "00:00");
+            snprintf(time_str, sizeof(time_str), "--:--");
         }
         DisplayLockGuard lock(this);
         if (status_label_ != nullptr) {

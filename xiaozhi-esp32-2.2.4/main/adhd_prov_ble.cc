@@ -38,12 +38,7 @@ static uint8_t s_prov_service_uuid[16] = {
 static char s_prov_name[24] = {0};
 
 static volatile bool  s_prov_done         = false;
-// When credentials are received we save them via SsidManager (so the next
-// boot's WifiManager picks them up) and arm a delayed reboot.  CONFIG_ESP_WIFI
-// _NVS_ENABLED is OFF in this firmware, so network_prov_mgr's own
-// esp_wifi_set_config call only lives in RAM — without an SsidManager save,
-// every reboot would land us back in BLE config mode.
-static volatile int64_t s_reboot_at_ms    = 0;
+static volatile bool  s_creds_received    = false;
 
 static void make_prov_name() {
     if (s_prov_name[0] != 0) {
@@ -77,16 +72,9 @@ static void prov_event_handler(void* arg, esp_event_base_t base, int32_t id, voi
             std::string ssid(reinterpret_cast<const char*>(cfg->ssid));
             std::string password(reinterpret_cast<const char*>(cfg->password));
             SsidManager::GetInstance().AddSsid(ssid, password);
-            ESP_LOGI(TAG, "creds saved to SsidManager, will reboot to join AP");
-
-            // Arm a short delayed reboot.  We don't try to keep BLE alive
-            // long enough for network_prov_mgr to finish testing the AP —
-            // the BT/Wi-Fi coexistence on ESP32-S3 routinely kills the GATT
-            // link with LINK_SUPERVISION_TIMEOUT during STA association
-            // anyway.  Letting WifiManager handle the actual STA connect on
-            // the next boot is more reliable, and the Flutter app already
-            // falls back to "wait for cloud announce" on this disconnect.
-            s_reboot_at_ms = esp_timer_get_time() / 1000LL + 3000;
+            ESP_LOGI(TAG, "creds saved to SsidManager, will connect with WifiManager");
+            s_creds_received = true;
+            s_prov_done = true;
             break;
         }
         case NETWORK_PROV_WIFI_CRED_FAIL: {
@@ -114,12 +102,12 @@ static void prov_event_handler(void* arg, esp_event_base_t base, int32_t id, voi
 
 void adhd_prov_ble_start_blocking(void) {
     make_prov_name();
+    s_prov_done = false;
+    s_creds_received = false;
 
-    // Take xiaozhi's WifiManager out of the way. From this point we won't
-    // interact with it again — we'll reboot once the manager finishes so that
-    // WifiManager re-reads the freshly stored SSID/password from NVS on next
-    // boot. This keeps us off the same WIFI_EVENT race the plush-ball flow
-    // already had to fight off.
+    // Take xiaozhi's WifiManager out of the way while BLE receives the
+    // credentials. After provisioning is deinitialized, WifiManager will start
+    // station mode again using the freshly saved SSID/password.
     WifiManager::GetInstance().StopStation();
 
     // The default IDF event loop and NVS are already initialised by xiaozhi's
@@ -156,28 +144,22 @@ void adhd_prov_ble_start_blocking(void) {
         return;
     }
 
-    // Block here until either the CRED_RECV handler arms a reboot (success
-    // path: creds delivered → SsidManager populated → reboot soon) or the
-    // 5-min ceiling expires (no client showed up, no point holding BLE
-    // forever).
+    // Block here until either credentials arrive or the 5-min ceiling expires.
+    // Once credentials are saved, deinit provisioning and let xiaozhi's
+    // WifiManager connect immediately in this boot. This keeps the UI state
+    // (Wi-Fi icon, SSID text, clock sync) on the same run instead of waiting
+    // for a reboot path that can leave the screen stuck in config mode.
     const TickType_t poll = pdMS_TO_TICKS(200);
     const int max_iters = (5 * 60 * 1000) / 200;
     for (int i = 0; i < max_iters && !s_prov_done; ++i) {
         vTaskDelay(poll);
-
-        int64_t reboot_at = s_reboot_at_ms;
-        if (reboot_at > 0) {
-            int64_t now_ms = esp_timer_get_time() / 1000LL;
-            if (now_ms >= reboot_at) {
-                ESP_LOGW(TAG, "reboot deadline reached, rebooting now");
-                break;
-            }
-        }
     }
 
-    ESP_LOGW(TAG, "rebooting to let WifiManager pick up new credentials");
-    vTaskDelay(pdMS_TO_TICKS(300));  // let logs / final BLE responses flush
-    esp_restart();
+    network_prov_mgr_deinit();
+    if (s_creds_received) {
+        ESP_LOGW(TAG, "credentials received, starting WifiManager station now");
+        WifiManager::GetInstance().StartStation();
+    }
 }
 
 void adhd_prov_ble_reset_and_reboot(void) {

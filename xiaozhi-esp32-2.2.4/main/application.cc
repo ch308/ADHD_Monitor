@@ -12,6 +12,9 @@
 #include "adhd_remote_cmd.h"
 
 #include <cstring>
+#include <cstdlib>
+#include <ctime>
+#include <sys/time.h>
 #include <esp_log.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
@@ -24,22 +27,40 @@
 // 进入 Listening 后头多少 ms 的 VAD 抖动忽略（避免上一段 TTS 残音/开 mic 时
 // 的杂音被误识别为孩子说话）。设小一点，否则孩子立刻回答会被这段忽略期吞掉。
 static constexpr int64_t kAutoStopIgnoreInitialVadMs = 300;
-// 至少说够多少 ms 才算"说过话"——给低声/简短回答留余量（孩子常常只说"嗯"
-// "好"、"我不要"这种 200~400ms 的短语）。
-static constexpr int64_t kAutoStopMinSpeechMs = 150;
+// 至少说够多少 ms 才算"说过话"。孩子刚接话时保留短句灵敏度；如果已经安静
+// 很久才突然冒出一小段 VAD，更可能是环境噪声/播放残响，需要更长片段才提交。
+static constexpr int64_t kAutoStopMinSpeechMs = 650;
+static constexpr int64_t kAutoStopMinSpeechAfterLongQuietMs = 1100;
+static constexpr int64_t kAutoStopLongQuietMs = 15000;
 // 前几秒里的极短 VAD 片段多半是残留播放声/环境噪声，不立刻提交，避免越聊
 // ASR 越碎。
-static constexpr int64_t kAutoStopEarlySpeechMs = 600;
+static constexpr int64_t kAutoStopEarlySpeechMs = 900;
 static constexpr int64_t kAutoStopAllowShortSpeechAfterMs = 7000;
 // Listening 总时长不到这么久不允许 endpoint。
 static constexpr int64_t kAutoStopMinListenMs = 800;
-// 孩子停顿多久算讲完一句 → 触发 listen stop / ASR / 回复。
-// 800ms 更贴近儿童短句互动；VAD 偶发抖动由 one-shot endpoint 兜住。
-static constexpr int64_t kAutoStopSilenceMs = 800;
+// 孩子停顿多久算讲完一句 → 触发 listen stop / ASR / 回复。等待越久才出现的人声，
+// 句尾静音也等越久，避免"没人说话但噪声触发一轮回复"。
+static constexpr int64_t kAutoStopBaseSilenceMs = 1200;
+static constexpr int64_t kAutoStopMaxSilenceMs = 4200;
+static constexpr int64_t kAutoStopSilenceGrowthDivisor = 8;
 // 兜底：如果 VAD 已经看到过说话但一直没稳定 endpoint，到这个时长强制提交。
-static constexpr int64_t kAutoStopMaxUtteranceMs = 12000;
+static constexpr int64_t kAutoStopMaxUtteranceMs = 15000;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
 static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
+
+static int64_t AutoStopEndpointDelayMs(int64_t quiet_before_voice_ms) {
+    int64_t delay = kAutoStopBaseSilenceMs + quiet_before_voice_ms / kAutoStopSilenceGrowthDivisor;
+    if (delay > kAutoStopMaxSilenceMs) {
+        delay = kAutoStopMaxSilenceMs;
+    }
+    return delay;
+}
+
+static int64_t AutoStopRequiredSpeechMs(int64_t quiet_before_voice_ms) {
+    return quiet_before_voice_ms >= kAutoStopLongQuietMs
+        ? kAutoStopMinSpeechAfterLongQuietMs
+        : kAutoStopMinSpeechMs;
+}
 
 
 Application::Application() {
@@ -67,7 +88,7 @@ Application::Application() {
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
 
-    // One-shot endpoint detector: fires `kAutoStopSilenceMs` after VAD goes silent.
+    // One-shot endpoint detector: fires after the adaptive silence window.
     esp_timer_create_args_t endpoint_timer_args = {
         .callback = [](void* arg) {
             Application* app = (Application*)arg;
@@ -298,7 +319,11 @@ void Application::Run() {
                         if (listening_ms >= kAutoStopIgnoreInitialVadMs) {
                             if (!auto_stop_voice_seen_) {
                                 auto_stop_voice_started_ms_ = now_ms;
-                                ESP_LOGI(TAG, "VAD voice (listen=%lldms)", listening_ms);
+                                auto_stop_voice_quiet_before_ms_ = listening_ms;
+                                auto_stop_endpoint_delay_ms_ =
+                                    AutoStopEndpointDelayMs(auto_stop_voice_quiet_before_ms_);
+                                ESP_LOGI(TAG, "VAD voice (listen=%lldms, endpoint_delay=%lldms)",
+                                         listening_ms, auto_stop_endpoint_delay_ms_);
                             }
                             auto_stop_voice_seen_ = true;
                         } else {
@@ -322,7 +347,7 @@ void Application::Run() {
                         if (endpoint_timer_handle_ != nullptr) {
                             esp_timer_stop(endpoint_timer_handle_);
                             esp_timer_start_once(endpoint_timer_handle_,
-                                                 kAutoStopSilenceMs * 1000);
+                                                 auto_stop_endpoint_delay_ms_ * 1000);
                         }
                     }
                 }
@@ -353,11 +378,14 @@ void Application::Run() {
                 listening_mode_ == kListeningModeAutoStop && protocol_) {
                 const int64_t now_ms = esp_timer_get_time() / 1000;
                 const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
+                const int64_t utterance_ms = auto_stop_voice_started_ms_ > 0
+                    ? now_ms - auto_stop_voice_started_ms_
+                    : listening_ms;
                 if (auto_stop_voice_seen_ &&
-                    listening_ms >= kAutoStopMaxUtteranceMs &&
+                    utterance_ms >= kAutoStopMaxUtteranceMs &&
                     protocol_->IsAudioChannelOpened()) {
-                    ESP_LOGI(TAG, "Max utterance: %lldms listening → stop",
-                             listening_ms);
+                    ESP_LOGI(TAG, "Max utterance: %lldms voice / %lldms listening → stop",
+                             utterance_ms, listening_ms);
                     auto_stop_endpoint_timer_armed_ = false;
                     if (endpoint_timer_handle_ != nullptr) {
                         esp_timer_stop(endpoint_timer_handle_);
@@ -440,7 +468,7 @@ void Application::HandleActivationDoneEvent() {
     SystemInfo::PrintHeapStats();
     SetDeviceState(kDeviceStateIdle);
 
-    has_server_time_ = ota_->HasServerTime();
+    has_server_time_ = has_server_time_ || ota_->HasServerTime();
 
     auto display = Board::GetInstance().GetDisplay();
     // 屏幕上显式打出"已连接到云端 + 当前 AP 名 + 固件版本"，6 秒。
@@ -479,6 +507,63 @@ void Application::HandleActivationDoneEvent() {
     adhd_remote_cmd_start();
 }
 
+bool Application::SyncClockFromMonitorServer() {
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+    // Path A bypasses xiaozhi OTA, so the original OTA `server_time` never
+    // arrives. Ask the ADHD Monitor Flask service for a small UTC timestamp.
+    setenv("TZ", "CST-8", 1);
+    tzset();
+
+    std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
+                      std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/time";
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(0);
+    http->SetTimeout(5000);
+    if (!http->Open("GET", url)) {
+        ESP_LOGW(TAG, "Clock sync open failed: %s", url.c_str());
+        return false;
+    }
+    const int status_code = http->GetStatusCode();
+    std::string body = http->ReadAll();
+    http->Close();
+    if (status_code != 200) {
+        ESP_LOGW(TAG, "Clock sync failed, status=%d body=%s", status_code, body.c_str());
+        return false;
+    }
+
+    cJSON* root = cJSON_Parse(body.c_str());
+    if (root == nullptr) {
+        ESP_LOGW(TAG, "Clock sync invalid JSON: %s", body.c_str());
+        return false;
+    }
+    cJSON* timestamp_ms = cJSON_GetObjectItem(root, "timestamp_ms");
+    if (!cJSON_IsNumber(timestamp_ms)) {
+        cJSON_Delete(root);
+        ESP_LOGW(TAG, "Clock sync response missing timestamp_ms");
+        return false;
+    }
+
+    const double ms = timestamp_ms->valuedouble;
+    struct timeval tv;
+    tv.tv_sec = static_cast<time_t>(ms / 1000);
+    tv.tv_usec = static_cast<suseconds_t>(static_cast<long long>(ms) % 1000) * 1000;
+    settimeofday(&tv, nullptr);
+    has_server_time_ = true;
+    cJSON_Delete(root);
+
+    char buf[32] = {0};
+    time_t now = time(nullptr);
+    struct tm* tm = localtime(&now);
+    if (tm != nullptr) {
+        strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", tm);
+    }
+    ESP_LOGI(TAG, "Clock synced from ADHD Monitor: %s", buf);
+    Board::GetInstance().GetDisplay()->UpdateStatusBar(true);
+    return true;
+#else
+    return false;
+#endif
+}
+
 void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
@@ -488,6 +573,7 @@ void Application::ActivationTask() {
     // The websocket NVS is seeded from Kconfig before protocol init.
     ESP_LOGI(TAG, "ADHD bypass OTA: seeding websocket NVS from Kconfig");
     adhd_remote_cmd_seed_settings();
+    SyncClockFromMonitorServer();
 #else
     // Check for new assets version
     CheckAssetsVersion();
@@ -1087,6 +1173,14 @@ const char* Application::SoftEmotionForKids(const char* emotion) {
     return emotion;
 }
 
+static const char* PickKidsStatusLine(const char* const* lines, size_t count) {
+    if (count == 0) {
+        return "";
+    }
+    const int64_t seconds = esp_timer_get_time() / 1000000;
+    return lines[(seconds / 8) % count];
+}
+
 void Application::RefreshKidsDisplay() {
     auto display = Board::GetInstance().GetDisplay();
     display->SetWelcomeTitle("");
@@ -1105,9 +1199,7 @@ void Application::RefreshKidsDisplay() {
         switch (state_machine_.GetState()) {
             case kDeviceStateWifiConfiguring:
                 if (have_wifi_ssid) {
-                    char buf[96];
-                    snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
-                    center = buf;
+                    center = "网络准备好了";
                     emotion = "relaxed";
                 } else {
                     center = Lang::Strings::WAITING_WIFI_CONFIG;
@@ -1115,11 +1207,27 @@ void Application::RefreshKidsDisplay() {
                 }
                 break;
             case kDeviceStateListening:
-                center = Lang::Strings::LISTENING_KIDS;
+                {
+                    static const char* const kListeningLines[] = {
+                        "我在听，慢慢说",
+                        "不用急，我会等你",
+                        "想结束就说“睡觉吧”"
+                    };
+                    center = PickKidsStatusLine(kListeningLines,
+                                                sizeof(kListeningLines) / sizeof(kListeningLines[0]));
+                }
                 emotion = "thinking";
                 break;
             case kDeviceStateSpeaking:
-                center = Lang::Strings::SPEAKING_KIDS;
+                {
+                    static const char* const kSpeakingLines[] = {
+                        "我慢慢说完这一句",
+                        "一边想，一边陪你",
+                        "等我停下后，说“别说了”"
+                    };
+                    center = PickKidsStatusLine(kSpeakingLines,
+                                                sizeof(kSpeakingLines) / sizeof(kSpeakingLines[0]));
+                }
                 emotion = "happy";
                 break;
             case kDeviceStateConnecting:
@@ -1128,9 +1236,13 @@ void Application::RefreshKidsDisplay() {
                 break;
             case kDeviceStateIdle:
                 if (have_wifi_ssid) {
-                    char buf[96];
-                    snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
-                    center = buf;
+                    static const char* const kIdleLines[] = {
+                        "我在这里，想聊就叫我",
+                        "准备好了就说一声",
+                        "今天也可以慢慢来"
+                    };
+                    center = PickKidsStatusLine(kIdleLines,
+                                                sizeof(kIdleLines) / sizeof(kIdleLines[0]));
                     emotion = "relaxed";
                 } else {
                     center = Lang::Strings::WAITING_WIFI_CONFIG;
@@ -1139,9 +1251,7 @@ void Application::RefreshKidsDisplay() {
                 break;
             default:
                 if (have_wifi_ssid) {
-                    char buf[96];
-                    snprintf(buf, sizeof(buf), Lang::Strings::CONNECTED_WIFI, last_connected_network_.c_str());
-                    center = buf;
+                    center = "我在准备下一句话";
                     emotion = "happy";
                 } else {
                     center = Lang::Strings::WAITING_WIFI_CONFIG;
@@ -1195,6 +1305,8 @@ void Application::HandleStateChangedEvent() {
             auto_stop_listen_started_ms_ = esp_timer_get_time() / 1000;
             auto_stop_voice_started_ms_ = 0;
             auto_stop_silence_started_ms_ = 0;
+            auto_stop_voice_quiet_before_ms_ = 0;
+            auto_stop_endpoint_delay_ms_ = kAutoStopBaseSilenceMs;
             auto_stop_endpoint_timer_armed_ = false;
             // Cancel any leftover endpoint timer from a previous turn.
             if (endpoint_timer_handle_ != nullptr) {
@@ -1278,12 +1390,14 @@ bool Application::IsSessionStopCommand(const std::string& text) const {
     static const char* kExactStopCommands[] = {
         "终止", "停止", "停下", "结束", "暂停", "别说", "不要说", "不聊了", "先这样",
         "终止对话", "停止对话", "结束对话", "暂停对话", "别说了", "不要说了",
-        "先不聊了", "今天先这样", "就这样吧", "可以了", "不用说了",
+        "别讲了", "不要讲了", "停一下", "先停一下", "安静一下", "闭嘴",
+        "先不聊了", "今天先这样", "就这样吧", "可以了", "不用说了", "够了",
         "休眠", "进入休眠", "进入休眠模式", "进入省电模式", "进入休眠省电模式",
         "休眠省电", "休眠省电模式", "睡觉吧"
     };
     static const char* kStrongStopPhrases[] = {
         "停止对话", "结束对话", "暂停对话", "终止对话", "别说了", "不要说了",
+        "别讲了", "不要讲了", "停一下", "先停一下", "安静一下",
         "不想聊了", "先不聊了", "今天先这样", "就这样吧", "不用说了",
         "进入休眠", "进入省电模式", "进入休眠省电模式"
     };
@@ -1313,6 +1427,8 @@ void Application::TerminateCurrentSession(const char* reason, bool notify_server
     session_termination_requested_ = true;
     auto_stop_voice_seen_ = false;
     auto_stop_silence_started_ms_ = 0;
+    auto_stop_voice_quiet_before_ms_ = 0;
+    auto_stop_endpoint_delay_ms_ = kAutoStopBaseSilenceMs;
     auto_stop_endpoint_timer_armed_ = false;
     if (endpoint_timer_handle_ != nullptr) {
         esp_timer_stop(endpoint_timer_handle_);
@@ -1340,7 +1456,7 @@ void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server
 }
 
 void Application::OnEndpointTimer() {
-    // Endpoint timer fired kAutoStopSilenceMs after the child went silent.
+    // Endpoint timer fired after the adaptive silence window.
     // We re-check the world from the main task because state may have changed
     // in the meantime (user resumed speaking, server replied, channel closed).
     auto_stop_endpoint_timer_armed_ = false;
@@ -1358,26 +1474,36 @@ void Application::OnEndpointTimer() {
     const int64_t silence_ms = now_ms - auto_stop_silence_started_ms_;
     const int64_t speech_ms = auto_stop_silence_started_ms_ - auto_stop_voice_started_ms_;
     const int64_t listening_ms = now_ms - auto_stop_listen_started_ms_;
+    const int64_t required_speech_ms =
+        AutoStopRequiredSpeechMs(auto_stop_voice_quiet_before_ms_);
+    const int64_t required_silence_ms = auto_stop_endpoint_delay_ms_ > 0
+        ? auto_stop_endpoint_delay_ms_
+        : kAutoStopBaseSilenceMs;
     if (speech_ms < kAutoStopEarlySpeechMs &&
         listening_ms < kAutoStopAllowShortSpeechAfterMs) {
         ESP_LOGI(TAG, "Endpoint timer: ignore short early speech (speech=%lld listen=%lld)",
                  speech_ms, listening_ms);
         auto_stop_voice_seen_ = false;
         auto_stop_silence_started_ms_ = 0;
+        auto_stop_voice_quiet_before_ms_ = 0;
         return;
     }
-    if (silence_ms < kAutoStopSilenceMs ||
-        speech_ms < kAutoStopMinSpeechMs ||
+    if (silence_ms < required_silence_ms ||
+        speech_ms < required_speech_ms ||
         listening_ms < kAutoStopMinListenMs) {
-        ESP_LOGI(TAG, "Endpoint timer: skip (silence=%lld speech=%lld listen=%lld)",
-                 silence_ms, speech_ms, listening_ms);
+        ESP_LOGI(TAG, "Endpoint timer: skip (silence=%lld/%lld speech=%lld/%lld listen=%lld quiet_before=%lld)",
+                 silence_ms, required_silence_ms, speech_ms, required_speech_ms,
+                 listening_ms, auto_stop_voice_quiet_before_ms_);
+        auto_stop_voice_seen_ = false;
         auto_stop_silence_started_ms_ = 0;
+        auto_stop_voice_quiet_before_ms_ = 0;
         return;
     }
-    ESP_LOGI(TAG, "Auto-stop (one-shot): silence=%lldms speech=%lldms",
-             silence_ms, speech_ms);
+    ESP_LOGI(TAG, "Auto-stop (one-shot): silence=%lldms speech=%lldms quiet_before=%lldms",
+             silence_ms, speech_ms, auto_stop_voice_quiet_before_ms_);
     auto_stop_voice_seen_ = false;
     auto_stop_silence_started_ms_ = 0;
+    auto_stop_voice_quiet_before_ms_ = 0;
     protocol_->SendStopListening();
     SetDeviceState(kDeviceStateIdle);
 }

@@ -934,7 +934,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_align(status_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(status_label_, lvgl_theme->text_color(), 0);
 #ifdef CONFIG_ADHD_KIDS_UI
-    lv_label_set_text(status_label_, "00:00");
+    lv_label_set_text(status_label_, "--:--");
 #else
     lv_label_set_text(status_label_, Lang::Strings::INITIALIZING);
 #endif

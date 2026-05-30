@@ -156,6 +156,8 @@ private:
     int64_t auto_stop_listen_started_ms_ = 0;
     int64_t auto_stop_voice_started_ms_ = 0;
     int64_t auto_stop_silence_started_ms_ = 0;
+    int64_t auto_stop_voice_quiet_before_ms_ = 0;
+    int64_t auto_stop_endpoint_delay_ms_ = 0;
     /** Source state for the transition that last fired MAIN_EVENT_STATE_CHANGED (see OnStateChanged). */
     DeviceState last_state_transition_from_{kDeviceStateUnknown};
     int clock_ticks_ = 0;
@@ -182,6 +184,7 @@ private:
     void CheckNewVersion();
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
+    bool SyncClockFromMonitorServer();
     void SetListeningMode(ListeningMode mode);
     ListeningMode GetDefaultListeningMode() const;
     bool IsSessionStopCommand(const std::string& text) const;

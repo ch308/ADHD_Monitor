@@ -55,7 +55,7 @@ The `assets` partition stores:
 - `phy_init`: 4KB
 - `ota_0`: 4MB
 - `ota_1`: 4MB
-- `assets`: 8MB
+- `assets`: ~7.875MB
 
 ### 16MB Flash Devices (`16m_c3.csv`) - ESP32-C3 Optimized
 - `nvs`: 16KB
