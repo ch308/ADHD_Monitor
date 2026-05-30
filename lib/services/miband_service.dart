@@ -172,6 +172,8 @@ class MiBand6Auth {
   BluetoothDevice? _device;
   BluetoothCharacteristic? _hrChar;
   BluetoothCharacteristic? _alertChar;
+  BluetoothCharacteristic? _chunkedV3WriteChar;
+  int _chunkedV3Seq = 0;
   BluetoothCharacteristic? _stressChar;
   StreamSubscription<List<int>>? _hrSub;
   StreamSubscription<List<int>>? _stressSub;
@@ -483,6 +485,8 @@ class MiBand6Auth {
     _authSub = null;
     _hrChar = null;
     _alertChar = null;
+    _chunkedV3WriteChar = null;
+    _chunkedV3Seq = 0;
     _authChar = null;
     _authWriteWithoutResponse = false;
     _stressChar = null;
@@ -718,26 +722,158 @@ class MiBand6Auth {
     return true;
   }
 
-  /// 通过标准 Immediate Alert Service 触发手环短震若干次。
+  /// 触发"查找设备"震动若干次。
+  ///
+  /// 实现走的是小米运动健康 / Zepp Life 在 FEE1 上的私有 chunked-v3
+  /// 协议（端点 `0x000d` = FIND_DEVICE），等同于 App 内"查找设备"按钮：
+  /// 每次发 `[0x03, 0x01]` 启动震动，等待 [on] 后再发 `[0x03, 0x00]`
+  /// 主动停止；这样可以做出多段短震节奏。
+  ///
+  /// 标准 Immediate Alert（1802/2A06）在小米手环 6 / 6 NFC 上会被固件
+  /// 静默丢弃（GATT 会返回 SUCCESS 但手环不震），所以这里不再使用。
   Future<bool> vibrateBandForTest({
     int times = 3,
     Duration on = const Duration(milliseconds: 650),
     Duration off = const Duration(milliseconds: 350),
-    int command = 0x04,
+    @Deprecated('No longer used; kept for source compat.') int command = 0x04,
   }) async {
-    final ch = await _ensureAlertCharacteristic();
+    final ch = await _ensureChunkedV3WriteChar();
     if (ch == null) {
-      debugPrint('MiBand6Auth: Immediate Alert characteristic not found.');
+      debugPrint(
+          'MiBand6Auth: chunked-v3 write char (0x0016) not found, '
+          'falling back to standard Immediate Alert.');
+      return _legacyImmediateAlertVibrate(times: times, on: on, off: off);
+    }
+
+    bool anyOk = false;
+    try {
+      for (var i = 0; i < times; i++) {
+        final startOk = await _writeFindDevice(ch, true);
+        if (startOk) anyOk = true;
+        await Future<void>.delayed(on);
+        await _writeFindDevice(ch, false);
+        if (i < times - 1) {
+          await Future<void>.delayed(off);
+        }
+      }
+      return anyOk;
+    } catch (e) {
+      debugPrint('MiBand6Auth: find-device vibration failed -> $e');
+      return anyOk;
+    } finally {
+      try {
+        await _writeFindDevice(ch, false);
+      } catch (_) {}
+    }
+  }
+
+  /// 一次性"查找设备"：开 → 等 [duration] → 关。返回是否成功写入。
+  Future<bool> findBandLikeMiFit({
+    Duration duration = const Duration(seconds: 5),
+  }) async {
+    final ch = await _ensureChunkedV3WriteChar();
+    if (ch == null) {
+      debugPrint('MiBand6Auth: chunked-v3 write char not found.');
       return false;
     }
-    // 根据特征属性自适应写入模式
+    final startOk = await _writeFindDevice(ch, true);
+    if (!startOk) return false;
+    await Future<void>.delayed(duration);
+    await _writeFindDevice(ch, false);
+    return true;
+  }
+
+  Future<bool> _writeFindDevice(
+      BluetoothCharacteristic ch, bool start) async {
+    // Huami chunked-v3 endpoint 0x000d (FIND_DEVICE):
+    //   payload[0] = 0x03 (subtype: vibration)
+    //   payload[1] = 0x01 / 0x00 (start / stop)
+    final payload = <int>[0x03, start ? 0x01 : 0x00];
+    final pkt = _buildChunkedV3Packet(
+      endpoint: 0x000d,
+      payload: payload,
+    );
+    final noResp = ch.properties.writeWithoutResponse;
+    try {
+      await ch.write(pkt, withoutResponse: noResp);
+      return true;
+    } catch (e) {
+      debugPrint('MiBand6Auth: chunked-v3 write failed -> $e');
+      return false;
+    }
+  }
+
+  /// 单包 chunked-v3 数据包（payload <= MTU - 9）。
+  ///
+  /// 字节布局（参考 Gadgetbridge `Huami2021ChunkedHandler`）：
+  ///   [0]    0x03                 ── 协议魔数
+  ///   [1]    flags                ── bit0=encrypted, bit1=needs_ack 等
+  ///   [2]    seq                  ── App 端递增序号
+  ///   [3]    count = 0x01         ── 总分片数
+  ///   [4]    index = 0x00         ── 当前分片索引
+  ///   [5..6] length (LE)          ── payload 长度
+  ///   [7..8] endpoint (LE)        ── 业务端点
+  ///   [9..]  payload              ── 业务数据
+  List<int> _buildChunkedV3Packet({
+    required int endpoint,
+    required List<int> payload,
+    bool encrypted = false,
+  }) {
+    final flags = encrypted ? 0x01 : 0x00;
+    final seq = _chunkedV3Seq;
+    _chunkedV3Seq = (_chunkedV3Seq + 1) & 0xff;
+    final length = payload.length;
+    return <int>[
+      0x03,
+      flags,
+      seq,
+      0x01,
+      0x00,
+      length & 0xff,
+      (length >> 8) & 0xff,
+      endpoint & 0xff,
+      (endpoint >> 8) & 0xff,
+      ...payload,
+    ];
+  }
+
+  Future<BluetoothCharacteristic?> _ensureChunkedV3WriteChar() async {
+    final existing = _chunkedV3WriteChar;
+    if (existing != null) return existing;
+    final dev = _device;
+    if (dev == null || !dev.isConnected) return null;
+    final services = await dev.discoverServices();
+    BluetoothCharacteristic? candidate;
+    for (final s in services) {
+      final sId = s.uuid.str.toLowerCase();
+      if (!sId.contains('fee1')) continue;
+      for (final c in s.characteristics) {
+        final id = c.uuid.str.toLowerCase();
+        if (id.startsWith('00000016-') &&
+            (c.properties.write || c.properties.writeWithoutResponse)) {
+          candidate = c;
+          break;
+        }
+      }
+      if (candidate != null) break;
+    }
+    _chunkedV3WriteChar = candidate;
+    return candidate;
+  }
+
+  /// 老路径兜底：写 1802/2A06。已知在 Mi Band 6 NFC 上无效，仅在
+  /// 设备没有 FEE1/0x0016 时尝试一次，方便兼容更老的固件。
+  Future<bool> _legacyImmediateAlertVibrate({
+    required int times,
+    required Duration on,
+    required Duration off,
+  }) async {
+    final ch = await _ensureAlertCharacteristic();
+    if (ch == null) return false;
     final noResp = ch.properties.writeWithoutResponse && !ch.properties.write;
     try {
       for (var i = 0; i < times; i++) {
-        // Mi Band 6 / newer Huami firmware commonly treats 0x04 on 1802/2A06
-        // as "vibrate without lighting the screen"; 0x02 is accepted by GATT
-        // but may be ignored by the band.
-        await ch.write(<int>[command], withoutResponse: noResp);
+        await ch.write(<int>[0x02], withoutResponse: noResp);
         await Future<void>.delayed(on);
         await ch.write(<int>[0x00], withoutResponse: noResp);
         if (i < times - 1) {
@@ -746,7 +882,7 @@ class MiBand6Auth {
       }
       return true;
     } catch (e) {
-      debugPrint('MiBand6Auth: test vibration failed -> $e');
+      debugPrint('MiBand6Auth: legacy 1802 vibration failed -> $e');
       return false;
     } finally {
       try {
@@ -1172,6 +1308,8 @@ class MiBand6Auth {
     _connStateSub = null;
     _hrChar = null;
     _alertChar = null;
+    _chunkedV3WriteChar = null;
+    _chunkedV3Seq = 0;
     _authChar = null;
     _authWriteWithoutResponse = false;
     _stressChar = null;

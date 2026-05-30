@@ -446,7 +446,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       setState(() => _bandVibrationTestColor = const Color(0xFFE84B4B));
       final redOk = await _miBandService.vibrateBandForTest(times: 3);
       if (!redOk) {
-        throw StateError('手环未开放标准震动通道，无法触发震动。');
+        throw StateError('手环未响应"查找设备"命令（私有协议未握手成功）。');
       }
 
       await Future<void>.delayed(const Duration(milliseconds: 500));
