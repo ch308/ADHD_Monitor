@@ -723,6 +723,7 @@ class MiBand6Auth {
     int times = 3,
     Duration on = const Duration(milliseconds: 650),
     Duration off = const Duration(milliseconds: 350),
+    int command = 0x04,
   }) async {
     final ch = await _ensureAlertCharacteristic();
     if (ch == null) {
@@ -733,7 +734,10 @@ class MiBand6Auth {
     final noResp = ch.properties.writeWithoutResponse && !ch.properties.write;
     try {
       for (var i = 0; i < times; i++) {
-        await ch.write(<int>[0x02], withoutResponse: noResp);
+        // Mi Band 6 / newer Huami firmware commonly treats 0x04 on 1802/2A06
+        // as "vibrate without lighting the screen"; 0x02 is accepted by GATT
+        // but may be ignored by the band.
+        await ch.write(<int>[command], withoutResponse: noResp);
         await Future<void>.delayed(on);
         await ch.write(<int>[0x00], withoutResponse: noResp);
         if (i < times - 1) {
