@@ -1,4 +1,5 @@
 #include "board.h"
+#include "backlight.h"
 #include "system_info.h"
 #include "settings.h"
 #include "display/display.h"
@@ -65,6 +66,18 @@ Camera* Board::GetCamera() {
 Led* Board::GetLed() {
     static NoLed led;
     return &led;
+}
+
+void Board::SetApplicationSleepDisplayDimmed(bool dimmed) {
+    Backlight* bl = GetBacklight();
+    if (!bl) {
+        return;
+    }
+    if (dimmed) {
+        bl->SetBrightness(0);
+    } else {
+        bl->RestoreBrightness();
+    }
 }
 
 std::string Board::GetSystemInfoJson() {

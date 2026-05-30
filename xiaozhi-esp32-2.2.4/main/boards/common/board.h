@@ -82,6 +82,12 @@ public:
     virtual void SetPowerSaveLevel(PowerSaveLevel level) = 0;
     virtual std::string GetBoardJson() = 0;
     virtual std::string GetDeviceStatusJson() = 0;
+
+    /**
+     * After EnterSleepPowerSaveMode (voice "休眠省电"), optionally turn LCD/backlight off
+     * while keeping WiFi alive for remote commands. Default: backlight only.
+     */
+    virtual void SetApplicationSleepDisplayDimmed(bool dimmed);
 };
 
 #define DECLARE_BOARD(BOARD_CLASS_NAME) \

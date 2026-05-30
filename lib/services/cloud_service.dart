@@ -295,6 +295,20 @@ class CloudService {
     return sendEsp32Command(deviceId, 'reset_provisioning');
   }
 
+  /// 家长从 App 主动唤醒星星机器人（与 submit_log 后相同的 `xiaozhi_invoke_chat` 通道）。
+  Future<bool> triggerXiaozhiParentWakeInvoke(String deviceId) {
+    const opening =
+        '你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。';
+    return sendEsp32Command(
+      deviceId,
+      'xiaozhi_invoke_chat',
+      extra: {
+        'opening_line': opening,
+        'context': '家长从手机端主动唤醒星星。',
+      },
+    );
+  }
+
   /// 解除手环 MAC 的绑定。
   /// [childIdToUnbind] 用于校验只有绑定者才能解绑。
   Future<bool> unbindDevice(String mac, int childIdToUnbind) async {

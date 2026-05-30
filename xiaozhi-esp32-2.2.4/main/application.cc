@@ -48,6 +48,9 @@ static constexpr int64_t kAutoStopMaxUtteranceMs = 15000;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
 static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
 
+// 进入「休眠省电」后多久关背光/面板（仍保持 WiFi 与长轮询，便于 App 远程唤醒）。
+static constexpr int64_t kAppSleepDisplayOffAfterUs = 30LL * 1000000LL;
+
 static int64_t AutoStopEndpointDelayMs(int64_t quiet_before_voice_ms) {
     int64_t delay = kAutoStopBaseSilenceMs + quiet_before_voice_ms / kAutoStopSilenceGrowthDivisor;
     if (delay > kAutoStopMaxSilenceMs) {
@@ -100,6 +103,18 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&endpoint_timer_args, &endpoint_timer_handle_);
+
+    esp_timer_create_args_t sleep_disp_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            app->Schedule([app]() { app->OnSleepDisplayOffTimer(); });
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "sleep_disp_off",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&sleep_disp_timer_args, &sleep_display_off_timer_);
 }
 
 Application::~Application() {
@@ -110,6 +125,10 @@ Application::~Application() {
     if (endpoint_timer_handle_ != nullptr) {
         esp_timer_stop(endpoint_timer_handle_);
         esp_timer_delete(endpoint_timer_handle_);
+    }
+    if (sleep_display_off_timer_ != nullptr) {
+        esp_timer_stop(sleep_display_off_timer_);
+        esp_timer_delete(sleep_display_off_timer_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -1288,6 +1307,7 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateConnecting:
             sleep_power_save_mode_ = false;
+            RestoreApplicationSleepDisplay();
 #ifndef CONFIG_ADHD_KIDS_UI
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
@@ -1296,6 +1316,7 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateListening:
             sleep_power_save_mode_ = false;
+            RestoreApplicationSleepDisplay();
 #ifndef CONFIG_ADHD_KIDS_UI
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
@@ -1446,6 +1467,7 @@ void Application::TerminateCurrentSession(const char* reason, bool notify_server
 
 void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server) {
     ESP_LOGI(TAG, "Enter sleep power-save mode: %s", reason ? reason : "");
+    RestoreApplicationSleepDisplay();
     sleep_power_save_mode_ = true;
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
@@ -1453,6 +1475,34 @@ void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server
     display->SetStatus("休眠省电中");
     display->SetChatMessage("system", "休眠省电中");
     TerminateCurrentSession(reason, notify_server);
+#ifdef CONFIG_ADHD_KIDS_UI
+    RefreshKidsDisplay();
+#endif
+    if (sleep_display_off_timer_ != nullptr) {
+        esp_timer_stop(sleep_display_off_timer_);
+        esp_err_t err = esp_timer_start_once(sleep_display_off_timer_, kAppSleepDisplayOffAfterUs);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "sleep display off timer start: %s", esp_err_to_name(err));
+        }
+    }
+}
+
+void Application::RestoreApplicationSleepDisplay() {
+    if (sleep_display_off_timer_ != nullptr) {
+        esp_timer_stop(sleep_display_off_timer_);
+    }
+    Board::GetInstance().SetApplicationSleepDisplayDimmed(false);
+}
+
+void Application::OnSleepDisplayOffTimer() {
+    if (!sleep_power_save_mode_) {
+        return;
+    }
+    if (GetDeviceState() != kDeviceStateIdle) {
+        return;
+    }
+    ESP_LOGI(TAG, "App sleep power-save: dimming display after 30s idle in sleep mode");
+    Board::GetInstance().SetApplicationSleepDisplayDimmed(true);
 }
 
 void Application::OnEndpointTimer() {

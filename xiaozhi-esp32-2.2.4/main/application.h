@@ -133,6 +133,8 @@ private:
     /** AutoStop endpoint detector: fires once `kAutoStopSilenceMs` after the
      * child stops talking, used instead of waiting for the 1 Hz clock tick. */
     esp_timer_handle_t endpoint_timer_handle_ = nullptr;
+    /** After EnterSleepPowerSaveMode: turn off LCD/backlight while staying on WiFi. */
+    esp_timer_handle_t sleep_display_off_timer_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -190,6 +192,8 @@ private:
     bool IsSessionStopCommand(const std::string& text) const;
     void TerminateCurrentSession(const char* reason, bool notify_server);
     void EnterSleepPowerSaveMode(const char* reason, bool notify_server);
+    void RestoreApplicationSleepDisplay();
+    void OnSleepDisplayOffTimer();
 
 #ifdef CONFIG_ADHD_KIDS_UI
     void RefreshKidsDisplay();

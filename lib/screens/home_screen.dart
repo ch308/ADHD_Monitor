@@ -172,6 +172,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
   /// 当前孩子已绑定的 xiaozhi 星星机器人 device_id（null=未绑定/未配网）
   String? _boundXiaozhiDeviceId;
+  bool _xiaozhiParentWakeBusy = false;
 
   /// 手环 stress 触发"还在焦虑中"的阈值（小米手环 stress 0-100），可由家长滑动调整。
   static const int _defaultStressAlertThreshold = 60;
@@ -1373,6 +1374,39 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
   }
 
+  /// 家长从顶栏主动唤醒星星机器人（长轮询 `xiaozhi_invoke_chat`）。
+  Future<void> _parentWakeXiaozhiStar() async {
+    final deviceId = _boundXiaozhiDeviceId;
+    if (deviceId == null || deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先在菜单里配网并绑定星星机器人，或「绑定小智设备」。')),
+      );
+      return;
+    }
+    if (_xiaozhiParentWakeBusy) return;
+    setState(() => _xiaozhiParentWakeBusy = true);
+    try {
+      final ok = await _cloudService.triggerXiaozhiParentWakeInvoke(deviceId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? '已唤醒星星，孩子侧几秒内会听到问候。'
+                : '唤醒失败：请确认星星已联网并已登录本账号。',
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('唤醒出错：$e')));
+      }
+    } finally {
+      if (mounted) setState(() => _xiaozhiParentWakeBusy = false);
+    }
+  }
+
   Future<void> fetchHistory() async {
     if (_miBandService.isStreaming) return;
     try {
@@ -2145,6 +2179,21 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 const PopupMenuItem(value: 'switch_mode', child: Text('切换使用身份')),
               const PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],
+          ),
+          IconButton(
+            icon: _xiaozhiParentWakeBusy
+                ? SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: isAlertMode ? _coral : _sage,
+                    ),
+                  )
+                : Icon(Icons.auto_awesome_outlined,
+                    color: isAlertMode ? _coral : _sage),
+            tooltip: '唤醒星星',
+            onPressed: _xiaozhiParentWakeBusy ? null : _parentWakeXiaozhiStar,
           ),
           IconButton(
             icon: Icon(Icons.insights_rounded,
