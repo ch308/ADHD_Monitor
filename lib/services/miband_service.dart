@@ -179,10 +179,14 @@ class MiBand6Auth {
   int? _lastStressRaw;
   int _stressStaleCount = 0;
 
+  /// 上次自动告警震动的时间，防抖用（同一轮高 BPM 不会频繁震动）。
+  DateTime? _lastAutoVibrationAt;
+
   // ── 鉴权用 ──
   BluetoothCharacteristic? _authChar;
   StreamSubscription<List<int>>? _authSub;
   Completer<bool>? _authCompleter;
+  bool _authWriteWithoutResponse = false;
 
   // ── 自动重连用 ──
   StreamSubscription<BluetoothConnectionState>? _connStateSub;
@@ -480,6 +484,7 @@ class MiBand6Auth {
     _hrChar = null;
     _alertChar = null;
     _authChar = null;
+    _authWriteWithoutResponse = false;
     _stressChar = null;
     _setStage(
       MiBandStage.disconnected,
@@ -562,6 +567,12 @@ class MiBand6Auth {
     _authChar = authChar;
     await authChar.setNotifyValue(true);
 
+    // 根据特征属性自适应写入模式：部分固件仅支持 writeWithoutResponse
+    _authWriteWithoutResponse =
+        authChar.properties.writeWithoutResponse && !authChar.properties.write;
+    debugPrint(
+        'MiBand6Auth: auth char write mode: ${_authWriteWithoutResponse ? "writeWithoutResponse" : "writeWithResponse"}');
+
     final completer = Completer<bool>();
     _authCompleter = completer;
     await _authSub?.cancel();
@@ -571,7 +582,7 @@ class MiBand6Auth {
     final keyBytes = _hexToBytes(hexKey);
     final step1 = Uint8List.fromList(<int>[0x01, 0x08, ...keyBytes]);
     debugPrint('MiBand6Auth: send step1 (register key).');
-    await authChar.write(step1, withoutResponse: false);
+    await authChar.write(step1, withoutResponse: _authWriteWithoutResponse);
 
     final ok = await completer.future
         .timeout(authTimeout, onTimeout: () => false);
@@ -599,7 +610,7 @@ class MiBand6Auth {
       final cmd = Uint8List.fromList(<int>[0x02, 0x08]);
       debugPrint('MiBand6Auth: send step2 (request nonce).');
       try {
-        await ch.write(cmd, withoutResponse: false);
+        await ch.write(cmd, withoutResponse: _authWriteWithoutResponse);
       } catch (e) {
         _authCompleter?.complete(false);
       }
@@ -616,7 +627,7 @@ class MiBand6Auth {
       final cmd = Uint8List.fromList(<int>[0x03, 0x08, ...encrypted]);
       debugPrint('MiBand6Auth: send step3 (encrypted nonce).');
       try {
-        await ch.write(cmd, withoutResponse: false);
+        await ch.write(cmd, withoutResponse: _authWriteWithoutResponse);
       } catch (e) {
         _authCompleter?.complete(false);
       }
@@ -718,11 +729,13 @@ class MiBand6Auth {
       debugPrint('MiBand6Auth: Immediate Alert characteristic not found.');
       return false;
     }
+    // 根据特征属性自适应写入模式
+    final noResp = ch.properties.writeWithoutResponse && !ch.properties.write;
     try {
       for (var i = 0; i < times; i++) {
-        await ch.write(<int>[0x02], withoutResponse: false);
+        await ch.write(<int>[0x02], withoutResponse: noResp);
         await Future<void>.delayed(on);
-        await ch.write(<int>[0x00], withoutResponse: false);
+        await ch.write(<int>[0x00], withoutResponse: noResp);
         if (i < times - 1) {
           await Future<void>.delayed(off);
         }
@@ -733,7 +746,7 @@ class MiBand6Auth {
       return false;
     } finally {
       try {
-        await ch.write(<int>[0x00], withoutResponse: false);
+        await ch.write(<int>[0x00], withoutResponse: noResp);
       } catch (_) {}
     }
   }
@@ -1071,6 +1084,19 @@ class MiBand6Auth {
     _noBroadcastTimer?.cancel();
     _noBroadcastTimer = null;
     _streaming = true;
+    // 心率超标时自动触发手环震动（防抖：同一条告警期只震一次）
+    if (sample.isAlert &&
+        (_lastAutoVibrationAt == null ||
+            now.difference(_lastAutoVibrationAt!) >
+                const Duration(seconds: 30))) {
+      _lastAutoVibrationAt = now;
+      unawaited(vibrateBandForTest(times: 2, on: const Duration(milliseconds: 400))
+          .then((ok) {
+        if (!ok) {
+          debugPrint('MiBand6Auth: auto-vibration failed (band may be disconnected)');
+        }
+      }));
+    }
     if (status.value.stage != MiBandStage.streaming) {
       _reconnectAttempt = 0;
       status.value = MiBandStatus(
@@ -1105,6 +1131,12 @@ class MiBand6Auth {
     }
   }
 
+  bool _uuidMatches(String actual, String expectedShortUuid) {
+    final normalized = actual.toLowerCase();
+    final expected = expectedShortUuid.toLowerCase();
+    return normalized == expected || normalized.startsWith('0000$expected-');
+  }
+
   bool _looksLikeMiBand(BluetoothDevice d) {
     final name = d.platformName;
     final id = d.remoteId.str.toUpperCase();
@@ -1137,6 +1169,7 @@ class MiBand6Auth {
     _hrChar = null;
     _alertChar = null;
     _authChar = null;
+    _authWriteWithoutResponse = false;
     _stressChar = null;
     _authCompleter = null;
     final d = _device;
