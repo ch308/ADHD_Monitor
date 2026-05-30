@@ -843,15 +843,19 @@ class MiBand6Auth {
     final dev = _device;
     if (dev == null || !dev.isConnected) return null;
     final services = await dev.discoverServices();
+
+    // Mi Band 6 / 6 NFC: chunked-v3 write char (`00000016-…`) 挂在 FEE0
+    // 而不是 FEE1，所以这里不限定 service，直接按 char UUID 全局搜。
     BluetoothCharacteristic? candidate;
     for (final s in services) {
-      final sId = s.uuid.str.toLowerCase();
-      if (!sId.contains('fee1')) continue;
       for (final c in s.characteristics) {
         final id = c.uuid.str.toLowerCase();
         if (id.startsWith('00000016-') &&
             (c.properties.write || c.properties.writeWithoutResponse)) {
           candidate = c;
+          debugPrint(
+              'MiBand6Auth: chunked-v3 write char located: '
+              '${c.uuid.str} under service ${s.uuid.str}');
           break;
         }
       }
