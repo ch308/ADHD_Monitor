@@ -160,6 +160,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   StreamSubscription<HeartRateSample>? _bandHrSub;
   StreamSubscription<BandStressSample>? _bandStressSub;
   bool _btBootstrapping = false;
+  bool _bandVibrationTestRunning = false;
+  Color? _bandVibrationTestColor;
   MiBandStage? _lastBandStageForToast;
 
   /// 手环设备与孩子的绑定状态
@@ -412,6 +414,70 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
     if (chosen == null || !mounted) return;
     _applyStressThreshold(chosen);
+  }
+
+  /// 菜单里的手环测试：暂停心率接收 → 红屏震 3 次 → 绿屏震 3 次 → 恢复心率。
+  Future<void> _runBandVibrationColorTest() async {
+    if (_bandVibrationTestRunning) return;
+    final status = _miBandService.status.value;
+    if (!status.isConnected) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先连接小米手环，再运行测试。')),
+      );
+      return;
+    }
+
+    setState(() {
+      _bandVibrationTestRunning = true;
+      _bandVibrationTestColor = null;
+    });
+
+    var paused = false;
+    try {
+      paused = await _miBandService.pauseHeartRateReceptionForTest();
+      if (!paused && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法暂停心率接收，测试已取消。')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() => _bandVibrationTestColor = const Color(0xFFE84B4B));
+      final redOk = await _miBandService.vibrateBandForTest(times: 3);
+      if (!redOk) {
+        throw StateError('手环未开放标准震动通道，无法触发震动。');
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      setState(() => _bandVibrationTestColor = const Color(0xFF47B276));
+      final greenOk = await _miBandService.vibrateBandForTest(times: 3);
+      if (!greenOk) {
+        throw StateError('第二轮震动失败，请确认手环仍在附近并保持连接。');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('手环震动与红绿屏测试完成，已恢复心率接收。')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('手环测试失败：$e')));
+      }
+    } finally {
+      if (paused) {
+        await _miBandService.resumeHeartRateReceptionAfterTest();
+      }
+      if (mounted) {
+        setState(() {
+          _bandVibrationTestRunning = false;
+          _bandVibrationTestColor = null;
+        });
+      }
+    }
   }
 
   /// 手环 BLE notify 一到就直接刷新 UI 和趋势图。
@@ -2082,6 +2148,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   @override
   Widget build(BuildContext context) {
     final isAlertMode = isAlerting && !isDismissed;
+    final bandTestColor = _bandVibrationTestColor;
 
     return Scaffold(
       appBar: AppBar(
@@ -2102,7 +2169,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           preferredSize: const Size.fromHeight(1),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 400),
-            color: isAlertMode ? const Color(0xFFF3C9BE) : _warmBorder,
+            color: bandTestColor != null
+                ? bandTestColor.withValues(alpha: 0.75)
+                : isAlertMode
+                    ? const Color(0xFFF3C9BE)
+                    : _warmBorder,
             height: 1,
           ),
         ),
@@ -2119,6 +2190,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'band_bind') await _bindCurrentDevice();
               if (v == 'band_unbind') await _unbindCurrentDevice();
               if (v == 'stress_threshold') await _showStressThresholdDialog();
+              if (v == 'band_vibration_test') await _runBandVibrationColorTest();
               if (v == 'esp_prov') await _openEspProvisionPage();
               if (v == 'esp_reset') await _resetEsp32Provisioning();
               if (v == 'xiaozhi_prov') await _openXiaozhiProvisionPage();
@@ -2153,6 +2225,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuItem(
                 value: 'stress_threshold',
                 child: Text('设置压力报警阈值'),
+              ),
+              PopupMenuItem(
+                value: 'band_vibration_test',
+                enabled: !_bandVibrationTestRunning,
+                child: const Text('测试手环震动/红绿屏'),
               ),
               const PopupMenuDivider(),
               const PopupMenuItem(
@@ -2233,9 +2310,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: isAlertMode
-                ? const [Color(0xFFFFF2ED), Color(0xFFFBF7F1)]
-                : const [Color(0xFFFBF7F1), Color(0xFFF4EFE6)],
+            colors: bandTestColor != null
+                ? [
+                    bandTestColor.withValues(alpha: 0.92),
+                    bandTestColor.withValues(alpha: 0.68),
+                  ]
+                : isAlertMode
+                    ? const [Color(0xFFFFF2ED), Color(0xFFFBF7F1)]
+                    : const [Color(0xFFFBF7F1), Color(0xFFF4EFE6)],
           ),
         ),
         child: SafeArea(

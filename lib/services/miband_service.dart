@@ -150,6 +150,10 @@ class MiBand6Auth {
   static const String heartRateServiceUuid = '180d';
   static const String heartRateCharUuid = '2a37';
 
+  /// 标准 Immediate Alert Service / Alert Level，用于触发手环短震。
+  static const String immediateAlertServiceUuid = '1802';
+  static const String alertLevelCharUuid = '2a06';
+
   /// 小米手环 6 私有鉴权服务 / 特征值
   static const String miAuthServiceShort = 'fee1';
   static const String miAuthCharUuid = '00000009-0000-1000-8000-00805f9b34fb';
@@ -167,6 +171,7 @@ class MiBand6Auth {
 
   BluetoothDevice? _device;
   BluetoothCharacteristic? _hrChar;
+  BluetoothCharacteristic? _alertChar;
   BluetoothCharacteristic? _stressChar;
   StreamSubscription<List<int>>? _hrSub;
   StreamSubscription<List<int>>? _stressSub;
@@ -192,6 +197,7 @@ class MiBand6Auth {
 
   bool _streaming = false;
   bool _authenticated = false;
+  bool _heartRateReceptionPaused = false;
 
   /// UI 可观察的连接状态。
   final ValueNotifier<MiBandStatus> status =
@@ -376,16 +382,25 @@ class MiBand6Auth {
 
     // 2. 标准 BLE 心率订阅
     BluetoothCharacteristic? hrChar;
+    BluetoothCharacteristic? alertChar;
     for (final s in services) {
-      if (s.uuid.str.toLowerCase() == heartRateServiceUuid) {
+      if (_uuidMatches(s.uuid.str, immediateAlertServiceUuid)) {
         for (final c in s.characteristics) {
-          if (c.uuid.str.toLowerCase() == heartRateCharUuid) {
+          if (_uuidMatches(c.uuid.str, alertLevelCharUuid)) {
+            alertChar = c;
+            break;
+          }
+        }
+      }
+      if (_uuidMatches(s.uuid.str, heartRateServiceUuid)) {
+        for (final c in s.characteristics) {
+          if (_uuidMatches(c.uuid.str, heartRateCharUuid)) {
             hrChar = c;
             break;
           }
         }
       }
-      if (hrChar != null) break;
+      if (hrChar != null && alertChar != null) break;
     }
     if (hrChar == null) {
       _setStage(
@@ -396,6 +411,7 @@ class MiBand6Auth {
     }
 
     _hrChar = hrChar;
+    _alertChar = alertChar;
     final subscribed = await _subscribeHeartRate();
     if (!subscribed) return;
     await _trySubscribeStress(services);
@@ -462,6 +478,7 @@ class MiBand6Auth {
     unawaited(_authSub?.cancel());
     _authSub = null;
     _hrChar = null;
+    _alertChar = null;
     _authChar = null;
     _stressChar = null;
     _setStage(
@@ -640,6 +657,7 @@ class MiBand6Auth {
     final ch = _hrChar;
     if (ch == null) return false;
     try {
+      _heartRateReceptionPaused = false;
       await ch.setNotifyValue(true);
       await _hrSub?.cancel();
       _hrSub = ch.lastValueStream.listen(_onNotify);
@@ -659,6 +677,84 @@ class MiBand6Auth {
       }
       return false;
     }
+  }
+
+  /// 暂停接收心率 notify，用于 BLE 测试流程中避免心率 UI/云端上报干扰。
+  Future<bool> pauseHeartRateReceptionForTest() async {
+    final ch = _hrChar;
+    if (ch == null) return false;
+    _heartRateReceptionPaused = true;
+    _noBroadcastTimer?.cancel();
+    _noBroadcastTimer = null;
+    await _hrSub?.cancel();
+    _hrSub = null;
+    try {
+      await ch.setNotifyValue(false);
+    } catch (e) {
+      debugPrint('MiBand6Auth: pause HR notify failed -> $e');
+    }
+    _streaming = false;
+    _setStage(MiBandStage.hrSubscribed, message: '已暂停接收心率，正在进行手环测试…');
+    return true;
+  }
+
+  /// 恢复心率 notify 与上传定时器。
+  Future<bool> resumeHeartRateReceptionAfterTest() async {
+    final ok = await _subscribeHeartRate();
+    if (!ok) return false;
+    _ensureUploadTimer();
+    _armNoBroadcastTimer();
+    return true;
+  }
+
+  /// 通过标准 Immediate Alert Service 触发手环短震若干次。
+  Future<bool> vibrateBandForTest({
+    int times = 3,
+    Duration on = const Duration(milliseconds: 650),
+    Duration off = const Duration(milliseconds: 350),
+  }) async {
+    final ch = await _ensureAlertCharacteristic();
+    if (ch == null) {
+      debugPrint('MiBand6Auth: Immediate Alert characteristic not found.');
+      return false;
+    }
+    try {
+      for (var i = 0; i < times; i++) {
+        await ch.write(<int>[0x02], withoutResponse: false);
+        await Future<void>.delayed(on);
+        await ch.write(<int>[0x00], withoutResponse: false);
+        if (i < times - 1) {
+          await Future<void>.delayed(off);
+        }
+      }
+      return true;
+    } catch (e) {
+      debugPrint('MiBand6Auth: test vibration failed -> $e');
+      return false;
+    } finally {
+      try {
+        await ch.write(<int>[0x00], withoutResponse: false);
+      } catch (_) {}
+    }
+  }
+
+  Future<BluetoothCharacteristic?> _ensureAlertCharacteristic() async {
+    final existing = _alertChar;
+    if (existing != null) return existing;
+    final dev = _device;
+    if (dev == null || !dev.isConnected) return null;
+    final services = await dev.discoverServices();
+    for (final s in services) {
+      if (!_uuidMatches(s.uuid.str, immediateAlertServiceUuid)) continue;
+      for (final c in s.characteristics) {
+        if (_uuidMatches(c.uuid.str, alertLevelCharUuid) &&
+            (c.properties.write || c.properties.writeWithoutResponse)) {
+          _alertChar = c;
+          return c;
+        }
+      }
+    }
+    return null;
   }
 
   Future<void> _trySubscribeStress(List<BluetoothService> services) async {
@@ -952,6 +1048,7 @@ class MiBand6Auth {
   }
 
   void _onNotify(List<int> value) {
+    if (_heartRateReceptionPaused) return;
     if (value.isEmpty) return;
     final flag = value[0];
     int bpm = 0;
@@ -1038,6 +1135,7 @@ class MiBand6Auth {
     await _connStateSub?.cancel();
     _connStateSub = null;
     _hrChar = null;
+    _alertChar = null;
     _authChar = null;
     _stressChar = null;
     _authCompleter = null;
@@ -1050,6 +1148,7 @@ class MiBand6Auth {
     _device = null;
     _streaming = false;
     _authenticated = false;
+    _heartRateReceptionPaused = false;
     _buffer.clear();
     if (!keepStatus) {
       _setStage(MiBandStage.disconnected, message: '已断开手环连接');

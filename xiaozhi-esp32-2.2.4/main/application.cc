@@ -24,27 +24,34 @@
 
 #define TAG "Application"
 
+static constexpr const char* kXiaoxingxingWakeOpeningLine =
+    "你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。";
+
 // 进入 Listening 后头多少 ms 的 VAD 抖动忽略（避免上一段 TTS 残音/开 mic 时
 // 的杂音被误识别为孩子说话）。设小一点，否则孩子立刻回答会被这段忽略期吞掉。
 static constexpr int64_t kAutoStopIgnoreInitialVadMs = 300;
-// 至少说够多少 ms 才算"说过话"。孩子刚接话时保留短句灵敏度；如果已经安静
-// 很久才突然冒出一小段 VAD，更可能是环境噪声/播放残响，需要更长片段才提交。
-static constexpr int64_t kAutoStopMinSpeechMs = 650;
-static constexpr int64_t kAutoStopMinSpeechAfterLongQuietMs = 1100;
+// 至少说够多少 ms 才算"说过话"。孩子回答常是很短的「嗯」「会呀」
+// 一类片段，阈值不能过高，否则会一直卡在 Listening 等下一段 VAD。
+static constexpr int64_t kAutoStopMinSpeechMs = 450;
+static constexpr int64_t kAutoStopMinSpeechAfterLongQuietMs = 700;
 static constexpr int64_t kAutoStopLongQuietMs = 15000;
 // 前几秒里的极短 VAD 片段多半是残留播放声/环境噪声，不立刻提交，避免越聊
 // ASR 越碎。
-static constexpr int64_t kAutoStopEarlySpeechMs = 900;
+static constexpr int64_t kAutoStopEarlySpeechMs = 450;
 static constexpr int64_t kAutoStopAllowShortSpeechAfterMs = 7000;
 // Listening 总时长不到这么久不允许 endpoint。
 static constexpr int64_t kAutoStopMinListenMs = 800;
 // 孩子停顿多久算讲完一句 → 触发 listen stop / ASR / 回复。等待越久才出现的人声，
 // 句尾静音也等越久，避免"没人说话但噪声触发一轮回复"。
-static constexpr int64_t kAutoStopBaseSilenceMs = 1200;
-static constexpr int64_t kAutoStopMaxSilenceMs = 4200;
-static constexpr int64_t kAutoStopSilenceGrowthDivisor = 8;
+static constexpr int64_t kAutoStopBaseSilenceMs = 1000;
+static constexpr int64_t kAutoStopMaxSilenceMs = 2200;
+static constexpr int64_t kAutoStopSilenceGrowthDivisor = 16;
 // 兜底：如果 VAD 已经看到过说话但一直没稳定 endpoint，到这个时长强制提交。
 static constexpr int64_t kAutoStopMaxUtteranceMs = 15000;
+// 如果 VAD 多次只抓到短片段，也要提交给 ASR；否则孩子断续说话会被当作噪声，
+// 直到 60s 空闲休眠，看起来像机器人卡死。
+static constexpr int64_t kAutoStopForceShortFragmentsAfterMs = 8000;
+static constexpr int64_t kAutoStopForceShortFragmentsSpeechMs = 700;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
 static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
 
@@ -1100,7 +1107,10 @@ void Application::HandleWakeWordDetectedEvent() {
 
     if (state == kDeviceStateIdle) {
         audio_service_.EncodeWakeWord();
-        auto wake_word = audio_service_.GetLastWakeWord();
+        // Treat any built-in local wake-word hit as the child calling
+        // "你好小星星", then start the same server-side flow as the Flutter
+        // "wake Star" button.
+        std::string wake_word = kXiaoxingxingWakeOpeningLine;
 
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
@@ -1230,7 +1240,7 @@ void Application::RefreshKidsDisplay() {
                     static const char* const kListeningLines[] = {
                         "我在听，慢慢说",
                         "不用急，我会等你",
-                        "想结束就说“睡觉吧”"
+                        "想休息就说“休息吧，小星星”"
                     };
                     center = PickKidsStatusLine(kListeningLines,
                                                 sizeof(kListeningLines) / sizeof(kListeningLines[0]));
@@ -1242,7 +1252,7 @@ void Application::RefreshKidsDisplay() {
                     static const char* const kSpeakingLines[] = {
                         "我慢慢说完这一句",
                         "一边想，一边陪你",
-                        "等我停下后，说“别说了”"
+                        "想停下来就说“休息吧，小星星”"
                     };
                     center = PickKidsStatusLine(kSpeakingLines,
                                                 sizeof(kSpeakingLines) / sizeof(kSpeakingLines[0]));
@@ -1329,6 +1339,8 @@ void Application::HandleStateChangedEvent() {
             auto_stop_voice_quiet_before_ms_ = 0;
             auto_stop_endpoint_delay_ms_ = kAutoStopBaseSilenceMs;
             auto_stop_endpoint_timer_armed_ = false;
+            auto_stop_short_speech_total_ms_ = 0;
+            auto_stop_short_speech_count_ = 0;
             // Cancel any leftover endpoint timer from a previous turn.
             if (endpoint_timer_handle_ != nullptr) {
                 esp_timer_stop(endpoint_timer_handle_);
@@ -1406,22 +1418,8 @@ void Application::Schedule(std::function<void()>&& callback) {
 }
 
 bool Application::IsSessionStopCommand(const std::string& text) const {
-    // 只把明确的"结束对话/别说了"当作停止会话。不能用子串宽松匹配
-    // "休息" 这类词，否则"怎么休息呢？拍皮球吗？"会被误判成 stop command。
-    static const char* kExactStopCommands[] = {
-        "终止", "停止", "停下", "结束", "暂停", "别说", "不要说", "不聊了", "先这样",
-        "终止对话", "停止对话", "结束对话", "暂停对话", "别说了", "不要说了",
-        "别讲了", "不要讲了", "停一下", "先停一下", "安静一下", "闭嘴",
-        "先不聊了", "今天先这样", "就这样吧", "可以了", "不用说了", "够了",
-        "休眠", "进入休眠", "进入休眠模式", "进入省电模式", "进入休眠省电模式",
-        "休眠省电", "休眠省电模式", "睡觉吧"
-    };
-    static const char* kStrongStopPhrases[] = {
-        "停止对话", "结束对话", "暂停对话", "终止对话", "别说了", "不要说了",
-        "别讲了", "不要讲了", "停一下", "先停一下", "安静一下",
-        "不想聊了", "先不聊了", "今天先这样", "就这样吧", "不用说了",
-        "进入休眠", "进入省电模式", "进入休眠省电模式"
-    };
+    // 只保留唯一休眠口令。不要把"休息"这类泛词当成停止，否则
+    // "我想休息一下再写作业"会误触发。
     std::string normalized = text;
     const char* puncts[] = {" ", "\t", "\r", "\n", "。", "，", "！", "？", "!", "?", ",", ".", "～", "~"};
     for (const auto* p : puncts) {
@@ -1430,17 +1428,7 @@ bool Application::IsSessionStopCommand(const std::string& text) const {
             normalized.erase(pos, strlen(p));
         }
     }
-    for (const auto* cmd : kExactStopCommands) {
-        if (normalized == cmd) {
-            return true;
-        }
-    }
-    for (const auto* phrase : kStrongStopPhrases) {
-        if (text.find(phrase) != std::string::npos) {
-            return true;
-        }
-    }
-    return false;
+    return normalized == "休息吧小星星";
 }
 
 void Application::TerminateCurrentSession(const char* reason, bool notify_server) {
@@ -1451,6 +1439,8 @@ void Application::TerminateCurrentSession(const char* reason, bool notify_server
     auto_stop_voice_quiet_before_ms_ = 0;
     auto_stop_endpoint_delay_ms_ = kAutoStopBaseSilenceMs;
     auto_stop_endpoint_timer_armed_ = false;
+    auto_stop_short_speech_total_ms_ = 0;
+    auto_stop_short_speech_count_ = 0;
     if (endpoint_timer_handle_ != nullptr) {
         esp_timer_stop(endpoint_timer_handle_);
     }
@@ -1531,6 +1521,23 @@ void Application::OnEndpointTimer() {
         : kAutoStopBaseSilenceMs;
     if (speech_ms < kAutoStopEarlySpeechMs &&
         listening_ms < kAutoStopAllowShortSpeechAfterMs) {
+        auto_stop_short_speech_total_ms_ += speech_ms > 0 ? speech_ms : 0;
+        auto_stop_short_speech_count_++;
+        if (listening_ms >= kAutoStopForceShortFragmentsAfterMs &&
+            auto_stop_short_speech_total_ms_ >= kAutoStopForceShortFragmentsSpeechMs &&
+            protocol_->IsAudioChannelOpened()) {
+            ESP_LOGI(TAG, "Auto-stop (short fragments): count=%d total=%lldms listen=%lldms",
+                     auto_stop_short_speech_count_, auto_stop_short_speech_total_ms_,
+                     listening_ms);
+            auto_stop_voice_seen_ = false;
+            auto_stop_silence_started_ms_ = 0;
+            auto_stop_voice_quiet_before_ms_ = 0;
+            auto_stop_short_speech_total_ms_ = 0;
+            auto_stop_short_speech_count_ = 0;
+            protocol_->SendStopListening();
+            SetDeviceState(kDeviceStateIdle);
+            return;
+        }
         ESP_LOGI(TAG, "Endpoint timer: ignore short early speech (speech=%lld listen=%lld)",
                  speech_ms, listening_ms);
         auto_stop_voice_seen_ = false;
@@ -1541,6 +1548,23 @@ void Application::OnEndpointTimer() {
     if (silence_ms < required_silence_ms ||
         speech_ms < required_speech_ms ||
         listening_ms < kAutoStopMinListenMs) {
+        auto_stop_short_speech_total_ms_ += speech_ms > 0 ? speech_ms : 0;
+        auto_stop_short_speech_count_++;
+        if (listening_ms >= kAutoStopForceShortFragmentsAfterMs &&
+            auto_stop_short_speech_total_ms_ >= kAutoStopForceShortFragmentsSpeechMs &&
+            protocol_->IsAudioChannelOpened()) {
+            ESP_LOGI(TAG, "Auto-stop (short fragments): count=%d total=%lldms listen=%lldms",
+                     auto_stop_short_speech_count_, auto_stop_short_speech_total_ms_,
+                     listening_ms);
+            auto_stop_voice_seen_ = false;
+            auto_stop_silence_started_ms_ = 0;
+            auto_stop_voice_quiet_before_ms_ = 0;
+            auto_stop_short_speech_total_ms_ = 0;
+            auto_stop_short_speech_count_ = 0;
+            protocol_->SendStopListening();
+            SetDeviceState(kDeviceStateIdle);
+            return;
+        }
         ESP_LOGI(TAG, "Endpoint timer: skip (silence=%lld/%lld speech=%lld/%lld listen=%lld quiet_before=%lld)",
                  silence_ms, required_silence_ms, speech_ms, required_speech_ms,
                  listening_ms, auto_stop_voice_quiet_before_ms_);
@@ -1554,6 +1578,8 @@ void Application::OnEndpointTimer() {
     auto_stop_voice_seen_ = false;
     auto_stop_silence_started_ms_ = 0;
     auto_stop_voice_quiet_before_ms_ = 0;
+    auto_stop_short_speech_total_ms_ = 0;
+    auto_stop_short_speech_count_ = 0;
     protocol_->SendStopListening();
     SetDeviceState(kDeviceStateIdle);
 }
