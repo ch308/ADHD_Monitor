@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:encrypt/encrypt.dart' as enc;
@@ -156,6 +157,12 @@ class MiBand6Auth {
   static const String immediateAlertServiceUuid = '1802';
   static const String alertLevelCharUuid = '2a06';
 
+  /// 标准 Alert Notification Service / Characteristic（来电、短信等通知）。
+  /// Mi Band 6 的「查找设备」实际走的是 NEW_ALERT(2A46) 写一条「来电」通知，
+  /// 然后写 ALERT_LEVEL(2A06)=0 停止；与小米运动健康内置「查找手环」一致。
+  static const String alertNotificationServiceUuid = '1811';
+  static const String newAlertCharUuid = '2a46';
+
   /// 小米手环 6 私有鉴权服务 / 特征值
   static const String miAuthServiceShort = 'fee1';
   static const String miAuthCharUuid = '00000009-0000-1000-8000-00805f9b34fb';
@@ -174,6 +181,7 @@ class MiBand6Auth {
   BluetoothDevice? _device;
   BluetoothCharacteristic? _hrChar;
   BluetoothCharacteristic? _alertChar;
+  BluetoothCharacteristic? _newAlertChar;
   BluetoothCharacteristic? _chunkedV3WriteChar;
   BluetoothCharacteristic? _chunkedV3ReadChar;
   int _chunkedV3Seq = 0;
@@ -412,11 +420,21 @@ class MiBand6Auth {
     // 2. 标准 BLE 心率订阅
     BluetoothCharacteristic? hrChar;
     BluetoothCharacteristic? alertChar;
+    BluetoothCharacteristic? newAlertChar;
     for (final s in services) {
       if (_uuidMatches(s.uuid.str, immediateAlertServiceUuid)) {
         for (final c in s.characteristics) {
           if (_uuidMatches(c.uuid.str, alertLevelCharUuid)) {
             alertChar = c;
+            break;
+          }
+        }
+      }
+      if (_uuidMatches(s.uuid.str, alertNotificationServiceUuid)) {
+        for (final c in s.characteristics) {
+          if (_uuidMatches(c.uuid.str, newAlertCharUuid) &&
+              (c.properties.write || c.properties.writeWithoutResponse)) {
+            newAlertChar = c;
             break;
           }
         }
@@ -429,7 +447,7 @@ class MiBand6Auth {
           }
         }
       }
-      if (hrChar != null && alertChar != null) break;
+      if (hrChar != null && alertChar != null && newAlertChar != null) break;
     }
     if (hrChar == null) {
       _setStage(
@@ -441,6 +459,7 @@ class MiBand6Auth {
 
     _hrChar = hrChar;
     _alertChar = alertChar;
+    _newAlertChar = newAlertChar;
     final subscribed = await _subscribeHeartRate();
     if (!subscribed) return;
     await _trySubscribeStress(services);
@@ -904,13 +923,14 @@ class MiBand6Auth {
 
   /// 触发"查找设备"震动若干次。
   ///
-  /// 优先走 Huami chunked-v3（端点 `0x000d`，负载 `[0x03,0x01]` / `[0x03,0x00]`），
-  /// 与小米运动健康「查找手环」一致。
+  /// 与 Gadgetbridge 的 `MiBand6Support.onFindDevice()` 同款做法：
+  /// **写一条「来电」通知到 `1811/2A46`**（payload =
+  /// `[Category=IncomingCall(3), numAlerts=1, utf8 message…]`）。
+  /// 这是小米手环 6 / 6 NFC 上唯一稳定起震的方式，因为它在固件里映射到
+  /// 「来电震动」马达流程；chunked `0x000d` 与 `1802/2A06` 都会「假成功」。
   ///
-  /// 不少 Mi Band 6 / 6 NFC 固件对 `0x000d` 写入成功但不震动；同时对
-  /// **标准 Immediate Alert（1802/2A06）** 的 `0x02` 也会「假成功」。
-  /// 社区逆向里 **`0x04`（振动、无 LED）** 在部分批次仍可触发马达，因此
-  /// 每次开/关震动都会 **双发**：先 `_pulseImmediateAlertLevel`，再 chunked。
+  /// 收尾时写 `[0x00]` 到 `1802/2A06`（ALERT_LEVEL_NONE）让来电立刻停。
+  /// chunked `0x000d` 仍保留兜底，便于 ZeppOS 等新固件场景。
   Future<bool> vibrateBandForTest({
     int times = 3,
     Duration on = const Duration(milliseconds: 650),
@@ -963,7 +983,8 @@ class MiBand6Auth {
     return true;
   }
 
-  /// 写蓝牙标准 Alert Level（2A06）。`0x04` 为小米系非扩展值，部分固件上比 `0x02` 更能真正触发马达。
+  /// 写蓝牙标准 Alert Level（2A06）。停止 Mi Band 6 来电震动用 `0x00`；
+  /// 极少数旧固件没装新协议时也试 `0x04 / 0x02`。
   Future<bool> _pulseImmediateAlertLevel(bool start) async {
     final ch = _alertChar ?? await _ensureAlertCharacteristic();
     if (ch == null) return false;
@@ -987,12 +1008,60 @@ class MiBand6Auth {
     }
   }
 
+  /// Mi Band 6「查找设备」核心：写一条 IncomingCall 通知到标准 NEW_ALERT(2A46)。
+  /// 与 Gadgetbridge 的 `AlertNotificationProfile.newAlert(IncomingCall)` 等价。
+  Future<bool> _pulseIncomingCallNotification(String name) async {
+    final ch = _newAlertChar ?? await _ensureNewAlertCharacteristic();
+    if (ch == null) return false;
+    final noResp =
+        ch.properties.writeWithoutResponse && !ch.properties.write;
+    final body = <int>[
+      0x03, // AlertCategory.IncomingCall
+      0x01, // numAlerts
+      ...utf8.encode(name),
+    ];
+    try {
+      await ch.write(body, withoutResponse: noResp);
+      return true;
+    } catch (e) {
+      debugPrint('MiBand6Auth: NEW_ALERT(2A46) write failed -> $e');
+      return false;
+    }
+  }
+
+  Future<BluetoothCharacteristic?> _ensureNewAlertCharacteristic() async {
+    final existing = _newAlertChar;
+    if (existing != null) return existing;
+    final dev = _device;
+    if (dev == null || !dev.isConnected) return null;
+    final services = await dev.discoverServices();
+    for (final s in services) {
+      if (!_uuidMatches(s.uuid.str, alertNotificationServiceUuid)) continue;
+      for (final c in s.characteristics) {
+        if (_uuidMatches(c.uuid.str, newAlertCharUuid) &&
+            (c.properties.write || c.properties.writeWithoutResponse)) {
+          _newAlertChar = c;
+          return c;
+        }
+      }
+    }
+    return null;
+  }
+
   Future<bool> _writeFindDevice(
       BluetoothCharacteristic ch, bool start) async {
-    // Huami chunked-v3 endpoint 0x000d (FIND_DEVICE):
-    //   payload[0] = 0x03 (subtype: vibration)
-    //   payload[1] = 0x01 / 0x00 (start / stop)
-    final pulseOk = await _pulseImmediateAlertLevel(start);
+    // 触发 / 停止「查找设备」三路并发尝试，命中任意一路就算成功：
+    //   1) 1811/2A46 写 IncomingCall 通知（Mi Band 6 主路径）
+    //   2) 1802/2A06 写 0x04/0x02（启动） / 0x00（停止）
+    //   3) FEE0/0x0016 chunked-v3 端点 0x000d（ZeppOS 兜底）
+    bool anyOk = false;
+    if (start) {
+      anyOk = await _pulseIncomingCallNotification('Alert') || anyOk;
+    } else {
+      // 收尾以 ALERT_LEVEL_NONE 停掉来电震动。
+      anyOk = await _pulseImmediateAlertLevel(false) || anyOk;
+    }
+
     final payload = <int>[0x03, start ? 0x01 : 0x00];
     try {
       final crypto = _huami2021Crypto;
@@ -1009,11 +1078,11 @@ class MiBand6Auth {
         );
         await ch.write(pkt, withoutResponse: ch.properties.writeWithoutResponse);
       }
-      return true;
+      anyOk = true;
     } catch (e) {
       debugPrint('MiBand6Auth: chunked-v3 write failed -> $e');
-      return pulseOk;
     }
+    return anyOk;
   }
 
   /// 单包 chunked-v3 数据包（payload <= MTU - 9）。
