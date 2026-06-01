@@ -1524,20 +1524,37 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         Uri.parse('http://${widget.serverIp}:11760/history'),
         headers: _apiHeaders(jsonBody: false),
       );
+      if (!mounted) return;
       if (response.statusCode == 200) {
-        List<dynamic> data = json.decode(response.body);
+        final decoded = json.decode(response.body);
+        if (decoded is! List) {
+          debugPrint('图表数据格式异常: history 不是数组');
+          return;
+        }
+        final data = decoded;
         final recentData =
             data.length > 20 ? data.sublist(data.length - 20) : data;
+        final safeTimestamps = <String>[];
+        final safeSpots = <FlSpot>[];
+        for (final entry in recentData) {
+          if (entry is! Map) {
+            debugPrint('图表数据格式异常: 单条记录不是对象，已跳过');
+            continue;
+          }
+          final bpmRaw = entry['bpm'];
+          final bpm = bpmRaw is num ? bpmRaw.toDouble() : null;
+          if (bpm == null) {
+            debugPrint('图表数据异常: bpm=$bpmRaw，已跳过');
+            continue;
+          }
+          safeTimestamps.add(entry['time']?.toString() ?? '');
+          safeSpots.add(FlSpot(safeSpots.length.toDouble(), bpm));
+        }
+        if (!mounted) return;
         setState(() {
           _chartLoadFailed = false;
-          chartTimestamps =
-              recentData.map((e) => e['time']?.toString() ?? '').toList();
-          chartData = recentData.asMap().entries.map((e) {
-            return FlSpot(
-              e.key.toDouble(),
-              (e.value['bpm'] as num).toDouble(),
-            );
-          }).toList();
+          chartTimestamps = safeTimestamps;
+          chartData = safeSpots;
         });
       }
     } catch (e) {
@@ -1555,6 +1572,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         Uri.parse('http://${widget.serverIp}:11760/webhook'),
         headers: _apiHeaders(jsonBody: false),
       );
+      if (!mounted) return;
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         double newBpm = data['bpm']?.toDouble() ?? 0;
@@ -1634,6 +1652,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => message = "连接云服务器失败");
     }
   }
