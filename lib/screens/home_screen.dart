@@ -734,7 +734,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('手环震动与红绿屏测试完成，已恢复心率接收。')),
+          const SnackBar(content: Text('手环震动与红绿屏测试完成，已断开连接，方便官方 App 重新连接。')),
         );
       }
     } catch (e) {
@@ -755,7 +755,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     } finally {
       if (paused) {
-        await _miBandService.resumeHeartRateReceptionAfterTest();
+        await _miBandService.disconnect();
       }
       if (mounted) {
         setState(() {

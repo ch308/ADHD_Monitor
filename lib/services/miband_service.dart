@@ -941,8 +941,7 @@ class MiBand6Auth {
     if (ch == null) {
       debugPrint(
           'MiBand6Auth: chunked-v3 write char (0x0016) not found, '
-          'falling back to standard Immediate Alert.');
-      return _legacyImmediateAlertVibrate(times: times, on: on, off: off);
+          'using NEW_ALERT/Immediate Alert only.');
     }
 
     bool anyOk = false;
@@ -973,8 +972,7 @@ class MiBand6Auth {
   }) async {
     final ch = await _ensureChunkedV3WriteChar();
     if (ch == null) {
-      debugPrint('MiBand6Auth: chunked-v3 write char not found.');
-      return false;
+      debugPrint('MiBand6Auth: chunked-v3 write char not found; using NEW_ALERT only.');
     }
     final startOk = await _writeFindDevice(ch, true);
     if (!startOk) return false;
@@ -1049,7 +1047,7 @@ class MiBand6Auth {
   }
 
   Future<bool> _writeFindDevice(
-      BluetoothCharacteristic ch, bool start) async {
+      BluetoothCharacteristic? ch, bool start) async {
     // 触发 / 停止「查找设备」三路并发尝试，命中任意一路就算成功：
     //   1) 1811/2A46 写 IncomingCall 通知（Mi Band 6 主路径）
     //   2) 1802/2A06 写 0x04/0x02（启动） / 0x00（停止）
@@ -1062,25 +1060,27 @@ class MiBand6Auth {
       anyOk = await _pulseImmediateAlertLevel(false) || anyOk;
     }
 
-    final payload = <int>[0x03, start ? 0x01 : 0x00];
-    try {
-      final crypto = _huami2021Crypto;
-      if (_authenticated && crypto != null && crypto.isReady) {
-        await _writeHuami2021Chunks(
-          endpoint: 0x000d,
-          payload: payload,
-          encrypted: true,
-        );
-      } else {
-        final pkt = _buildChunkedV3Packet(
-          endpoint: 0x000d,
-          payload: payload,
-        );
-        await ch.write(pkt, withoutResponse: ch.properties.writeWithoutResponse);
+    if (ch != null) {
+      final payload = <int>[0x03, start ? 0x01 : 0x00];
+      try {
+        final crypto = _huami2021Crypto;
+        if (_authenticated && crypto != null && crypto.isReady) {
+          await _writeHuami2021Chunks(
+            endpoint: 0x000d,
+            payload: payload,
+            encrypted: true,
+          );
+        } else {
+          final pkt = _buildChunkedV3Packet(
+            endpoint: 0x000d,
+            payload: payload,
+          );
+          await ch.write(pkt, withoutResponse: ch.properties.writeWithoutResponse);
+        }
+        anyOk = true;
+      } catch (e) {
+        debugPrint('MiBand6Auth: chunked-v3 write failed -> $e');
       }
-      anyOk = true;
-    } catch (e) {
-      debugPrint('MiBand6Auth: chunked-v3 write failed -> $e');
     }
     return anyOk;
   }
@@ -1631,6 +1631,7 @@ class MiBand6Auth {
     _connStateSub = null;
     _hrChar = null;
     _alertChar = null;
+    _newAlertChar = null;
     _chunkedV3WriteChar = null;
     _chunkedV3ReadChar = null;
     _chunkedV3Seq = 0;
