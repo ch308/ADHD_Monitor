@@ -1663,10 +1663,34 @@ class MiBand6Auth {
     return normalized == expected || normalized.startsWith('0000$expected-');
   }
 
+  /// Mi Band 6 / 6 NFC / 7 / Huami 系列常见 OUI（MAC 前 3 字节，无冒号大写）。
+  /// 厂家广播名常常为空（尤其在低耗模式或刚断开后），仅靠名字易漏；
+  /// 用 OUI 兜底比 `id.contains('MI')` 准确得多。
+  static const Set<String> _knownXiaomiHuamiOuis = <String>{
+    'C8B021', 'EA3B1F', 'D5FB3E', 'F4980F', 'C45BBE', 'D58E7A',
+    'E0CA3C', 'F8AE8F', 'F0846E', 'F4F95B', 'D40C4A', 'C09F05',
+    '885A92', '2C415A',
+  };
+
   bool _looksLikeMiBand(BluetoothDevice d) {
-    final name = d.platformName;
+    final name = d.platformName.toLowerCase();
+    final keyword = deviceNameKeyword.toLowerCase();
+    if (name.contains(keyword) ||
+        name.contains('mi band') ||
+        name.contains('mi smart band') ||
+        name.contains('xiaomi smart band') ||
+        name.contains('redmi') ||
+        name.contains('amazfit')) {
+      return true;
+    }
     final id = d.remoteId.str.toUpperCase();
-    return name.contains(deviceNameKeyword) || id.contains(remoteIdKeyword);
+    if (id.contains(remoteIdKeyword.toUpperCase())) return true;
+    final ouis = id.replaceAll(':', '');
+    if (ouis.length >= 6 &&
+        _knownXiaomiHuamiOuis.contains(ouis.substring(0, 6))) {
+      return true;
+    }
+    return false;
   }
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;

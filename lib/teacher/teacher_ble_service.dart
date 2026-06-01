@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -70,6 +71,52 @@ class TeacherBleService {
         (statuses[Permission.bluetoothConnect]?.isGranted ?? true);
   }
 
+  /// Mi Band 6 / 6 NFC / 7 等 Huami 系列常见 OUI（MAC 前 3 字节，去掉冒号大写）。
+  /// 实际广播名经常是空，名称匹配会漏；用 OUI 兜底比 `contains('MI')` 可靠。
+  static const Set<String> _xiaomiHuamiOuis = <String>{
+    'C8B021', // Mi Band 6 / 6 NFC（含日志中的 C8:B0:21）
+    'EA3B1F',
+    'D5FB3E',
+    'F4980F', // Huami
+    'C45BBE',
+    'D58E7A',
+    'E0CA3C',
+    'F8AE8F',
+    'F0846E',
+    'F4F95B',
+    'D40C4A',
+    'C09F05',
+    '885A92',
+    '2C415A',
+  };
+
+  static bool _looksLikeMiBandResult(ScanResult r, String nameHint) {
+    final name = r.device.platformName.trim();
+    final lower = name.toLowerCase();
+    if (lower.contains(nameHint.toLowerCase()) ||
+        lower.contains('mi band') ||
+        lower.contains('mi smart band') ||
+        lower.contains('xiaomi smart band') ||
+        lower.contains('redmi') ||
+        lower.contains('amazfit')) {
+      return true;
+    }
+    final ouis = r.device.remoteId.str.replaceAll(':', '').toUpperCase();
+    if (ouis.length >= 6 && _xiaomiHuamiOuis.contains(ouis.substring(0, 6))) {
+      return true;
+    }
+    final advertisedServices = <String>{
+      ...r.advertisementData.serviceUuids.map((g) => g.str.toLowerCase()),
+    };
+    final hasMiService = advertisedServices.any((u) =>
+        u == 'fee0' || u == 'fee1' ||
+        u.startsWith('0000fee0-') || u.startsWith('0000fee1-'));
+    if (hasMiService) return true;
+    // 0x0157 = Anhui Huami（Mi Band 厂商 ID）
+    if (r.advertisementData.manufacturerData.containsKey(0x0157)) return true;
+    return false;
+  }
+
   Future<List<TeacherBandScanResult>> scanMiBand6({
     Duration timeout = const Duration(seconds: 10),
   }) async {
@@ -77,27 +124,77 @@ class TeacherBleService {
     if (!allowed) return const <TeacherBandScanResult>[];
 
     final results = <String, TeacherBandScanResult>{};
-    final subscription = FlutterBluePlus.scanResults.listen((items) {
-      for (final item in items) {
-        final name = item.device.platformName.trim();
-        final remoteId = item.device.remoteId.str;
-        final matchesName = name.contains(deviceNameKeyword);
-        final matchesRemoteId = remoteId.toUpperCase().contains('MI');
-        if (!matchesName && !matchesRemoteId) continue;
 
-        results[remoteId] = TeacherBandScanResult(
+    void addResult(BluetoothDevice device, {int rssi = -127}) {
+      final name = device.platformName.trim();
+      final remoteId = device.remoteId.str;
+      results.putIfAbsent(
+        remoteId,
+        () => TeacherBandScanResult(
           remoteId: remoteId,
           name: name.isEmpty ? '小米手环 6' : name,
-          rssi: item.rssi,
-        );
+          rssi: rssi,
+        ),
+      );
+    }
+
+    // 1) 已连接 / 系统配对里就有手环（带 180D 心率服务）→ 直接展示，不必等广播。
+    try {
+      for (final d in FlutterBluePlus.connectedDevices) {
+        addResult(d, rssi: 0);
+      }
+    } catch (_) {}
+    try {
+      final sys = await FlutterBluePlus.systemDevices(<Guid>[
+        Guid(MiBand6Auth.heartRateServiceUuid),
+      ]);
+      for (final d in sys) {
+        addResult(d, rssi: 0);
+      }
+    } catch (_) {}
+
+    final subscription = FlutterBluePlus.scanResults.listen((items) {
+      for (final item in items) {
+        if (!_looksLikeMiBandResult(item, deviceNameKeyword)) continue;
+        final remoteId = item.device.remoteId.str;
+        final name = item.device.platformName.trim();
+        final prev = results[remoteId];
+        if (prev == null || item.rssi > prev.rssi) {
+          results[remoteId] = TeacherBandScanResult(
+            remoteId: remoteId,
+            name: name.isEmpty ? (prev?.name ?? '小米手环 6') : name,
+            rssi: item.rssi,
+          );
+        }
       }
     });
 
     try {
-      await FlutterBluePlus.startScan(timeout: timeout);
-      await Future<void>.delayed(timeout);
+      try {
+        await FlutterBluePlus.stopScan();
+      } catch (_) {}
+      // 用 fee0 在系统层做一次精准过滤，命中率最高（Mi Band 一定广播 fee0）。
+      try {
+        await FlutterBluePlus.startScan(
+          timeout: timeout,
+          withServices: <Guid>[Guid('fee0')],
+        );
+        await Future<void>.delayed(timeout);
+      } catch (e) {
+        debugPrint('TeacherBleService: filtered scan failed, fallback -> $e');
+      }
+      // 有的 OEM ROM（如华为 EMUI）对 withServices 不一定准，再做一次开放扫描兜底。
+      if (results.isEmpty) {
+        try {
+          await FlutterBluePlus.stopScan();
+        } catch (_) {}
+        await FlutterBluePlus.startScan(timeout: timeout);
+        await Future<void>.delayed(timeout);
+      }
     } finally {
-      await FlutterBluePlus.stopScan();
+      try {
+        await FlutterBluePlus.stopScan();
+      } catch (_) {}
       await subscription.cancel();
     }
 
