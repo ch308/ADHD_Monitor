@@ -35,19 +35,19 @@
 **Character lock（英文，即梦 / 国际站可混用）**  
 `Same character throughout: East Asian boy, 9-10 years old, grade 3, neat short black hair with light bangs, warm skin, dark brown eyes, white crew-neck T-shirt with a fixed cute side-view green cartoon dinosaur print on chest, dark blue sweatpants, a slim smart band on LEFT wrist (dark strap), holds pencil in RIGHT hand, photorealistic, cinematic natural light, consistent proportions.`
 
-### 父母（中年人，略带倦意）
+### 父母（年轻父母，略带倦意）
 
 | 人物 | 详细描述 |
 | --- | --- |
-| **父亲** | **东亚男性**，约 **36～42 岁**；身高中等，体态 **标准或略久坐型**（二选一，全片一致）。发型 **短侧分或平短**，**黑发整齐、无白发**；眉略浓，**面部干净平滑**，**不做细纹、不做胡茬强调**；仅保留 **眼下轻微疲惫、淡黑眼圈**（像加班后的倦，**非衰老妆**）。家居穿着固定为 **灰或藏青纯棉圆领 T 恤 / 薄长袖**，下着 **深色家居长裤**。看手机时 **肩略耸、拇指滑动**，表情从放松 → 关切。 |
-| **母亲** | **东亚女性**，约 **36～42 岁**；**中短发齐肩**或 **低马尾**（二选一固定）；肤色自然偏暖，**淡妆或无妆**，**眼下轻微疲惫**与父亲呼应，**无夸张衰老妆**。上衣固定为 **米白、浅灰或淡蓝** 棉质家居衫；下着 **深色家居裤**。看手机时身体 **微前倾**，可与父亲 **对视一眼**。 |
-| **共同** | 二人气质 **克制、生活化**，像「下班晚饭后仍在操心孩子的家长」；首饰仅 **素圈婚戒** 或小耳钉即可，避免大logo抢戏。卧室场景光线 **暖黄小台灯**，与书桌冷白台灯形成 **空间区隔**（孩子房 vs 父母房）。 |
+| **父亲** | **东亚男性**，约 **32～34 岁**；身高中等，体态 **标准偏修长**，无明显久坐体型。发型 **短侧分或平短**，**黑发有光泽、无白发**；眉形自然不浓，**面部年轻饱满**，**无法令纹、无细纹、不做胡茬强调**；肤色健康偏暖，仅保留 **眼下极轻疲惫感**（像带孩子操劳的年轻爸爸，**绝非衰老妆**）。家居穿着固定为 **灰或藏青纯棉圆领 T 恤 / 薄长袖**，下着 **深色家居长裤**。看手机时 **肩略耸、拇指滑动**，表情从放松 → 关切。 |
+| **母亲** | **东亚女性**，约 **30～33 岁**；**中短发齐肩**或 **低马尾**（二选一固定）；肤色自然偏暖、有弹性，**淡妆或无妆**，面部线条 **年轻流畅**，**无细纹、无眼纹**；仅眼下 **极轻阴影**与父亲呼应，**无任何衰老妆**。上衣固定为 **米白、浅灰或淡蓝** 棉质家居衫；下着 **深色家居裤**。看手机时身体 **微前倾**，可与父亲 **对视一眼**。 |
+| **共同** | 二人气质 **年轻、温暖、生活化**，像「刚把孩子哄睡后还在牵挂的年轻父母」；面部整体 **饱满有光泽**，疲惫感来自眼神与姿态而非皮肤刻画；首饰仅 **素圈婚戒** 或小耳钉即可，避免大 logo 抢戏。卧室场景光线 **暖黄小台灯**，与书桌冷白台灯形成 **空间区隔**（孩子房 vs 父母房）。 |
 
 **人物锁定（父母，中文）**  
-`同一对夫妇：东亚中年父母，面色温和，父亲黑发短侧分、面部年轻干净、藏青家居T恤，仅眼下轻微倦意；母亲齐肩黑发、米色家居上衣；卧室暖台灯下看手机，写实，无夸张衰老妆。`
+`同一对年轻夫妇：东亚父母，父亲约32岁、黑发短侧分、面部年轻饱满无法令纹无细纹、藏青家居T恤，仅眼下极轻倦意；母亲约31岁、齐肩黑发、面部光滑有弹性、米色家居上衣；卧室暖台灯下看手机，写实，无任何衰老妆。`
 
 **Character lock（父母，英文）**  
-`Same couple throughout: East Asian parents mid-late 30s, gentle faces with mild tired under-eyes only, not haggard; father short neat black hair, smooth youthful skin, no gray hair, no emphasized wrinkles or stubble, navy casual tee; mother shoulder-length black hair, cream knit top; warm bedroom lamp, soft cinematic realism, natural skin texture, no aging makeup.`
+`Same couple throughout: East Asian young parents early 30s, youthful smooth faces, no wrinkles, no fine lines, no aging features; father short neat black hair with natural sheen, healthy warm skin, no gray, no stubble emphasis, only very subtle under-eye softness, navy casual tee; mother shoulder-length black hair, plump smooth skin, cream knit top; warm bedroom lamp, soft cinematic realism, natural skin texture, absolutely no aging makeup.`
 
 ### 定妆图建议产出清单
 
@@ -157,13 +157,13 @@
 | **风格锚点** | **卧室私密、暖、轻倦意与关切并存**；与《人物设定》父母定妆 **同一睡衣与发型分区**。 |
 | **场景与环境** | **隔壁卧室**：床头 **暖黄小台灯**，被单 **亚麻色或浅灰**；床头柜 **水杯半满**、书一本倒扣；手机在 **父亲或母亲掌心**（与分镜 storyboard 一致谁主握）。 |
 | **人物与动作** | **并排靠坐** 或 **一坐一半躺**；先 **各自看手机** → 震动后 **同时抬眼** → **对视半秒** → 母亲 **指尖在屏上滑一下** 确认通知详情。 |
-| **面部特写（父亲）** | **中近景**：**眼下淡黑眼圈** 在暖灯下 **不脏**（倦意来自作息，不靠皱纹刻画）；**眉** 从放松到 **略抬**；**眼** 瞳孔 **微微放大** 读屏；**面颊与法令区域保持平滑干净**，**不加深法令纹、不强调胡茬**；**嘴** 从微张读字到 **抿成一条** 表示「嗯，得看看」。 |
-| **面部特写（母亲）** | **中近景**：**眉心轻蹙** 一瞬即松；**眼** 先看屏再看配偶，**眼角软下来**；**嘴角** 先 **下撇 1mm（担心）** 再 **略上扬成安慰式**（对配偶而非笑场）；**颊** 暖光下 **略红** 可来自台灯反射而非腮红。 |
+| **面部特写（父亲）** | **中近景**：面部 **年轻饱满**，暖台灯下 **皮肤有光泽**；**眼下仅极轻阴影**，不做眼圈强调（倦意来自眼神与肩姿，不靠皮肤刻画）；**眉** 从放松到 **略抬**；**眼** 瞳孔 **微微放大** 读屏；**面颊与鼻周区域平滑无纹**，**无法令纹、无细纹、不强调胡茬**；**嘴** 从微张读字到 **抿成一条** 表示「嗯，得看看」。 |
+| **面部特写（母亲）** | **中近景**：面部 **光滑有弹性**，暖台灯映出 **年轻饱满的颧骨弧线**；**眉心轻蹙** 一瞬即松；**眼** 先看屏再看配偶，**眼角柔和下来**，无眼纹；**嘴角** 先 **下撇 1mm（担心）** 再 **略上扬成安慰式**（对配偶而非笑场）；**颊** 暖光下 **略红** 来自台灯反射，皮肤细腻有质感。 |
 | **手机与推送** | 横幅：**温和图标**（小月亮 / 小叶子 / 心形线稿）+ 文案「孩子可能需要你陪一下」；**勿红色全屏警报**；屏幕光 **映在两人鼻梁与颧骨** 形成 **窄条高光**。 |
 | **震动表现** | **水杯同心细涟漪**；被单纤维 **几乎看不见的颤**；掌根与手机边框 **1mm 级位移** 即可。 |
 | **运镜** | **正反打**：手机特写 → 父亲脸 → 手机 → 母亲脸；**每切一次光方向不变**（台灯在画面固定侧）。 |
 | **音效** | 手机 **两声短震「嗡—嗡—」**；通知音 **极轻**；卧室 **环境底噪极低**。 |
-| **AI 提示词（示例）** | 首行：**人物锁定（父母）**；**warm bedroom, practical lamp light, East Asian couple mid-late 30s, father with neat black hair smooth youthful face no gray no stubble emphasis, mild under-eye tiredness only, gentle concern reading phone, mother natural, smartphone notification glow on faces, subtle water ripple in glass, cinematic shallow dof, photorealistic skin, no aging makeup, no melodrama** |
+| **AI 提示词（示例）** | 首行：**人物锁定（父母）**；**warm bedroom, practical lamp light, East Asian young couple early 30s, father with neat black hair, youthful plump face, no wrinkles, no fine lines, no gray, no stubble emphasis, only very subtle under-eye softness, gentle concern reading phone, mother smooth glowing skin, natural warm cheeks, smartphone notification glow on faces, subtle water ripple in glass, cinematic shallow dof, photorealistic skin, no aging makeup, no melodrama** |
 
 ---
 
@@ -291,10 +291,17 @@
 
 ## 成片与实机（供答辩混剪）
 
-| 演示说法 | 当前工程常见实现 | 建议 |
-| --- | --- | --- |
-| 云端 MQTT 到球 | 多为 HTTP 长轮询 | 动画可用「云端一指触达」，字幕写「云端联动」 |
-| 球上 432Hz | 多在手机端 + 球光效 | 可画音波从手机流向球，或仅光效 + 环境钢琴 |
+> 下表列出演示片中的视觉/叙事表达与工程实际实现之间的差异，以及答辩时推荐的口径。**影响程度**：低 = 口播不提即可，中 = 需提前准备话术，高 = 需主动说明边界。
+
+| 演示说法 | 当前工程实现 | 影响 | 建议话术 / 处理方式 |
+| --- | --- | :---: | --- |
+| 云端 MQTT 实时推送到毛绒球 | HTTP **长轮询**（`GET /device/<id>/cmd?wait=25`），延迟约 0–25 s | 低 | 动画写「云端联动」，字幕用「云端一指触达」，不具体说协议 |
+| 毛绒球发出 432 Hz 疗愈音频 | 432/528 Hz 音频主要在**家长手机端**（`just_audio`）播放，球本身**无扬声器** | 低 | 画音波从手机流向球，或仅展示球光效 + 环境钢琴音；口播不提球端发声 |
+| 孩子可主动按道具发出求助信号 | 当前道具**仅有 BOOT 键**，且 BOOT 键主要用于长按重置配网；`QMI8658` IMU 已上电但**未接入交互逻辑** | 中 | 演示时聚焦「家长触发→道具响应」方向，不演示孩子侧双向交互；答辩若被问可说「路线图 A-03，已在开发」 |
+| 温情毛绒球外形（布绒包裹） | 仓库内**无外壳/毛绒包裹的工程文件**，实机为裸 ESP32-S3 LCD 开发板 | 中 | 拍摄或上台演示时需提前备好实体毛绒外壳道具；答辩若被问，说明外壳为工业设计阶段，固件独立 |
+| 一键发布小红书 | 小红书**无官方开放接口**，当前实现仅能生成脱敏草稿文案 + AI 配图（`/share/xiaohongshu_draft`、`/share/generate_image`），不能自动发布 | 低 | 演示截图草稿界面，口播说「一键生成草稿，家长确认后发布」；不演示「发布」按钮 |
+| 周报自动覆盖全部孩子 | 周报守护线程硬编码 `child_id=1`；多孩家庭其余孩子需手动 `POST /weekly_report/generate` | 低 | 演示环境只展示单孩账号；答辩若涉及多孩场景，说明「多孩支持已排期」 |
+| 星星机器人 OTA 云端升级 | 固件通过 `CONFIG_ADHD_MONITOR_BYPASS_OTA` **跳过官方小智 OTA**，直连自建 `/xiaozhi/ws` | 低 | 演示时不提 OTA；若被问，说明使用自建语音云（Path A）以确保数据闭环 |
 
 ---
 
