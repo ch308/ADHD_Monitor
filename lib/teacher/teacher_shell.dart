@@ -75,9 +75,11 @@ class _TeacherShellState extends State<TeacherShell> {
   final Map<String, MiBand6Auth> _studentClients = <String, MiBand6Auth>{};
   final Map<String, StreamSubscription<HeartRateSample>> _studentHrSubs =
       <String, StreamSubscription<HeartRateSample>>{};
-  final Map<String, MiBandStatus> _studentBandStatuses = <String, MiBandStatus>{};
+  final Map<String, MiBandStatus> _studentBandStatuses =
+      <String, MiBandStatus>{};
   final Map<String, String> _studentBandLastFailures = <String, String>{};
-  final Map<String, VoidCallback> _studentStatusListeners = <String, VoidCallback>{};
+  final Map<String, VoidCallback> _studentStatusListeners =
+      <String, VoidCallback>{};
   VoidCallback? _teacherStatusListener;
   MiBand6Auth? _teacherBandClient;
 
@@ -101,12 +103,24 @@ class _TeacherShellState extends State<TeacherShell> {
     super.dispose();
   }
 
+  void _safeSetState(VoidCallback fn) {
+    if (!mounted) return;
+    try {
+      setState(fn);
+    } on AssertionError {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(fn);
+      });
+    }
+  }
+
   Future<void> _restore() async {
     final students = await TeacherLocalStore.getStudents();
     final teacherBand = await TeacherLocalStore.getTeacherBand();
     final events = await TeacherLocalStore.getAlertEvents();
     if (!mounted) return;
-    setState(() {
+    _safeSetState(() {
       _students = students;
       _teacherBand = teacherBand;
       _events = events;
@@ -293,11 +307,11 @@ class _TeacherShellState extends State<TeacherShell> {
 
     final next = _students
         .map((item) => item.id == student.id
-        ? item.copyWith(
-            bandRemoteId: selected.remoteId,
-            bandDisplayName: selected.name,
-            bandAuthHexKey: authKey,
-          )
+            ? item.copyWith(
+                bandRemoteId: selected.remoteId,
+                bandDisplayName: selected.name,
+                bandAuthHexKey: authKey,
+              )
             : item)
         .toList();
     await _persistStudents(next);
@@ -316,13 +330,14 @@ class _TeacherShellState extends State<TeacherShell> {
   Future<void> _bindTeacherBand() async {
     if (_teacherBindingBusy) return;
     _teacherBindingBusy = true;
-    if (mounted) setState(() {});
+    _safeSetState(() {});
     try {
       _showSnack('正在搜索附近可绑定的老师手环...');
       final selected = await _pickNearbyBand(title: '选择老师手环');
       if (selected == null) return;
 
-      final duplicateStudent = _students.any((item) => item.bandRemoteId == selected.remoteId);
+      final duplicateStudent =
+          _students.any((item) => item.bandRemoteId == selected.remoteId);
       if (duplicateStudent) {
         _showSnack('这只手环已经绑定给学生了，请换一只再试。');
         return;
@@ -377,14 +392,16 @@ class _TeacherShellState extends State<TeacherShell> {
       if (!mounted) return;
       setState(() {
         _teacherBand = binding;
-        _teacherBandMessage = '已连接 ${binding.displayName ?? '老师手环'}，接下来请完成震动测试。';
-        _teacherBandStatus = _teacherBandClient?.status.value ?? _teacherBandStatus;
+        _teacherBandMessage =
+            '已连接 ${binding.displayName ?? '老师手环'}，接下来请完成震动测试。';
+        _teacherBandStatus =
+            _teacherBandClient?.status.value ?? _teacherBandStatus;
         _teacherBandLastFailure = null;
       });
       _showSnack('老师手环已真实连接并保存，可以继续测试震动。');
     } finally {
       _teacherBindingBusy = false;
-      if (mounted) setState(() {});
+      _safeSetState(() {});
     }
   }
 
@@ -427,9 +444,10 @@ class _TeacherShellState extends State<TeacherShell> {
     }
 
     _teacherVibrationBusy = true;
-    if (mounted) setState(() {});
+    _safeSetState(() {});
     try {
-      if (_teacherBandClient == null || !_teacherBandClient!.status.value.isConnected) {
+      if (_teacherBandClient == null ||
+          !_teacherBandClient!.status.value.isConnected) {
         final connectResult = await _bleService.connectBand(
           remoteId: binding.remoteId,
           authHexKey: binding.authHexKey!,
@@ -438,7 +456,8 @@ class _TeacherShellState extends State<TeacherShell> {
           if (mounted) {
             setState(() {
               _teacherBandStatus = connectResult.status ??
-                  MiBandStatus(MiBandStage.error, message: connectResult.message);
+                  MiBandStatus(MiBandStage.error,
+                      message: connectResult.message);
               _teacherBandLastFailure = connectResult.message;
             });
           }
@@ -468,7 +487,8 @@ class _TeacherShellState extends State<TeacherShell> {
         }
 
         if (!mounted) return;
-        setState(() => _teacherBandVibrationTestColor = const Color(0xFFE84B4B));
+        setState(
+            () => _teacherBandVibrationTestColor = const Color(0xFFE84B4B));
         final redOk = await client.vibrateBandForTest(
           times: 3,
           newAlertMessage: '$nameLabel 红屏测试',
@@ -479,7 +499,8 @@ class _TeacherShellState extends State<TeacherShell> {
 
         await Future<void>.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
-        setState(() => _teacherBandVibrationTestColor = const Color(0xFF47B276));
+        setState(
+            () => _teacherBandVibrationTestColor = const Color(0xFF47B276));
         final greenOk = await client.vibrateBandForTest(
           times: 3,
           newAlertMessage: '$nameLabel 绿屏测试',
@@ -528,13 +549,14 @@ class _TeacherShellState extends State<TeacherShell> {
       setState(() {
         _teacherBand = verified;
         _teacherBandMessage = '老师手环震动测试已通过，告警时会优先提醒手环。';
-        _teacherBandStatus = _teacherBandClient?.status.value ?? _teacherBandStatus;
+        _teacherBandStatus =
+            _teacherBandClient?.status.value ?? _teacherBandStatus;
         _teacherBandLastFailure = null;
       });
       _showSnack('老师手环震动测试通过，绑定已经生效。');
     } finally {
       _teacherVibrationBusy = false;
-      if (mounted) setState(() {});
+      _safeSetState(() {});
     }
   }
 
@@ -554,9 +576,12 @@ class _TeacherShellState extends State<TeacherShell> {
       return;
     }
 
-    final readyStudents = _students.where((student) => student.enabled).toList();
+    final readyStudents =
+        _students.where((student) => student.enabled).toList();
     final missingBindings = readyStudents
-        .where((student) => (student.bandRemoteId ?? '').isEmpty || (student.bandAuthHexKey ?? '').isEmpty)
+        .where((student) =>
+            (student.bandRemoteId ?? '').isEmpty ||
+            (student.bandAuthHexKey ?? '').isEmpty)
         .map((student) => student.name)
         .toList();
     if (missingBindings.isNotEmpty) {
@@ -565,7 +590,7 @@ class _TeacherShellState extends State<TeacherShell> {
     }
 
     _monitorBusy = true;
-    if (mounted) setState(() {});
+    _safeSetState(() {});
     final connected = <String>[];
     final failed = <String>[];
     try {
@@ -590,7 +615,7 @@ class _TeacherShellState extends State<TeacherShell> {
       }
     } finally {
       _monitorBusy = false;
-      if (mounted) setState(() {});
+      _safeSetState(() {});
     }
   }
 
@@ -636,7 +661,8 @@ class _TeacherShellState extends State<TeacherShell> {
           ),
         );
       }
-    } else if (rapidRiseBaseline != null && bpm >= (rapidRiseBaseline * 1.3).ceil()) {
+    } else if (rapidRiseBaseline != null &&
+        bpm >= (rapidRiseBaseline * 1.3).ceil()) {
       _highSampleCount[student.id] = 0;
       _lowSampleCount[student.id] = 0;
       if (canAlert) {
@@ -669,7 +695,9 @@ class _TeacherShellState extends State<TeacherShell> {
     required String note,
   }) async {
     final teacherBandReady = _teacherBand?.vibrationVerified == true;
-    if (teacherBandReady && _teacherBand != null && (_teacherBand!.authHexKey ?? '').isNotEmpty) {
+    if (teacherBandReady &&
+        _teacherBand != null &&
+        (_teacherBand!.authHexKey ?? '').isNotEmpty) {
       unawaited(_vibrateTeacherBandForAlert(student, eventType));
     }
     await _phoneFallbackAlert();
@@ -721,8 +749,7 @@ class _TeacherShellState extends State<TeacherShell> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
-          if (events.isEmpty)
-            const Text('还没有提醒记录。'),
+          if (events.isEmpty) const Text('还没有提醒记录。'),
           for (final event in events)
             ListTile(
               contentPadding: EdgeInsets.zero,
@@ -737,173 +764,12 @@ class _TeacherShellState extends State<TeacherShell> {
     );
   }
 
-  Future<_StudentDialogResult?> _showStudentDialog({TeacherStudent? student}) async {
-    final nameController = TextEditingController(text: student?.name ?? '');
-    final nicknameController = TextEditingController(text: student?.nickname ?? '');
-    final ageController = TextEditingController(text: student?.age?.toString() ?? '');
-    final personalityController = TextEditingController(text: student?.personality ?? '');
-    final interestsController = TextEditingController(text: student?.interests ?? '');
-    final categoryController = TextEditingController(text: student?.category ?? '');
-    final noteController = TextEditingController(text: student?.note ?? '');
-    var selectedGender = (student?.gender?.trim().isNotEmpty ?? false)
-      ? student!.gender!.trim()
-      : null;
-
-    final result = await showDialog<_StudentDialogResult>(
+  Future<_StudentDialogResult?> _showStudentDialog(
+      {TeacherStudent? student}) async {
+    return showDialog<_StudentDialogResult>(
       context: context,
-      builder: (ctx) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            final age = int.tryParse(ageController.text.trim());
-            final thresholds = teacherHeartRateThresholdsForAge(age);
-            return AlertDialog(
-              title: Text(student == null ? '添加学生' : '编辑学生'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: '学生姓名'),
-                      textInputAction: TextInputAction.next,
-                    ),
-                    TextField(
-                      controller: nicknameController,
-                      decoration: const InputDecoration(labelText: '小名，可选'),
-                      textInputAction: TextInputAction.next,
-                    ),
-                    TextField(
-                      controller: ageController,
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setDialogState(() => errorText = null),
-                      decoration: const InputDecoration(labelText: '年龄'),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedGender,
-                      decoration: const InputDecoration(labelText: '性别，可选'),
-                      items: _genderOptions
-                          .map(
-                            (item) => DropdownMenuItem<String>(
-                              value: item,
-                              child: Text(item),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) => setDialogState(() => selectedGender = value),
-                    ),
-                    TextField(
-                      controller: categoryController,
-                      decoration: const InputDecoration(
-                        labelText: '类别',
-                        hintText: '如已诊断多动症、自闭症、发育迟缓等',
-                      ),
-                      textInputAction: TextInputAction.next,
-                    ),
-                    TextField(
-                      controller: personalityController,
-                      decoration: const InputDecoration(labelText: '性格，可选'),
-                      textInputAction: TextInputAction.next,
-                    ),
-                    TextField(
-                      controller: interestsController,
-                      decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.border),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '自动提醒线',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w800,
-                              color: AppColors.ink,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text('${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}'),
-                          const SizedBox(height: 4),
-                          Text('过高提醒：>${thresholds.high} 次/分钟'),
-                          Text('过低提醒：<${thresholds.low} 次/分钟'),
-                        ],
-                      ),
-                    ),
-                    TextField(
-                      controller: noteController,
-                      decoration: const InputDecoration(labelText: '补充说明，可选'),
-                      maxLines: 2,
-                    ),
-                    if (errorText != null) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        errorText!,
-                        style: const TextStyle(color: AppColors.coral),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final name = nameController.text.trim();
-                    final ageValue = int.tryParse(ageController.text.trim());
-                    if (name.isEmpty) {
-                      setDialogState(() => errorText = '请先填写学生姓名。');
-                      return;
-                    }
-                    if (ageValue == null || ageValue < 0) {
-                      setDialogState(() => errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。');
-                      return;
-                    }
-                    final nextThresholds = teacherHeartRateThresholdsForAge(ageValue);
-                    Navigator.pop(
-                      ctx,
-                      _StudentDialogResult(
-                        name: name,
-                        nickname: nicknameController.text.trim(),
-                        age: ageValue,
-                        gender: selectedGender?.trim() ?? '',
-                        personality: personalityController.text.trim(),
-                        interests: interestsController.text.trim(),
-                        category: categoryController.text.trim(),
-                        note: noteController.text.trim(),
-                        thresholdBpm: nextThresholds.high,
-                        lowThresholdBpm: nextThresholds.low,
-                      ),
-                    );
-                  },
-                  child: const Text('保存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (ctx) => _TeacherStudentDialog(student: student),
     );
-
-    nameController.dispose();
-    nicknameController.dispose();
-    ageController.dispose();
-    personalityController.dispose();
-    interestsController.dispose();
-    categoryController.dispose();
-    noteController.dispose();
-    return result;
   }
 
   int? _recordRecentHeartRate(String studentId, int bpm, DateTime now) {
@@ -925,7 +791,8 @@ class _TeacherShellState extends State<TeacherShell> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// 若本机曾登录家长版且服务器已配置 [XIAOMI_AUTH_KEY]，则预填教师绑定里的密钥输入框。
@@ -941,7 +808,8 @@ class _TeacherShellState extends State<TeacherShell> {
     }
   }
 
-  Future<TeacherBandScanResult?> _pickNearbyBand({required String title}) async {
+  Future<TeacherBandScanResult?> _pickNearbyBand(
+      {required String title}) async {
     final results = await _bleService.scanMiBand6();
     if (!mounted) return null;
     if (results.isEmpty) {
@@ -1004,7 +872,8 @@ class _TeacherShellState extends State<TeacherShell> {
                     controller: controller,
                     autocorrect: false,
                     inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9a-fA-F\s]')),
+                      FilteringTextInputFormatter.allow(
+                          RegExp(r'[0-9a-fA-F\s]')),
                     ],
                     onChanged: (_) {
                       setDialogState(() {
@@ -1099,7 +968,10 @@ class _TeacherShellState extends State<TeacherShell> {
   Future<bool> _ensureStudentMonitoring(TeacherStudent student) async {
     final remoteId = student.bandRemoteId;
     final authKey = student.bandAuthHexKey;
-    if (remoteId == null || remoteId.isEmpty || authKey == null || authKey.isEmpty) {
+    if (remoteId == null ||
+        remoteId.isEmpty ||
+        authKey == null ||
+        authKey.isEmpty) {
       return false;
     }
 
@@ -1146,7 +1018,10 @@ class _TeacherShellState extends State<TeacherShell> {
     _lowSampleCount.remove(studentId);
     _recentHeartRateHistory.remove(studentId);
     _alertingStudents.remove(studentId);
-    if (mounted && _students.any((student) => student.id == studentId && (student.bandRemoteId ?? '').isNotEmpty)) {
+    if (mounted &&
+        _students.any((student) =>
+            student.id == studentId &&
+            (student.bandRemoteId ?? '').isNotEmpty)) {
       setState(() {
         _studentBandStatuses[studentId] = const MiBandStatus(
           MiBandStage.disconnected,
@@ -1196,7 +1071,8 @@ class _TeacherShellState extends State<TeacherShell> {
     final binding = _teacherBand;
     if (binding == null || (binding.authHexKey ?? '').isEmpty) return;
 
-    if (_teacherBandClient == null || !_teacherBandClient!.status.value.isConnected) {
+    if (_teacherBandClient == null ||
+        !_teacherBandClient!.status.value.isConnected) {
       final result = await _bleService.connectBand(
         remoteId: binding.remoteId,
         authHexKey: binding.authHexKey!,
@@ -1259,9 +1135,10 @@ class _TeacherShellState extends State<TeacherShell> {
     final lastSampleText = status?.lastSampleAt == null
         ? '最近一次心率时间：暂无'
         : '最近一次心率时间：${_formatDiagnosticTime(status!.lastSampleAt!)}';
-    final lastFailureText = (lastFailureReason == null || lastFailureReason.isEmpty)
-        ? '最近一次失败原因：暂无'
-        : '最近一次失败原因：$lastFailureReason';
+    final lastFailureText =
+        (lastFailureReason == null || lastFailureReason.isEmpty)
+            ? '最近一次失败原因：暂无'
+            : '最近一次失败原因：$lastFailureReason';
 
     if (status == null || status.stage == MiBandStage.idle) {
       return _BandDiagnosticViewData(
@@ -1387,7 +1264,8 @@ class _TeacherShellState extends State<TeacherShell> {
           lastSampleText: lastSampleText,
           lastFailureText: lastFailureText,
           color: AppColors.coral,
-          icon: isKeyIssue ? Icons.key_off_rounded : Icons.error_outline_rounded,
+          icon:
+              isKeyIssue ? Icons.key_off_rounded : Icons.error_outline_rounded,
         );
       case MiBandStage.idle:
         return _BandDiagnosticViewData(
@@ -1453,7 +1331,8 @@ class _TeacherShellState extends State<TeacherShell> {
         _teacherBandStatus = status;
         if (status.isFailure && (status.message?.isNotEmpty ?? false)) {
           _teacherBandLastFailure = status.message;
-        } else if (status.isConnected || status.stage == MiBandStage.streaming) {
+        } else if (status.isConnected ||
+            status.stage == MiBandStage.streaming) {
           _teacherBandLastFailure = null;
         }
       });
@@ -1485,7 +1364,8 @@ class _TeacherShellState extends State<TeacherShell> {
         _studentBandStatuses[studentId] = status;
         if (status.isFailure && (status.message?.isNotEmpty ?? false)) {
           _studentBandLastFailures[studentId] = status.message!;
-        } else if (status.isConnected || status.stage == MiBandStage.streaming) {
+        } else if (status.isConnected ||
+            status.stage == MiBandStage.streaming) {
           _studentBandLastFailures.remove(studentId);
         }
       });
@@ -1559,38 +1439,230 @@ class _TeacherShellState extends State<TeacherShell> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
           children: [
-          _StatusPanel(
-            teacherReady: teacherReady,
-            studentCount: activeStudents,
-            monitoring: _monitoring,
-            busy: _monitorBusy || _teacherBindingBusy || _teacherVibrationBusy,
-            teacherBandName: _teacherBand?.displayName,
-            teacherBandMessage: _teacherBandMessage,
-            onBindTeacherBand: _bindTeacherBand,
-            onVerifyVibration: _verifyTeacherVibration,
-            onToggleMonitoring: _toggleMonitoring,
-          ),
-          const SizedBox(height: 12),
-          _buildConnectionDiagnosticPanel(),
-          const SizedBox(height: 12),
-          if (_students.isEmpty)
-            const _EmptyTeacherState(),
-          for (final student in _students) ...[
-            _StudentCard(
-              student: student,
-              bpm: _bpmByStudent[student.id],
-              alerting: _alertingStudents.contains(student.id),
+            _StatusPanel(
+              teacherReady: teacherReady,
+              studentCount: activeStudents,
               monitoring: _monitoring,
-              onEdit: () => _editStudent(student),
-              onBindBand: () => _bindStudentBand(student),
-              onToggleEnabled: () => _toggleStudentEnabled(student),
-              onRemove: () => _removeStudent(student),
+              busy:
+                  _monitorBusy || _teacherBindingBusy || _teacherVibrationBusy,
+              teacherBandName: _teacherBand?.displayName,
+              teacherBandMessage: _teacherBandMessage,
+              onBindTeacherBand: _bindTeacherBand,
+              onVerifyVibration: _verifyTeacherVibration,
+              onToggleMonitoring: _toggleMonitoring,
             ),
-            const SizedBox(height: 10),
-          ],
+            const SizedBox(height: 12),
+            _buildConnectionDiagnosticPanel(),
+            const SizedBox(height: 12),
+            if (_students.isEmpty) const _EmptyTeacherState(),
+            for (final student in _students) ...[
+              _StudentCard(
+                student: student,
+                bpm: _bpmByStudent[student.id],
+                alerting: _alertingStudents.contains(student.id),
+                monitoring: _monitoring,
+                onEdit: () => _editStudent(student),
+                onBindBand: () => _bindStudentBand(student),
+                onToggleEnabled: () => _toggleStudentEnabled(student),
+                onRemove: () => _removeStudent(student),
+              ),
+              const SizedBox(height: 10),
+            ],
           ],
         ),
       ),
+    );
+  }
+}
+
+class _TeacherStudentDialog extends StatefulWidget {
+  const _TeacherStudentDialog({super.key, this.student});
+
+  final TeacherStudent? student;
+
+  @override
+  State<_TeacherStudentDialog> createState() => _TeacherStudentDialogState();
+}
+
+class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
+  late final TextEditingController nameController;
+  late final TextEditingController nicknameController;
+  late final TextEditingController ageController;
+  late final TextEditingController personalityController;
+  late final TextEditingController interestsController;
+  late final TextEditingController categoryController;
+  late final TextEditingController noteController;
+
+  String? selectedGender;
+  String? errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    final student = widget.student;
+    nameController = TextEditingController(text: student?.name ?? '');
+    nicknameController = TextEditingController(text: student?.nickname ?? '');
+    ageController = TextEditingController(text: student?.age?.toString() ?? '');
+    personalityController =
+        TextEditingController(text: student?.personality ?? '');
+    interestsController = TextEditingController(text: student?.interests ?? '');
+    categoryController = TextEditingController(text: student?.category ?? '');
+    noteController = TextEditingController(text: student?.note ?? '');
+    selectedGender = (student?.gender?.trim().isNotEmpty ?? false)
+        ? student!.gender!.trim()
+        : null;
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    nicknameController.dispose();
+    ageController.dispose();
+    personalityController.dispose();
+    interestsController.dispose();
+    categoryController.dispose();
+    noteController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final age = int.tryParse(ageController.text.trim());
+    final thresholds = teacherHeartRateThresholdsForAge(age);
+    return AlertDialog(
+      title: Text(widget.student == null ? '添加学生' : '编辑学生'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: '学生姓名'),
+              textInputAction: TextInputAction.next,
+            ),
+            TextField(
+              controller: nicknameController,
+              decoration: const InputDecoration(labelText: '小名，可选'),
+              textInputAction: TextInputAction.next,
+            ),
+            TextField(
+              controller: ageController,
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() => errorText = null),
+              decoration: const InputDecoration(labelText: '年龄'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: selectedGender,
+              decoration: const InputDecoration(labelText: '性别，可选'),
+              items: _TeacherShellState._genderOptions
+                  .map(
+                    (item) => DropdownMenuItem<String>(
+                      value: item,
+                      child: Text(item),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) => setState(() => selectedGender = value),
+            ),
+            TextField(
+              controller: categoryController,
+              decoration: const InputDecoration(
+                labelText: '类别',
+                hintText: '如已诊断多动症、自闭症、发育迟缓等',
+              ),
+              textInputAction: TextInputAction.next,
+            ),
+            TextField(
+              controller: personalityController,
+              decoration: const InputDecoration(labelText: '性格，可选'),
+              textInputAction: TextInputAction.next,
+            ),
+            TextField(
+              controller: interestsController,
+              decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '自动提醒线',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                      '${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}'),
+                  const SizedBox(height: 4),
+                  Text('过高提醒：>${thresholds.high} 次/分钟'),
+                  Text('过低提醒：<${thresholds.low} 次/分钟'),
+                ],
+              ),
+            ),
+            TextField(
+              controller: noteController,
+              decoration: const InputDecoration(labelText: '补充说明，可选'),
+              maxLines: 2,
+            ),
+            if (errorText != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                errorText!,
+                style: const TextStyle(color: AppColors.coral),
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final name = nameController.text.trim();
+            final ageValue = int.tryParse(ageController.text.trim());
+            if (name.isEmpty) {
+              setState(() => errorText = '请先填写学生姓名。');
+              return;
+            }
+            if (ageValue == null || ageValue < 0) {
+              setState(() => errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。');
+              return;
+            }
+            final nextThresholds = teacherHeartRateThresholdsForAge(ageValue);
+            Navigator.pop(
+              context,
+              _StudentDialogResult(
+                name: name,
+                nickname: nicknameController.text.trim(),
+                age: ageValue,
+                gender: selectedGender?.trim() ?? '',
+                personality: personalityController.text.trim(),
+                interests: interestsController.text.trim(),
+                category: categoryController.text.trim(),
+                note: noteController.text.trim(),
+                thresholdBpm: nextThresholds.high,
+                lowThresholdBpm: nextThresholds.low,
+              ),
+            );
+          },
+          child: const Text('保存'),
+        ),
+      ],
     );
   }
 }
@@ -1673,11 +1745,11 @@ class _StatusPanel extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             teacherBandName == null
-              ? '先绑定老师手环，再完成震动测试，课堂告警会更及时。'
-              : teacherBandMessage ??
-                (teacherReady
-                  ? '老师手环已完成震动测试，正式监测可用。'
-                  : '老师手环已经连好，还差一次震动确认。'),
+                ? '先绑定老师手环，再完成震动测试，课堂告警会更及时。'
+                : teacherBandMessage ??
+                    (teacherReady
+                        ? '老师手环已完成震动测试，正式监测可用。'
+                        : '老师手环已经连好，还差一次震动确认。'),
             style: const TextStyle(
               color: AppColors.muted,
               height: 1.4,
@@ -1702,7 +1774,8 @@ class _StatusPanel extends StatelessWidget {
           ),
           if (teacherBandName != null) ...[
             const SizedBox(height: 10),
-            Text('当前老师手环：$teacherBandName', style: const TextStyle(color: AppColors.ink)),
+            Text('当前老师手环：$teacherBandName',
+                style: const TextStyle(color: AppColors.ink)),
           ],
           const SizedBox(height: 12),
           Wrap(
@@ -1721,7 +1794,9 @@ class _StatusPanel extends StatelessWidget {
               ),
               FilledButton.icon(
                 onPressed: busy ? null : () => onToggleMonitoring(),
-                icon: Icon(monitoring ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                icon: Icon(monitoring
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded),
                 label: Text(monitoring ? '暂停监测' : '开始监测'),
               ),
             ],
@@ -1871,9 +1946,11 @@ class _StudentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasBand = student.bandRemoteId != null && student.bandRemoteId!.isNotEmpty;
+    final hasBand =
+        student.bandRemoteId != null && student.bandRemoteId!.isNotEmpty;
     final profileBits = <String>[
-      if ((student.nickname ?? '').trim().isNotEmpty) '小名 ${student.nickname!.trim()}',
+      if ((student.nickname ?? '').trim().isNotEmpty)
+        '小名 ${student.nickname!.trim()}',
       if (student.age != null) '${student.age} 岁',
       if ((student.gender ?? '').trim().isNotEmpty) student.gender!.trim(),
       if ((student.category ?? '').trim().isNotEmpty) student.category!.trim(),
@@ -1882,16 +1959,16 @@ class _StudentCard extends StatelessWidget {
         ? '已暂停监测'
         : !hasBand
             ? '还未绑定手环'
-        : !monitoring
-          ? '已绑定完成，等待开始监测'
-          : bpm == null
-            ? '正在连接手环并等待心率'
-            : alerting
-                ? '心率已连续异常，请留意'
-          : '实时监测中';
+            : !monitoring
+                ? '已绑定完成，等待开始监测'
+                : bpm == null
+                    ? '正在连接手环并等待心率'
+                    : alerting
+                        ? '心率已连续异常，请留意'
+                        : '实时监测中';
     final bandLabel = student.bandDisplayName?.trim().isNotEmpty == true
-      ? student.bandDisplayName!
-      : student.bandRemoteId;
+        ? student.bandDisplayName!
+        : student.bandRemoteId;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -1921,14 +1998,18 @@ class _StudentCard extends StatelessWidget {
                   children: [
                     Text(
                       student.name,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w800),
                     ),
                     if (profileBits.isNotEmpty)
                       Text(
                         profileBits.join(' · '),
-                        style: const TextStyle(height: 1.3, color: AppColors.muted),
+                        style: const TextStyle(
+                            height: 1.3, color: AppColors.muted),
                       ),
-                    Text(statusText, style: const TextStyle(height: 1.35, color: AppColors.muted)),
+                    Text(statusText,
+                        style: const TextStyle(
+                            height: 1.35, color: AppColors.muted)),
                   ],
                 ),
               ),
@@ -1958,9 +2039,13 @@ class _StudentCard extends StatelessWidget {
           Wrap(
             spacing: 8,
             children: [
-              TextButton(onPressed: onBindBand, child: Text(hasBand ? '更换手环' : '绑定手环')),
+              TextButton(
+                  onPressed: onBindBand,
+                  child: Text(hasBand ? '更换手环' : '绑定手环')),
               TextButton(onPressed: onEdit, child: const Text('编辑')),
-              TextButton(onPressed: onToggleEnabled, child: Text(student.enabled ? '暂停' : '启用')),
+              TextButton(
+                  onPressed: onToggleEnabled,
+                  child: Text(student.enabled ? '暂停' : '启用')),
               TextButton(onPressed: onRemove, child: const Text('移除')),
             ],
           ),

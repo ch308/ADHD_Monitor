@@ -1586,7 +1586,7 @@ def fetch_kimi_weekly_report(user_prompt: str) -> str:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.42,
+            temperature=0.6,
             max_tokens=2800,
         )
         text = (response.choices[0].message.content or "").strip()
@@ -1617,7 +1617,7 @@ def fetch_kimi_period_report(period_type: str, user_prompt: str) -> str:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user_prompt},
             ],
-            temperature=0.42,
+            temperature=0.6,
             max_tokens=max_tokens,
         )
         return (response.choices[0].message.content or "").strip()

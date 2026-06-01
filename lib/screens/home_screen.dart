@@ -191,7 +191,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       h['Content-Type'] = 'application/json';
     }
     final t = widget.authToken;
-    
+
     if (t != null && t.isNotEmpty) {
       h['Authorization'] = 'Bearer $t';
     }
@@ -234,13 +234,15 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
 
     // 每 3 秒从云服务器拉取一次最新的模拟心率
-    _statusTimer = Timer.periodic(Duration(seconds: 3), (timer) => fetchStatus());
+    _statusTimer =
+        Timer.periodic(Duration(seconds: 3), (timer) => fetchStatus());
 
     // 启动时加载历史心率数据
     fetchHistory();
 
     // 每 5 秒刷新历史心率数据
-    _historyTimer = Timer.periodic(Duration(seconds: 5), (timer) => fetchHistory());
+    _historyTimer =
+        Timer.periodic(Duration(seconds: 5), (timer) => fetchHistory());
 
     // 蓝牙手环引导：监听适配器状态，开启即尝试静默连接
     _bootstrapMiBand();
@@ -285,8 +287,21 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
   }
 
+  void _safeSetState(VoidCallback fn) {
+    if (!mounted) return;
+    try {
+      setState(fn);
+    } on AssertionError {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(fn);
+      });
+    }
+  }
+
   Future<void> _restoreParentChildProfile() async {
-    final profile = await ParentChildProfileStore.getProfile(widget.activeChildId);
+    final profile =
+        await ParentChildProfileStore.getProfile(widget.activeChildId);
     if (!mounted) return;
     _syncMiBandBandAlertSubject(profile);
     setState(() => _childProfile = profile);
@@ -309,7 +324,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   Future<void> _restoreStressThreshold() async {
-    final threshold = await SessionStore.getStressThreshold(widget.activeChildId);
+    final threshold =
+        await SessionStore.getStressThreshold(widget.activeChildId);
     if (!mounted) return;
     setState(() => _stressAlertThreshold = threshold);
   }
@@ -391,11 +407,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       _ParentHeartRateSnapshot(recordedAt: timestamp, bpm: bpm),
     );
     _recentHeartRateHistory.removeWhere(
-      (sample) => timestamp.difference(sample.recordedAt) > _heartRateRapidRiseWindow,
+      (sample) =>
+          timestamp.difference(sample.recordedAt) > _heartRateRapidRiseWindow,
     );
     if (_recentHeartRateHistory.length < 2) return null;
     final baseline = _recentHeartRateHistory.first;
-    if (timestamp.difference(baseline.recordedAt) < const Duration(minutes: 1)) {
+    if (timestamp.difference(baseline.recordedAt) <
+        const Duration(minutes: 1)) {
       return null;
     }
     return baseline.bpm;
@@ -409,11 +427,13 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final baseline = _recordHeartRateBaseline(bpm, timestamp);
     final highThreshold = _alertBpm.round();
     final lowThreshold = _lowAlertBpm;
-    final rapidRiseThreshold = baseline == null ? null : (baseline * 1.3).ceil();
+    final rapidRiseThreshold =
+        baseline == null ? null : (baseline * 1.3).ceil();
     final high = bpm >= highThreshold;
     final low = bpm <= lowThreshold;
     final rapidRise = rapidRiseThreshold != null && bpm >= rapidRiseThreshold;
-    final recovered = bpm < highThreshold - 5 && bpm > lowThreshold + 5 && !rapidRise;
+    final recovered =
+        bpm < highThreshold - 5 && bpm > lowThreshold + 5 && !rapidRise;
 
     if (recovered && _heartRateAlertTriggered) {
       _heartRateAlertTriggered = false;
@@ -449,170 +469,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   Future<void> _showParentChildProfileDialog() async {
-    final profile = _childProfile;
-    final nameController = TextEditingController(text: profile?.name ?? '');
-    final nicknameController = TextEditingController(text: profile?.nickname ?? '');
-    final ageController = TextEditingController(text: profile?.age?.toString() ?? '');
-    final personalityController = TextEditingController(text: profile?.personality ?? '');
-    final interestsController = TextEditingController(text: profile?.interests ?? '');
-    final categoryController = TextEditingController(text: profile?.category ?? '');
-    final noteController = TextEditingController(text: profile?.note ?? '');
-    var selectedGender = (profile?.gender?.trim().isNotEmpty ?? false)
-        ? profile!.gender!.trim()
-        : null;
-
     final result = await showDialog<ParentChildProfile>(
       context: context,
-      builder: (ctx) {
-        String? errorText;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) {
-            final age = int.tryParse(ageController.text.trim());
-            final thresholds = parentHeartRateThresholdsForAge(age);
-            return AlertDialog(
-              title: const Text('录入孩子资料'),
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: nameController,
-                      decoration: const InputDecoration(labelText: '孩子姓名，可选'),
-                    ),
-                    TextField(
-                      controller: nicknameController,
-                      decoration: const InputDecoration(labelText: '小名，可选'),
-                    ),
-                    TextField(
-                      controller: ageController,
-                      keyboardType: TextInputType.number,
-                      onChanged: (_) => setDialogState(() => errorText = null),
-                      decoration: const InputDecoration(labelText: '年龄'),
-                    ),
-                    const SizedBox(height: 12),
-                    DropdownButtonFormField<String>(
-                      initialValue: selectedGender,
-                      decoration: const InputDecoration(labelText: '性别，可选'),
-                      items: _parentGenderOptions
-                          .map((item) => DropdownMenuItem<String>(value: item, child: Text(item)))
-                          .toList(),
-                      onChanged: (value) => setDialogState(() => selectedGender = value),
-                    ),
-                    TextField(
-                      controller: categoryController,
-                      decoration: const InputDecoration(
-                        labelText: '类别',
-                        hintText: '如多动症、自闭症、发育迟缓等',
-                      ),
-                    ),
-                    TextField(
-                      controller: personalityController,
-                      decoration: const InputDecoration(labelText: '性格，可选'),
-                    ),
-                    TextField(
-                      controller: interestsController,
-                      decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: _warmSurface,
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: _warmBorder),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            '自动提醒线',
-                            style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
-                          ),
-                          const SizedBox(height: 6),
-                          Text('${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}'),
-                          const SizedBox(height: 4),
-                          Text('过高提醒：>${thresholds.high} 次/分钟'),
-                          Text('过低提醒：<${thresholds.low} 次/分钟'),
-                        ],
-                      ),
-                    ),
-                    TextField(
-                      controller: noteController,
-                      maxLines: 2,
-                      decoration: const InputDecoration(labelText: '补充说明，可选'),
-                    ),
-                    if (errorText != null) ...[
-                      const SizedBox(height: 10),
-                      Text(errorText!, style: const TextStyle(color: _coral)),
-                    ],
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final ageValue = int.tryParse(ageController.text.trim());
-                    if (ageValue == null || ageValue < 0) {
-                      setDialogState(() {
-                        errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。';
-                      });
-                      return;
-                    }
-                    final thresholds = parentHeartRateThresholdsForAge(ageValue);
-                    Navigator.pop(
-                      ctx,
-                      ParentChildProfile(
-                        childId: widget.activeChildId,
-                        name: nameController.text.trim().isEmpty
-                            ? null
-                            : nameController.text.trim(),
-                        nickname: nicknameController.text.trim().isEmpty
-                            ? null
-                            : nicknameController.text.trim(),
-                        age: ageValue,
-                        gender: selectedGender?.trim().isEmpty ?? true
-                            ? null
-                            : selectedGender!.trim(),
-                        personality: personalityController.text.trim().isEmpty
-                            ? null
-                            : personalityController.text.trim(),
-                        interests: interestsController.text.trim().isEmpty
-                            ? null
-                            : interestsController.text.trim(),
-                        category: categoryController.text.trim().isEmpty
-                            ? null
-                            : categoryController.text.trim(),
-                        note: noteController.text.trim().isEmpty
-                            ? null
-                            : noteController.text.trim(),
-                        highThresholdBpm: thresholds.high,
-                        lowThresholdBpm: thresholds.low,
-                        updatedAt: DateTime.now(),
-                      ),
-                    );
-                  },
-                  child: const Text('保存'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+      builder: (ctx) => _ParentChildProfileDialog(profile: _childProfile),
     );
-
-    nameController.dispose();
-    nicknameController.dispose();
-    ageController.dispose();
-    personalityController.dispose();
-    interestsController.dispose();
-    categoryController.dispose();
-    noteController.dispose();
 
     if (result == null || !mounted) return;
     await ParentChildProfileStore.saveProfile(result);
@@ -740,8 +600,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         label,
       ];
       if (chartTimestamps.length > 20) {
-        chartTimestamps =
-            chartTimestamps.sublist(chartTimestamps.length - 20);
+        chartTimestamps = chartTimestamps.sublist(chartTimestamps.length - 20);
       }
       message = _resolveStatusMessage();
       if (calculatedStress != null) {
@@ -791,12 +650,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         _syncMacToCloudService();
         unawaited(_checkAndResolveBinding());
         break;
-              case MiBandStage.authFailed:
+      case MiBandStage.authFailed:
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: Colors.red.shade700,
             duration: const Duration(seconds: 6),
-                    content: const Text('❌ 当前无法连接这只手环。请确认孩子佩戴的是已绑定的那只手环，必要时重新绑定后再试。'),
+            content: const Text('❌ 当前无法连接这只手环。请确认孩子佩戴的是已绑定的那只手环，必要时重新绑定后再试。'),
           ),
         );
         break;
@@ -832,7 +691,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       // 先查本地缓存
       final cachedMac = await SessionStore.getBoundMac(widget.activeChildId);
       if (cachedMac == mac) {
-        _deviceBinding = DeviceBinding.boundToCurrent(mac, widget.activeChildId);
+        _deviceBinding =
+            DeviceBinding.boundToCurrent(mac, widget.activeChildId);
         return;
       }
 
@@ -848,7 +708,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         // 网络不可达，尝试本地判定
         if (cachedMac != null && cachedMac != mac) {
           _deviceBinding = DeviceBinding.boundToOther(
-            mac, widget.activeChildId,
+            mac,
+            widget.activeChildId,
             nickname: '当前孩子已绑定另一只手环（$cachedMac）',
           );
         } else {
@@ -857,7 +718,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     } finally {
       _bindingCheckInProgress = false;
-      if (mounted) setState(() {});
+      _safeSetState(() {});
     }
   }
 
@@ -872,13 +733,14 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
     if (_bindingActionInProgress) return;
     _bindingActionInProgress = true;
-    if (mounted) setState(() {});
+    _safeSetState(() {});
     try {
       final ok = await _cloudService.bindDevice(mac, widget.activeChildId);
       if (!mounted) return;
       if (ok) {
         await SessionStore.saveBoundMac(widget.activeChildId, mac);
-        _deviceBinding = DeviceBinding.boundToCurrent(mac, widget.activeChildId);
+        _deviceBinding =
+            DeviceBinding.boundToCurrent(mac, widget.activeChildId);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Color(0xFF2E7D32),
@@ -895,7 +757,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     } finally {
       _bindingActionInProgress = false;
-      if (mounted) setState(() {});
+      _safeSetState(() {});
     }
   }
 
@@ -910,7 +772,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
     if (_bindingActionInProgress) return;
     _bindingActionInProgress = true;
-    if (mounted) setState(() {});
+    _safeSetState(() {});
     try {
       final ok = await _cloudService.unbindDevice(mac, widget.activeChildId);
       if (!mounted) return;
@@ -939,7 +801,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
     } finally {
       _bindingActionInProgress = false;
-      if (mounted) setState(() {});
+      _safeSetState(() {});
     }
   }
 
@@ -1159,8 +1021,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         PageRouteBuilder<void>(
           transitionDuration: const Duration(milliseconds: 400),
           opaque: true,
-          pageBuilder: (ctx, _, __) =>
-              BreathingBallPage(
+          pageBuilder: (ctx, _, __) => BreathingBallPage(
             onPlay432: _playMindfulnessSdcard432,
             onPlay528: _playMindfulnessSdcard528,
             onStopAudio: _stopMindfulnessAudio,
@@ -1172,7 +1033,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       // 用户主动关闭正念呼吸页 = 想结束此次陪伴调节：停呼吸灯 + 停音乐。
       // （只有 ESP32 端的 10 分钟 watchdog 不会自动停音乐，那是防丢命令的兜底。）
       if (esp != null && esp.isNotEmpty) {
-        debugPrint('BreathingBall: exit, sending breathing_stop + sdcard_audio_stop to $esp');
+        debugPrint(
+            'BreathingBall: exit, sending breathing_stop + sdcard_audio_stop to $esp');
         unawaited(_cloudService.triggerEsp32BreathingStop(esp));
         unawaited(_cloudService.triggerEsp32SdcardAudioStop(esp));
       }
@@ -1397,7 +1259,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       ),
     );
     if (submit != true || !mounted) return;
-    final cleaned = ctrl.text.trim().replaceAll(RegExp(r'[:\-\s]'), '').toUpperCase();
+    final cleaned =
+        ctrl.text.trim().replaceAll(RegExp(r'[:\-\s]'), '').toUpperCase();
     String raw;
     if (RegExp(r'^[0-9A-F]{8}$').hasMatch(cleaned)) {
       raw = cleaned;
@@ -1407,7 +1270,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       raw = cleaned.substring(cleaned.length - 8);
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入 8 位 device_id（例 E0160560）或 12 位完整 MAC。')),
+        const SnackBar(
+            content: Text('请输入 8 位 device_id（例 E0160560）或 12 位完整 MAC。')),
       );
       return;
     }
@@ -1447,9 +1311,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            ok
-                ? '已唤醒星星，孩子侧几秒内会听到问候。'
-                : '唤醒失败：请确认星星已联网并已登录本账号。',
+            ok ? '已唤醒星星，孩子侧几秒内会听到问候。' : '唤醒失败：请确认星星已联网并已登录本账号。',
           ),
         ),
       );
@@ -1562,17 +1424,17 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         if (isAlerting && alertStartTime != null) {
           Duration elapsed = DateTime.now().difference(alertStartTime!);
           // H6: 报警 2 分钟自动停止前短暂提示用户
-        if (elapsed.inSeconds >= 105 && elapsed.inSeconds < 111) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('报警即将自动结束，心率已至少在 2 分钟内未再超限'),
-                duration: Duration(seconds: 5),
-              ),
-            );
+          if (elapsed.inSeconds >= 105 && elapsed.inSeconds < 111) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('报警即将自动结束，心率已至少在 2 分钟内未再超限'),
+                  duration: Duration(seconds: 5),
+                ),
+              );
+            }
           }
-        }
-        if (elapsed.inMinutes >= 2) {
+          if (elapsed.inMinutes >= 2) {
             setState(() {
               isAlerting = false;
               isDismissed = false;
@@ -1603,8 +1465,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         setState(() {
           if (useCloudBpm) bpm = newBpm;
           isAlert = newAlert ||
-              (useCloudBpm &&
-                  (newBpm >= _alertBpm || newBpm <= _lowAlertBpm));
+              (useCloudBpm && (newBpm >= _alertBpm || newBpm <= _lowAlertBpm));
           message = _resolveStatusMessage();
         });
       }
@@ -1697,23 +1558,21 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     padding:
                         const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: (_selectedConditionType == 'adhd'
-                          ? _amber
-                          : _sage)
-                        .withValues(alpha: 0.13),
+                      color: (_selectedConditionType == 'adhd' ? _amber : _sage)
+                          .withValues(alpha: 0.13),
                       border: Border.all(
                         color: _selectedConditionType == 'adhd'
-                        ? _amber.withValues(alpha: 0.35)
-                        : _sage.withValues(alpha: 0.35),
+                            ? _amber.withValues(alpha: 0.35)
+                            : _sage.withValues(alpha: 0.35),
                       ),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Text(
                       _selectedConditionLabel!,
                       style: TextStyle(
-                        color: _selectedConditionType == 'adhd'
-                          ? const Color(0xFF8E6423)
-                          : const Color(0xFF416857),
+                          color: _selectedConditionType == 'adhd'
+                              ? const Color(0xFF8E6423)
+                              : const Color(0xFF416857),
                           fontSize: 12,
                           fontWeight: FontWeight.w600),
                     ),
@@ -1722,8 +1581,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   const Expanded(
                     child: Text(
                       '记录孩子行为',
-                      style:
-                          TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: _ink),
+                      style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: _ink),
                     ),
                   ),
                 ],
@@ -1745,9 +1606,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(14),
                     borderSide: BorderSide(
-                        color: _selectedConditionType == 'adhd'
-                            ? _amber
-                            : _sage,
+                        color:
+                            _selectedConditionType == 'adhd' ? _amber : _sage,
                         width: 2),
                   ),
                   contentPadding:
@@ -1780,9 +1640,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     child: FilledButton(
                       onPressed: _recordSubmitting ? null : _submitRecord,
                       style: FilledButton.styleFrom(
-                        backgroundColor: _selectedConditionType == 'adhd'
-                          ? _amber
-                          : _sage,
+                        backgroundColor:
+                            _selectedConditionType == 'adhd' ? _amber : _sage,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
@@ -1848,7 +1707,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              msg != null && msg.isNotEmpty ? msg : '提交失败（${response.statusCode}）',
+              msg != null && msg.isNotEmpty
+                  ? msg
+                  : '提交失败（${response.statusCode}）',
             ),
           ),
         );
@@ -1857,9 +1718,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       }
       final advice = decoded['advice'] as String?;
       final rawLogId = decoded['log_id'];
-      final logId = rawLogId is int
-          ? rawLogId
-          : int.tryParse(rawLogId?.toString() ?? '');
+      final logId =
+          rawLogId is int ? rawLogId : int.tryParse(rawLogId?.toString() ?? '');
       setState(() {
         _lastRecordLogId = logId;
         _lastRecordObservation = text;
@@ -1942,8 +1802,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       color: _sage.withValues(alpha: 0.14),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.auto_awesome,
-                        color: _sage, size: 18),
+                    child:
+                        const Icon(Icons.auto_awesome, color: _sage, size: 18),
                   ),
                   const SizedBox(width: 10),
                   Text(
@@ -1963,8 +1823,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(_kimiAdvice!,
-                      style:
-                        const TextStyle(fontSize: 14, height: 1.65, color: _ink)),
+                      style: const TextStyle(
+                          fontSize: 14, height: 1.65, color: _ink)),
                   const SizedBox(height: 16),
                   SizedBox(
                     width: double.infinity,
@@ -2022,7 +1882,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final chips = <String>[
       if (profile?.age != null) '${profile!.age} 岁',
       if ((profile?.gender ?? '').trim().isNotEmpty) profile!.gender!.trim(),
-      if ((profile?.category ?? '').trim().isNotEmpty) profile!.category!.trim(),
+      if ((profile?.category ?? '').trim().isNotEmpty)
+        profile!.category!.trim(),
     ];
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -2061,7 +1922,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     const SizedBox(height: 4),
                     Text(
                       '$subtitle\n过高 >${_alertBpm.toInt()} / 过低 <$_lowAlertBpm 次/分钟',
-                      style: const TextStyle(color: _mutedInk, height: 1.35, fontSize: 12),
+                      style: const TextStyle(
+                          color: _mutedInk, height: 1.35, fontSize: 12),
                     ),
                     if (chips.isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -2253,7 +2115,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         scrolledUnderElevation: 0,
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(1),
-            child: AnimatedContainer(
+          child: AnimatedContainer(
             duration: const Duration(milliseconds: 400),
             color: isAlertMode ? const Color(0xFFF3C9BE) : _warmBorder,
             height: 1,
@@ -2281,16 +2143,25 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuItem(
                 enabled: false,
                 height: 32,
-                child: Text('家庭协作', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+                child: Text('家庭协作',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
-              const PopupMenuItem(value: 'child_profile', child: Text('录入孩子资料')),
+              const PopupMenuItem(
+                  value: 'child_profile', child: Text('录入孩子资料')),
               const PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
               const PopupMenuDivider(),
               const PopupMenuItem(
                 enabled: false,
                 height: 32,
-                child: Text('手环管理', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+                child: Text('手环管理',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600)),
               ),
               PopupMenuItem(
                 value: 'band_bind',
@@ -2310,16 +2181,25 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuItem(
                 enabled: false,
                 height: 32,
-                child: Text('设备管理', style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w600)),
+                child: Text('设备管理',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600)),
               ),
               const PopupMenuItem(value: 'esp_prov', child: Text('配网毛绒球呼吸灯')),
-              const PopupMenuItem(value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
-              const PopupMenuItem(value: 'xiaozhi_prov', child: Text('配网星星机器人')),
-              const PopupMenuItem(value: 'xiaozhi_reset', child: Text('让星星机器人重新配网')),
-              const PopupMenuItem(value: 'xiaozhi_bind', child: Text('绑定小智设备 (MAC)')),
+              const PopupMenuItem(
+                  value: 'esp_reset', child: Text('让毛绒球呼吸灯重新配网')),
+              const PopupMenuItem(
+                  value: 'xiaozhi_prov', child: Text('配网星星机器人')),
+              const PopupMenuItem(
+                  value: 'xiaozhi_reset', child: Text('让星星机器人重新配网')),
+              const PopupMenuItem(
+                  value: 'xiaozhi_bind', child: Text('绑定小智设备 (MAC)')),
               const PopupMenuDivider(),
               if (widget.onSwitchMode != null)
-                const PopupMenuItem(value: 'switch_mode', child: Text('切换使用身份')),
+                const PopupMenuItem(
+                    value: 'switch_mode', child: Text('切换使用身份')),
               const PopupMenuItem(value: 'logout', child: Text('退出登录')),
             ],
           ),
@@ -2340,7 +2220,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           ),
           IconButton(
             icon: Icon(Icons.insights_rounded,
-              color: isAlertMode ? _coral : _sage),
+                color: isAlertMode ? _coral : _sage),
             tooltip: '历史足迹',
             onPressed: () {
               Navigator.of(context).push<void>(
@@ -2355,7 +2235,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           ),
           IconButton(
             icon: Icon(Icons.auto_stories_outlined,
-              color: isAlertMode ? _coral : _sage),
+                color: isAlertMode ? _coral : _sage),
             tooltip: 'AI 报告',
             onPressed: () {
               Navigator.of(context).push<void>(
@@ -2429,19 +2309,19 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         boxShadow: [
                           BoxShadow(
                             color: isAlertMode
-                              ? _coral.withValues(alpha: 0.32)
+                                ? _coral.withValues(alpha: 0.32)
                                 : isDismissed
-                                ? _sage.withValues(alpha: 0.26)
-                                : _teal.withValues(alpha: 0.25),
+                                    ? _sage.withValues(alpha: 0.26)
+                                    : _teal.withValues(alpha: 0.25),
                             blurRadius: 28,
                             spreadRadius: 2,
                           ),
                           BoxShadow(
                             color: isAlertMode
-                              ? _coral.withValues(alpha: 0.12)
+                                ? _coral.withValues(alpha: 0.12)
                                 : isDismissed
-                                ? _sage.withValues(alpha: 0.1)
-                                : _teal.withValues(alpha: 0.1),
+                                    ? _sage.withValues(alpha: 0.1)
+                                    : _teal.withValues(alpha: 0.1),
                             blurRadius: 48,
                             spreadRadius: 8,
                           ),
@@ -2471,9 +2351,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     fontSize: 48,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0,
-                    color: isAlertMode
-                      ? _coral
-                      : _ink,
+                    color: isAlertMode ? _coral : _ink,
                   ),
                   child: Text(bpm > 0 ? bpm.toStringAsFixed(0) : '--'),
                 ),
@@ -2515,8 +2393,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                       color: isAlertMode
                           ? const Color(0xFFC75F4B)
                           : isDismissed
-                            ? _sage
-                            : _mutedInk,
+                              ? _sage
+                              : _mutedInk,
                     ),
                   ),
                 ),
@@ -2526,7 +2404,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                     child: Text(
                       '轻触上方图标，确认已知晓',
                       style: TextStyle(
-                          color: const Color(0xFFFF7F72).withValues(alpha: 0.75),
+                          color:
+                              const Color(0xFFFF7F72).withValues(alpha: 0.75),
                           fontSize: 12,
                           fontWeight: FontWeight.w500),
                     ),
@@ -2575,7 +2454,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         iconColor: Colors.blueGrey,
         message: '正在检查设备绑定状态…',
         trailing: const SizedBox(
-          width: 16, height: 16,
+          width: 16,
+          height: 16,
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
       );
@@ -2598,9 +2478,12 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         trailing: TextButton(
           onPressed: acting ? null : _unbindCurrentDevice,
           child: acting
-              ? const SizedBox(width: 16, height: 16,
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('解绑', style: TextStyle(color: Colors.red, fontSize: 12)),
+              : const Text('解绑',
+                  style: TextStyle(color: Colors.red, fontSize: 12)),
         ),
       );
     }
@@ -2610,7 +2493,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       return _buildBindingCard(
         icon: Icons.link_off,
         iconColor: Colors.red,
-        message: '设备 ($mac)\n已绑定到「${binding.boundChildNickname ?? "孩子#" + (binding.boundChildId?.toString() ?? "?")}」(ID: ${binding.boundChildId})\n请切换到对应孩子后再解绑',
+        message:
+            '设备 ($mac)\n已绑定到「${binding.boundChildNickname ?? "孩子#" + (binding.boundChildId?.toString() ?? "?")}」(ID: ${binding.boundChildId})\n请切换到对应孩子后再解绑',
       );
     }
 
@@ -2628,8 +2512,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         ),
         child: acting
-            ? const SizedBox(width: 16, height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
             : const Text('绑定', style: TextStyle(fontSize: 12)),
       ),
     );
@@ -2668,9 +2555,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
 
   Widget _buildStressChip() {
     final value = stressValue;
-    final text = value == null
-        ? '压力值：收集中…'
-        : '压力值：$value · 阈值 $_stressAlertThreshold';
+    final text =
+        value == null ? '压力值：收集中…' : '压力值：$value · 阈值 $_stressAlertThreshold';
     final color = value == null
         ? Colors.blueGrey
         : value >= _stressAlertThreshold + 20
@@ -2707,8 +2593,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                           color: color.shade700)),
                 ]),
                 const SizedBox(height: 12),
-                Text(detail,
-                    style: const TextStyle(fontSize: 14, height: 1.6)),
+                Text(detail, style: const TextStyle(fontSize: 14, height: 1.6)),
               ],
             ),
           ),
@@ -2795,157 +2680,154 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                         child: Text(
                           _chartLoadFailed ? '心率数据暂时没有刷新出来\n稍后再试试' : '暂无心率数据',
                           textAlign: TextAlign.center,
-                          style: const TextStyle(color: _mutedInk, fontSize: 13),
+                          style:
+                              const TextStyle(color: _mutedInk, fontSize: 13),
                         ),
                       )
                     : LineChart(
-                  LineChartData(
-                    lineBarsData: [
-                      LineChartBarData(
-                        spots: chartData,
-                        isCurved: true,
-                        curveSmoothness: 0.3,
-                        color: isAlert
-                          ? _coral
-                          : _teal,
-                        barWidth: 2.5,
-                        dotData: FlDotData(
-                          show: chartData.length <= 10,
-                          getDotPainter: (spot, _, __, ___) =>
-                              FlDotCirclePainter(
-                            radius: 3,
-                            color: isAlert
-                              ? _coral
-                              : _teal,
-                            strokeWidth: 1.5,
-                            strokeColor: Colors.white,
-                          ),
-                        ),
-                        belowBarData: BarAreaData(
-                          show: true,
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              (isAlert
-                                    ? _coral
-                                    : _teal)
-                                  .withValues(alpha: 0.25),
-                              (isAlert
-                                    ? _coral
-                                    : _teal)
-                                  .withValues(alpha: 0.02),
+                        LineChartData(
+                          lineBarsData: [
+                            LineChartBarData(
+                              spots: chartData,
+                              isCurved: true,
+                              curveSmoothness: 0.3,
+                              color: isAlert ? _coral : _teal,
+                              barWidth: 2.5,
+                              dotData: FlDotData(
+                                show: chartData.length <= 10,
+                                getDotPainter: (spot, _, __, ___) =>
+                                    FlDotCirclePainter(
+                                  radius: 3,
+                                  color: isAlert ? _coral : _teal,
+                                  strokeWidth: 1.5,
+                                  strokeColor: Colors.white,
+                                ),
+                              ),
+                              belowBarData: BarAreaData(
+                                show: true,
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    (isAlert ? _coral : _teal)
+                                        .withValues(alpha: 0.25),
+                                    (isAlert ? _coral : _teal)
+                                        .withValues(alpha: 0.02),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                          extraLinesData: ExtraLinesData(
+                            horizontalLines: [
+                              HorizontalLine(
+                                y: _alertBpm,
+                                color: _coral.withValues(alpha: 0.55),
+                                strokeWidth: 1.5,
+                                dashArray: [8, 4],
+                                label: HorizontalLineLabel(
+                                  show: true,
+                                  alignment: Alignment.topRight,
+                                  padding: const EdgeInsets.only(
+                                      right: 8, bottom: 4),
+                                  style: TextStyle(
+                                    color: Colors.red.shade300,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  labelResolver: (line) => '${line.y.toInt()}',
+                                ),
+                              ),
+                              HorizontalLine(
+                                y: _lowAlertBpm.toDouble(),
+                                color: _amber.withValues(alpha: 0.45),
+                                strokeWidth: 1.2,
+                                dashArray: [6, 4],
+                                label: HorizontalLineLabel(
+                                  show: true,
+                                  alignment: Alignment.bottomRight,
+                                  padding:
+                                      const EdgeInsets.only(right: 8, top: 4),
+                                  style: TextStyle(
+                                    color: Colors.orange.shade300,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  labelResolver: (line) => '${line.y.toInt()}',
+                                ),
+                              ),
                             ],
                           ),
-                        ),
-                      ),
-                    ],
-                    extraLinesData: ExtraLinesData(
-                      horizontalLines: [
-                        HorizontalLine(
-                          y: _alertBpm,
-                          color: _coral.withValues(alpha: 0.55),
-                          strokeWidth: 1.5,
-                          dashArray: [8, 4],
-                          label: HorizontalLineLabel(
+                          gridData: FlGridData(
                             show: true,
-                            alignment: Alignment.topRight,
-                            padding:
-                                const EdgeInsets.only(right: 8, bottom: 4),
-                            style: TextStyle(
-                              color: Colors.red.shade300,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            labelResolver: (line) => '${line.y.toInt()}',
+                            drawVerticalLine: false,
+                            horizontalInterval: 25,
+                            getDrawingHorizontalLine: (value) {
+                              if ((value - _alertBpm).abs() < 0.01 ||
+                                  (value - _lowAlertBpm).abs() < 0.01) {
+                                return const FlLine(
+                                    color: Colors.transparent, strokeWidth: 0);
+                              }
+                              return FlLine(
+                                color: _warmBorder.withValues(alpha: 0.55),
+                                strokeWidth: 1,
+                              );
+                            },
                           ),
-                        ),
-                        HorizontalLine(
-                          y: _lowAlertBpm.toDouble(),
-                          color: _amber.withValues(alpha: 0.45),
-                          strokeWidth: 1.2,
-                          dashArray: [6, 4],
-                          label: HorizontalLineLabel(
-                            show: true,
-                            alignment: Alignment.bottomRight,
-                            padding: const EdgeInsets.only(right: 8, top: 4),
-                            style: TextStyle(
-                              color: Colors.orange.shade300,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            labelResolver: (line) => '${line.y.toInt()}',
-                          ),
-                        ),
-                      ],
-                    ),
-                    gridData: FlGridData(
-                      show: true,
-                      drawVerticalLine: false,
-                      horizontalInterval: 25,
-                      getDrawingHorizontalLine: (value) {
-                        if ((value - _alertBpm).abs() < 0.01 ||
-                          (value - _lowAlertBpm).abs() < 0.01) {
-                          return const FlLine(
-                              color: Colors.transparent, strokeWidth: 0);
-                        }
-                        return FlLine(
-                          color: _warmBorder.withValues(alpha: 0.55),
-                          strokeWidth: 1,
-                        );
-                      },
-                    ),
-                    minY: max(30, _lowAlertBpm - 20).toDouble(),
-                    // H2: 动态计算 maxY，至少覆盖报警遨値 + 20，防止峰値被截断
-                    maxY: max(
-                      chartData.isEmpty ? _alertBpm : chartData.map((s) => s.y).reduce(max),
-                      _alertBpm,
-                    ) + 20,
-                    minX: 0,
-                    maxX: chartData.isNotEmpty ? chartData.last.x : 0,
-                    titlesData: FlTitlesData(
-                      bottomTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: chartData.isNotEmpty,
-                          reservedSize: 28,
-                          interval: _bottomTitleInterval(),
-                          getTitlesWidget: (value, meta) {
-                            final label = _shortTimeAtX(value);
-                            if (label.isEmpty) {
-                              return const SizedBox.shrink();
-                            }
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: Text(
-                                label,
-                                style: const TextStyle(
-                                  fontSize: 10, color: _mutedInk),
+                          minY: max(30, _lowAlertBpm - 20).toDouble(),
+                          // H2: 动态计算 maxY，至少覆盖报警遨値 + 20，防止峰値被截断
+                          maxY: max(
+                                chartData.isEmpty
+                                    ? _alertBpm
+                                    : chartData.map((s) => s.y).reduce(max),
+                                _alertBpm,
+                              ) +
+                              20,
+                          minX: 0,
+                          maxX: chartData.isNotEmpty ? chartData.last.x : 0,
+                          titlesData: FlTitlesData(
+                            bottomTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: chartData.isNotEmpty,
+                                reservedSize: 28,
+                                interval: _bottomTitleInterval(),
+                                getTitlesWidget: (value, meta) {
+                                  final label = _shortTimeAtX(value);
+                                  if (label.isEmpty) {
+                                    return const SizedBox.shrink();
+                                  }
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 6),
+                                    child: Text(
+                                      label,
+                                      style: const TextStyle(
+                                          fontSize: 10, color: _mutedInk),
+                                    ),
+                                  );
+                                },
                               ),
-                            );
-                          },
+                            ),
+                            leftTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                showTitles: true,
+                                reservedSize: 30,
+                                interval: 25,
+                                getTitlesWidget: (value, meta) {
+                                  return Text(
+                                    value.toInt().toString(),
+                                    style: const TextStyle(
+                                        fontSize: 10, color: _mutedInk),
+                                  );
+                                },
+                              ),
+                            ),
+                            topTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false)),
+                            rightTitles: const AxisTitles(
+                                sideTitles: SideTitles(showTitles: false)),
+                          ),
                         ),
                       ),
-                      leftTitles: AxisTitles(
-                        sideTitles: SideTitles(
-                          showTitles: true,
-                          reservedSize: 30,
-                          interval: 25,
-                          getTitlesWidget: (value, meta) {
-                            return Text(
-                              value.toInt().toString(),
-                              style: const TextStyle(
-                                  fontSize: 10, color: _mutedInk),
-                            );
-                          },
-                        ),
-                      ),
-                      topTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false)),
-                      rightTitles: const AxisTitles(
-                          sideTitles: SideTitles(showTitles: false)),
-                    ),
-                  ),
-                ),
               ),
             ],
           ),
@@ -3087,8 +2969,8 @@ class _BandStatusBanner extends StatelessWidget {
                     onPressed: () => onRetry(),
                     style: TextButton.styleFrom(
                       foregroundColor: palette.fg,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 0),
                       minimumSize: const Size(0, 28),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
@@ -3254,6 +3136,199 @@ class _BandStatusBanner extends StatelessWidget {
           icon: Icons.bluetooth,
         );
     }
+  }
+}
+
+class _ParentChildProfileDialog extends StatefulWidget {
+  const _ParentChildProfileDialog({
+    super.key,
+    this.profile,
+  });
+
+  final ParentChildProfile? profile;
+
+  @override
+  State<_ParentChildProfileDialog> createState() =>
+      _ParentChildProfileDialogState();
+}
+
+class _ParentChildProfileDialogState extends State<_ParentChildProfileDialog> {
+  late final TextEditingController nameController;
+  late final TextEditingController nicknameController;
+  late final TextEditingController ageController;
+  late final TextEditingController personalityController;
+  late final TextEditingController interestsController;
+  late final TextEditingController categoryController;
+  late final TextEditingController noteController;
+  String? selectedGender;
+  String? errorText;
+
+  @override
+  void initState() {
+    super.initState();
+    final profile = widget.profile;
+    nameController = TextEditingController(text: profile?.name ?? '');
+    nicknameController = TextEditingController(text: profile?.nickname ?? '');
+    ageController = TextEditingController(text: profile?.age?.toString() ?? '');
+    personalityController =
+        TextEditingController(text: profile?.personality ?? '');
+    interestsController = TextEditingController(text: profile?.interests ?? '');
+    categoryController = TextEditingController(text: profile?.category ?? '');
+    noteController = TextEditingController(text: profile?.note ?? '');
+    selectedGender = (profile?.gender?.trim().isNotEmpty ?? false)
+        ? profile!.gender!.trim()
+        : null;
+  }
+
+  @override
+  void dispose() {
+    nameController.dispose();
+    nicknameController.dispose();
+    ageController.dispose();
+    personalityController.dispose();
+    interestsController.dispose();
+    categoryController.dispose();
+    noteController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final age = int.tryParse(ageController.text.trim());
+    final thresholds = parentHeartRateThresholdsForAge(age);
+    return AlertDialog(
+      title: const Text('录入孩子资料'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: '孩子姓名，可选'),
+            ),
+            TextField(
+              controller: nicknameController,
+              decoration: const InputDecoration(labelText: '小名，可选'),
+            ),
+            TextField(
+              controller: ageController,
+              keyboardType: TextInputType.number,
+              onChanged: (_) => setState(() => errorText = null),
+              decoration: const InputDecoration(labelText: '年龄'),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: selectedGender,
+              decoration: const InputDecoration(labelText: '性别，可选'),
+              items: _parentGenderOptions
+                  .map((item) =>
+                      DropdownMenuItem<String>(value: item, child: Text(item)))
+                  .toList(),
+              onChanged: (value) => setState(() => selectedGender = value),
+            ),
+            TextField(
+              controller: categoryController,
+              decoration: const InputDecoration(
+                labelText: '类别',
+                hintText: '如多动症、自闭症、发育迟缓等',
+              ),
+            ),
+            TextField(
+              controller: personalityController,
+              decoration: const InputDecoration(labelText: '性格，可选'),
+            ),
+            TextField(
+              controller: interestsController,
+              decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _warmSurface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: _warmBorder),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '自动提醒线',
+                    style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                      '${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}'),
+                  const SizedBox(height: 4),
+                  Text('过高提醒：>${thresholds.high} 次/分钟'),
+                  Text('过低提醒：<${thresholds.low} 次/分钟'),
+                ],
+              ),
+            ),
+            TextField(
+              controller: noteController,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: '补充说明，可选'),
+            ),
+            if (errorText != null) ...[
+              const SizedBox(height: 10),
+              Text(errorText!, style: const TextStyle(color: _coral)),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('取消'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final ageValue = int.tryParse(ageController.text.trim());
+            if (ageValue == null || ageValue < 0) {
+              setState(() {
+                errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。';
+              });
+              return;
+            }
+            final thresholds = parentHeartRateThresholdsForAge(ageValue);
+            Navigator.of(context).pop(
+              ParentChildProfile(
+                childId: widget.profile?.childId ?? 1,
+                name: nameController.text.trim().isEmpty
+                    ? null
+                    : nameController.text.trim(),
+                nickname: nicknameController.text.trim().isEmpty
+                    ? null
+                    : nicknameController.text.trim(),
+                age: ageValue,
+                gender: selectedGender?.trim().isEmpty ?? true
+                    ? null
+                    : selectedGender!.trim(),
+                personality: personalityController.text.trim().isEmpty
+                    ? null
+                    : personalityController.text.trim(),
+                interests: interestsController.text.trim().isEmpty
+                    ? null
+                    : interestsController.text.trim(),
+                category: categoryController.text.trim().isEmpty
+                    ? null
+                    : categoryController.text.trim(),
+                note: noteController.text.trim().isEmpty
+                    ? null
+                    : noteController.text.trim(),
+                highThresholdBpm: thresholds.high,
+                lowThresholdBpm: thresholds.low,
+                updatedAt: DateTime.now(),
+              ),
+            );
+          },
+          child: const Text('保存'),
+        ),
+      ],
+    );
   }
 }
 
