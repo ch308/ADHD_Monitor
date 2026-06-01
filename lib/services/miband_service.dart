@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:encrypt/encrypt.dart' as enc;
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/band_stress_data.dart';
 import '../models/heart_rate_data.dart';
 import 'cloud_service.dart';
+import 'huami2021_protocol.dart';
 
 /// 手环连接生命周期阶段。
 ///
@@ -173,10 +175,12 @@ class MiBand6Auth {
   BluetoothCharacteristic? _hrChar;
   BluetoothCharacteristic? _alertChar;
   BluetoothCharacteristic? _chunkedV3WriteChar;
+  BluetoothCharacteristic? _chunkedV3ReadChar;
   int _chunkedV3Seq = 0;
   BluetoothCharacteristic? _stressChar;
   StreamSubscription<List<int>>? _hrSub;
   StreamSubscription<List<int>>? _stressSub;
+  StreamSubscription<List<int>>? _huami2021Sub;
   Timer? _stressPollTimer;
   int? _lastStressRaw;
   int _stressStaleCount = 0;
@@ -188,6 +192,10 @@ class MiBand6Auth {
   BluetoothCharacteristic? _authChar;
   StreamSubscription<List<int>>? _authSub;
   Completer<bool>? _authCompleter;
+  Completer<Huami2021Payload>? _huami2021PayloadCompleter;
+  int? _huami2021ExpectedEndpoint;
+  Huami2021Crypto? _huami2021Crypto;
+  Huami2021Decoder? _huami2021Decoder;
   bool _authWriteWithoutResponse = false;
 
   // ── 自动重连用 ──
@@ -362,22 +370,37 @@ class MiBand6Auth {
     if (hex != null && hex.isNotEmpty) {
       _setStage(MiBandStage.authenticating, message: '已连接，正在与手环完成安全握手…');
       try {
-        await _runMiBand6Handshake(services, hex);
+        if (_hasHuami2021ChunkedPair(services)) {
+          await _runHuami2021Handshake(services, hex);
+        } else {
+          await _runMiBand6Handshake(services, hex);
+        }
         _authenticated = true;
         debugPrint('MiBand6Auth: 🎉 private handshake unlocked.');
       } catch (e) {
-        debugPrint('MiBand6Auth: private handshake failed -> $e');
-        if (e.toString().contains('未找到小米手环鉴权特征值')) {
+        debugPrint('MiBand6Auth: primary private handshake failed -> $e');
+        if (_hasHuami2021ChunkedPair(services)) {
           _setStage(
-            MiBandStage.awaitingBroadcast,
-            message: '已经连上手环，但还不能直接接收心率。'
-                '我们会继续尝试；如果仍没有心率，请在小米运动健康中开启「运动心率广播」。',
-          );
-        } else {
-          _setStage(
-            MiBandStage.authFailed,
-            message: '这只手环暂时无法完成连接校验，请确认当前连接的是已绑定的那只手环。',
-          );
+              MiBandStage.authenticating, message: '新协议握手失败，正在尝试旧式校验…');
+        }
+        try {
+          await _runMiBand6Handshake(services, hex);
+          _authenticated = true;
+          debugPrint('MiBand6Auth: 🎉 legacy private handshake unlocked.');
+        } catch (legacyError) {
+          debugPrint('MiBand6Auth: private handshake failed -> $legacyError');
+          if (legacyError.toString().contains('未找到')) {
+            _setStage(
+              MiBandStage.awaitingBroadcast,
+              message: '已经连上手环，但还不能直接接收心率。'
+                  '我们会继续尝试；如果仍没有心率，请在小米运动健康中开启「运动心率广播」。',
+            );
+          } else {
+            _setStage(
+              MiBandStage.authFailed,
+              message: '这只手环暂时无法完成连接校验，请确认当前连接的是已绑定的那只手环。',
+            );
+          }
         }
         // 握手失败仍然继续尝试标准 HR 订阅，方便排查（必要时上层可读 isAuthenticated）
       }
@@ -483,11 +506,18 @@ class MiBand6Auth {
     _stressSub = null;
     unawaited(_authSub?.cancel());
     _authSub = null;
+    unawaited(_huami2021Sub?.cancel());
+    _huami2021Sub = null;
     _hrChar = null;
     _alertChar = null;
     _chunkedV3WriteChar = null;
+    _chunkedV3ReadChar = null;
     _chunkedV3Seq = 0;
     _authChar = null;
+    _huami2021PayloadCompleter = null;
+    _huami2021ExpectedEndpoint = null;
+    _huami2021Crypto = null;
+    _huami2021Decoder = null;
     _authWriteWithoutResponse = false;
     _stressChar = null;
     _setStage(
@@ -538,6 +568,156 @@ class MiBand6Auth {
         debugPrint('    char ${c.uuid.str} props=${c.properties}');
       }
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // 小米手环 6 / Huami 2021 新式 chunked-v3 握手
+  // ──────────────────────────────────────────────────────────────
+
+  bool _hasHuami2021ChunkedPair(List<BluetoothService> services) {
+    BluetoothCharacteristic? writeChar;
+    BluetoothCharacteristic? readChar;
+    for (final s in services) {
+      for (final c in s.characteristics) {
+        final id = c.uuid.str.toLowerCase();
+        if (id.startsWith('00000016-') &&
+            (c.properties.write || c.properties.writeWithoutResponse)) {
+          writeChar = c;
+        }
+        if (id.startsWith('00000017-') &&
+            (c.properties.notify || c.properties.indicate)) {
+          readChar = c;
+        }
+      }
+    }
+    return writeChar != null && readChar != null;
+  }
+
+  Future<void> _runHuami2021Handshake(
+    List<BluetoothService> services,
+    String hexKey,
+  ) async {
+    final writeChar = await _ensureChunkedV3WriteChar(services: services);
+    final readChar = await _ensureChunkedV3ReadChar(services: services);
+    if (writeChar == null || readChar == null) {
+      throw StateError('未找到 Huami 2021 新协议通道（0x0016/0x0017）。');
+    }
+
+    final crypto = Huami2021Crypto(authKey: _hexToBytes(hexKey));
+    crypto.start();
+    final decoder = Huami2021Decoder();
+    _huami2021Crypto = crypto;
+    _huami2021Decoder = decoder;
+    await _huami2021Sub?.cancel();
+    await readChar.setNotifyValue(true);
+    _huami2021Sub = readChar.onValueReceived.listen((data) {
+      unawaited(_handleHuami2021Notification(data));
+    });
+
+    debugPrint('MiBand6Auth: Huami2021 send auth public key.');
+    await _writeHuami2021Chunks(
+      endpoint: 0x0082,
+      payload: crypto.buildAuthHello(),
+      encrypted: false,
+    );
+
+    final remoteKey = await _waitHuami2021Payload(0x0082, authTimeout);
+    final sessionCommand = crypto.handleRemoteKey(remoteKey.payload);
+    debugPrint('MiBand6Auth: Huami2021 send double encrypted random.');
+    await _writeHuami2021Chunks(
+      endpoint: 0x0082,
+      payload: sessionCommand,
+      encrypted: false,
+    );
+
+    final sessionResult = await _waitHuami2021Payload(0x0082, authTimeout);
+    final p = sessionResult.payload;
+    if (p.length >= 3 && p[0] == 0x10 && p[1] == 0x05 && p[2] == 0x01) {
+      debugPrint('MiBand6Auth: Huami2021 auth success.');
+      return;
+    }
+    if (p.length >= 3 && p[0] == 0x10 && p[1] == 0x05 && p[2] == 0x25) {
+      throw StateError('Huami2021 鉴权失败：Auth Key 不匹配。');
+    }
+    throw StateError('Huami2021 鉴权返回未知响应：$p');
+  }
+
+  Future<void> _handleHuami2021Notification(List<int> data) async {
+    if (data.isEmpty) return;
+    debugPrint('MiBand6Auth: Huami2021 notify <- ${_hexDump(data)}');
+    if (data[0] == 0x04) {
+      debugPrint('MiBand6Auth: Huami2021 ack <- ${_hexDump(data)}');
+      return;
+    }
+    final decoder = _huami2021Decoder;
+    final crypto = _huami2021Crypto;
+    if (decoder == null || crypto == null) return;
+    final needsAck = decoder.needsAck(data);
+    final payload = decoder.decode(data, crypto: crypto, extendedFlags: true);
+    if (needsAck) {
+      await _sendHuami2021Ack(decoder.lastHandle, decoder.lastCount);
+    }
+    if (payload == null) return;
+    debugPrint('MiBand6Auth: Huami2021 payload endpoint='
+        '0x${payload.endpoint.toRadixString(16).padLeft(4, '0')} '
+        'data=${_hexDump(payload.payload)}');
+    final completer = _huami2021PayloadCompleter;
+    final expectedEndpoint = _huami2021ExpectedEndpoint;
+    if (completer != null &&
+        !completer.isCompleted &&
+        (expectedEndpoint == null || payload.endpoint == expectedEndpoint)) {
+      completer.complete(payload);
+    }
+  }
+
+  Future<Huami2021Payload> _waitHuami2021Payload(
+      int endpoint, Duration timeout) async {
+    final completer = Completer<Huami2021Payload>();
+    _huami2021PayloadCompleter = completer;
+    _huami2021ExpectedEndpoint = endpoint;
+    try {
+      return await completer.future.timeout(timeout);
+    } finally {
+      if (_huami2021PayloadCompleter == completer) {
+        _huami2021PayloadCompleter = null;
+        _huami2021ExpectedEndpoint = null;
+      }
+    }
+  }
+
+  Future<void> _writeHuami2021Chunks({
+    required int endpoint,
+    required List<int> payload,
+    required bool encrypted,
+  }) async {
+    final ch = await _ensureChunkedV3WriteChar();
+    final crypto = _huami2021Crypto;
+    if (ch == null || crypto == null) {
+      throw StateError('Huami2021 write channel is not ready.');
+    }
+    final chunks = crypto.encode(
+      endpoint: endpoint,
+      payload: payload,
+      encrypted: encrypted,
+      extendedFlags: true,
+      mtu: 247,
+    );
+    final noResp = ch.properties.writeWithoutResponse;
+    for (final chunk in chunks) {
+      debugPrint('MiBand6Auth: Huami2021 write -> ${_hexDump(chunk)}');
+      await ch.write(chunk, withoutResponse: noResp);
+    }
+  }
+
+  Future<void> _sendHuami2021Ack(int handle, int count) async {
+    final readChar = await _ensureChunkedV3ReadChar();
+    if (readChar == null) return;
+    final ack = <int>[0x04, 0x00, handle & 0xff, 0x01, count & 0xff];
+    debugPrint('MiBand6Auth: Huami2021 ack -> ${_hexDump(ack)}');
+    await readChar.write(
+      ack,
+      withoutResponse: readChar.properties.writeWithoutResponse,
+    );
   }
 
   // ──────────────────────────────────────────────────────────────
@@ -789,13 +969,21 @@ class MiBand6Auth {
     //   payload[0] = 0x03 (subtype: vibration)
     //   payload[1] = 0x01 / 0x00 (start / stop)
     final payload = <int>[0x03, start ? 0x01 : 0x00];
-    final pkt = _buildChunkedV3Packet(
-      endpoint: 0x000d,
-      payload: payload,
-    );
-    final noResp = ch.properties.writeWithoutResponse;
     try {
-      await ch.write(pkt, withoutResponse: noResp);
+      final crypto = _huami2021Crypto;
+      if (_authenticated && crypto != null && crypto.isReady) {
+        await _writeHuami2021Chunks(
+          endpoint: 0x000d,
+          payload: payload,
+          encrypted: true,
+        );
+      } else {
+        final pkt = _buildChunkedV3Packet(
+          endpoint: 0x000d,
+          payload: payload,
+        );
+        await ch.write(pkt, withoutResponse: ch.properties.writeWithoutResponse);
+      }
       return true;
     } catch (e) {
       debugPrint('MiBand6Auth: chunked-v3 write failed -> $e');
@@ -837,17 +1025,19 @@ class MiBand6Auth {
     ];
   }
 
-  Future<BluetoothCharacteristic?> _ensureChunkedV3WriteChar() async {
+  Future<BluetoothCharacteristic?> _ensureChunkedV3WriteChar({
+    List<BluetoothService>? services,
+  }) async {
     final existing = _chunkedV3WriteChar;
     if (existing != null) return existing;
     final dev = _device;
     if (dev == null || !dev.isConnected) return null;
-    final services = await dev.discoverServices();
+    final discovered = services ?? await dev.discoverServices();
 
     // Mi Band 6 / 6 NFC: chunked-v3 write char (`00000016-…`) 挂在 FEE0
     // 而不是 FEE1，所以这里不限定 service，直接按 char UUID 全局搜。
     BluetoothCharacteristic? candidate;
-    for (final s in services) {
+    for (final s in discovered) {
       for (final c in s.characteristics) {
         final id = c.uuid.str.toLowerCase();
         if (id.startsWith('00000016-') &&
@@ -862,6 +1052,34 @@ class MiBand6Auth {
       if (candidate != null) break;
     }
     _chunkedV3WriteChar = candidate;
+    return candidate;
+  }
+
+  Future<BluetoothCharacteristic?> _ensureChunkedV3ReadChar({
+    List<BluetoothService>? services,
+  }) async {
+    final existing = _chunkedV3ReadChar;
+    if (existing != null) return existing;
+    final dev = _device;
+    if (dev == null || !dev.isConnected) return null;
+    final discovered = services ?? await dev.discoverServices();
+
+    BluetoothCharacteristic? candidate;
+    for (final s in discovered) {
+      for (final c in s.characteristics) {
+        final id = c.uuid.str.toLowerCase();
+        if (id.startsWith('00000017-') &&
+            (c.properties.notify || c.properties.indicate)) {
+          candidate = c;
+          debugPrint(
+              'MiBand6Auth: chunked-v3 read char located: '
+              '${c.uuid.str} under service ${s.uuid.str}');
+          break;
+        }
+      }
+      if (candidate != null) break;
+    }
+    _chunkedV3ReadChar = candidate;
     return candidate;
   }
 
@@ -1308,13 +1526,20 @@ class MiBand6Auth {
     _stressSub = null;
     await _authSub?.cancel();
     _authSub = null;
+    await _huami2021Sub?.cancel();
+    _huami2021Sub = null;
     await _connStateSub?.cancel();
     _connStateSub = null;
     _hrChar = null;
     _alertChar = null;
     _chunkedV3WriteChar = null;
+    _chunkedV3ReadChar = null;
     _chunkedV3Seq = 0;
     _authChar = null;
+    _huami2021PayloadCompleter = null;
+    _huami2021ExpectedEndpoint = null;
+    _huami2021Crypto = null;
+    _huami2021Decoder = null;
     _authWriteWithoutResponse = false;
     _stressChar = null;
     _authCompleter = null;
