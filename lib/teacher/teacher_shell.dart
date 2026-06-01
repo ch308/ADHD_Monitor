@@ -1107,240 +1107,240 @@ class _TeacherShellState extends State<TeacherShell> {
       );
       if (!result.success || result.client == null) return;
       await _disposeTeacherClient();
+      _attachTeacherClient(result.client!);
+    }
+    await _bleService.vibrateAlertBand(_teacherBandClient!);
+  }
 
-    _BandDiagnosticViewData _buildTeacherDiagnostic() {
-      return _describeBandDiagnostic(
-        title: '老师手环',
-        displayName: _teacherBand?.displayName,
-        hasBinding: _teacherBand != null,
-        status: _teacherBandStatus,
-        lastFailureReason: _teacherBandLastFailure,
-        verified: _teacherBand?.vibrationVerified == true,
+  _BandDiagnosticViewData _buildTeacherDiagnostic() {
+    return _describeBandDiagnostic(
+      title: '老师手环',
+      displayName: _teacherBand?.displayName,
+      hasBinding: _teacherBand != null,
+      status: _teacherBandStatus,
+      lastFailureReason: _teacherBandLastFailure,
+      verified: _teacherBand?.vibrationVerified == true,
+    );
+  }
+
+  _BandDiagnosticViewData _buildStudentDiagnostic(TeacherStudent student) {
+    return _describeBandDiagnostic(
+      title: student.name,
+      displayName: student.bandDisplayName ?? student.bandRemoteId,
+      hasBinding: (student.bandRemoteId ?? '').isNotEmpty,
+      status: _studentBandStatuses[student.id],
+      currentBpm: _bpmByStudent[student.id],
+      lastFailureReason: _studentBandLastFailures[student.id],
+      verified: (student.bandAuthHexKey ?? '').isNotEmpty,
+    );
+  }
+
+  _BandDiagnosticViewData _describeBandDiagnostic({
+    required String title,
+    required bool hasBinding,
+    required MiBandStatus? status,
+    String? displayName,
+    int? currentBpm,
+    String? lastFailureReason,
+    bool verified = false,
+  }) {
+    if (!hasBinding) {
+      return _BandDiagnosticViewData(
+        title: title,
+        stateLabel: '未绑定',
+        detail: '还没有选择手环和连接密钥。',
+        lastSampleText: '最近一次心率时间：暂无',
+        lastFailureText: '最近一次失败原因：暂无',
+        color: AppColors.muted,
+        icon: Icons.link_off_rounded,
       );
     }
 
-    _BandDiagnosticViewData _buildStudentDiagnostic(TeacherStudent student) {
-      return _describeBandDiagnostic(
-        title: student.name,
-        displayName: student.bandDisplayName ?? student.bandRemoteId,
-        hasBinding: (student.bandRemoteId ?? '').isNotEmpty,
-        status: _studentBandStatuses[student.id],
-        currentBpm: _bpmByStudent[student.id],
-        lastFailureReason: _studentBandLastFailures[student.id],
-        verified: (student.bandAuthHexKey ?? '').isNotEmpty,
+    final lastSampleText = status?.lastSampleAt == null
+        ? '最近一次心率时间：暂无'
+        : '最近一次心率时间：${_formatDiagnosticTime(status!.lastSampleAt!)}';
+    final lastFailureText = (lastFailureReason == null || lastFailureReason.isEmpty)
+        ? '最近一次失败原因：暂无'
+        : '最近一次失败原因：$lastFailureReason';
+
+    if (status == null || status.stage == MiBandStage.idle) {
+      return _BandDiagnosticViewData(
+        title: title,
+        stateLabel: '已扫描',
+        detail: status?.message ?? '${displayName ?? '手环'} 已保存，等待开始连接。',
+        lastSampleText: lastSampleText,
+        lastFailureText: lastFailureText,
+        color: AppColors.teal,
+        icon: Icons.bluetooth_searching_rounded,
       );
     }
 
-    _BandDiagnosticViewData _describeBandDiagnostic({
-      required String title,
-      required bool hasBinding,
-      required MiBandStatus? status,
-      String? displayName,
-      int? currentBpm,
-      String? lastFailureReason,
-      bool verified = false,
-    }) {
-      if (!hasBinding) {
+    final message = status.message ?? '${displayName ?? '手环'} 当前状态已更新。';
+    switch (status.stage) {
+      case MiBandStage.permissionDenied:
         return _BandDiagnosticViewData(
           title: title,
-          stateLabel: '未绑定',
-          detail: '还没有选择手环和连接密钥。',
-          lastSampleText: '最近一次心率时间：暂无',
-          lastFailureText: '最近一次失败原因：暂无',
-          color: AppColors.muted,
-          icon: Icons.link_off_rounded,
+          stateLabel: '权限不足',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.warning,
+          icon: Icons.lock_outline_rounded,
         );
-      }
-
-      final lastSampleText = status?.lastSampleAt == null
-          ? '最近一次心率时间：暂无'
-          : '最近一次心率时间：${_formatDiagnosticTime(status!.lastSampleAt!)}';
-      final lastFailureText = (lastFailureReason == null || lastFailureReason.isEmpty)
-          ? '最近一次失败原因：暂无'
-          : '最近一次失败原因：$lastFailureReason';
-
-      if (status == null || status.stage == MiBandStage.idle) {
+      case MiBandStage.bluetoothOff:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '蓝牙未开启',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.warning,
+          icon: Icons.bluetooth_disabled_rounded,
+        );
+      case MiBandStage.scanning:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '搜索中',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.teal,
+          icon: Icons.radar_rounded,
+        );
+      case MiBandStage.notFound:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '未找到',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.warning,
+          icon: Icons.search_off_rounded,
+        );
+      case MiBandStage.connecting:
+      case MiBandStage.authenticating:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '连接中',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.teal,
+          icon: Icons.sync_rounded,
+        );
+      case MiBandStage.authFailed:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '密钥错误',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.coral,
+          icon: Icons.key_off_rounded,
+        );
+      case MiBandStage.hrSubscribed:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '已连接',
+          detail: currentBpm == null ? message : '已连上手环，最新心率 $currentBpm 次/分钟。',
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: verified ? AppColors.sage : AppColors.teal,
+          icon: Icons.bluetooth_connected_rounded,
+        );
+      case MiBandStage.awaitingBroadcast:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '等待心率广播',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.warning,
+          icon: Icons.monitor_heart_outlined,
+        );
+      case MiBandStage.streaming:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '已连接',
+          detail: currentBpm == null ? '正在接收实时心率。' : '最新心率 $currentBpm 次/分钟。',
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: verified ? AppColors.sage : AppColors.teal,
+          icon: Icons.favorite_rounded,
+        );
+      case MiBandStage.disconnected:
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: '连接断开',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.warning,
+          icon: Icons.portable_wifi_off_rounded,
+        );
+      case MiBandStage.error:
+        final isKeyIssue = message.contains('密钥') || message.contains('校验');
+        return _BandDiagnosticViewData(
+          title: title,
+          stateLabel: isKeyIssue ? '密钥错误' : '连接异常',
+          detail: message,
+          lastSampleText: lastSampleText,
+          lastFailureText: lastFailureText,
+          color: AppColors.coral,
+          icon: isKeyIssue ? Icons.key_off_rounded : Icons.error_outline_rounded,
+        );
+      case MiBandStage.idle:
         return _BandDiagnosticViewData(
           title: title,
           stateLabel: '已扫描',
-          detail: status?.message ?? '${displayName ?? '手环'} 已保存，等待开始连接。',
+          detail: message,
           lastSampleText: lastSampleText,
           lastFailureText: lastFailureText,
           color: AppColors.teal,
           icon: Icons.bluetooth_searching_rounded,
         );
-      }
-
-      final message = status.message ?? '${displayName ?? '手环'} 当前状态已更新。';
-      switch (status.stage) {
-        case MiBandStage.permissionDenied:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '权限不足',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.warning,
-            icon: Icons.lock_outline_rounded,
-          );
-        case MiBandStage.bluetoothOff:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '蓝牙未开启',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.warning,
-            icon: Icons.bluetooth_disabled_rounded,
-          );
-        case MiBandStage.scanning:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '搜索中',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.teal,
-            icon: Icons.radar_rounded,
-          );
-        case MiBandStage.notFound:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '未找到',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.warning,
-            icon: Icons.search_off_rounded,
-          );
-        case MiBandStage.connecting:
-        case MiBandStage.authenticating:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '连接中',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.teal,
-            icon: Icons.sync_rounded,
-          );
-        case MiBandStage.authFailed:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '密钥错误',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.coral,
-            icon: Icons.key_off_rounded,
-          );
-        case MiBandStage.hrSubscribed:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '已连接',
-            detail: currentBpm == null ? message : '已连上手环，最新心率 $currentBpm 次/分钟。',
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: verified ? AppColors.sage : AppColors.teal,
-            icon: Icons.bluetooth_connected_rounded,
-          );
-        case MiBandStage.awaitingBroadcast:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '等待心率广播',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.warning,
-            icon: Icons.monitor_heart_outlined,
-          );
-        case MiBandStage.streaming:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '已连接',
-            detail: currentBpm == null ? '正在接收实时心率。' : '最新心率 $currentBpm 次/分钟。',
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: verified ? AppColors.sage : AppColors.teal,
-            icon: Icons.favorite_rounded,
-          );
-        case MiBandStage.disconnected:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '连接断开',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.warning,
-            icon: Icons.portable_wifi_off_rounded,
-          );
-        case MiBandStage.error:
-          final isKeyIssue = message.contains('密钥') || message.contains('校验');
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: isKeyIssue ? '密钥错误' : '连接异常',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.coral,
-            icon: isKeyIssue ? Icons.key_off_rounded : Icons.error_outline_rounded,
-          );
-        case MiBandStage.idle:
-          return _BandDiagnosticViewData(
-            title: title,
-            stateLabel: '已扫描',
-            detail: message,
-            lastSampleText: lastSampleText,
-            lastFailureText: lastFailureText,
-            color: AppColors.teal,
-            icon: Icons.bluetooth_searching_rounded,
-          );
-      }
     }
+  }
 
-    String _formatDiagnosticTime(DateTime time) {
-      final value = time.toLocal();
-      String two(int number) => number.toString().padLeft(2, '0');
-      return '${two(value.month)}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}:${two(value.second)}';
-    }
+  String _formatDiagnosticTime(DateTime time) {
+    final value = time.toLocal();
+    String two(int number) => number.toString().padLeft(2, '0');
+    return '${two(value.month)}-${two(value.day)} ${two(value.hour)}:${two(value.minute)}:${two(value.second)}';
+  }
 
-    Widget _buildConnectionDiagnosticPanel() {
-      final diagnostics = <_BandDiagnosticViewData>[
-        _buildTeacherDiagnostic(),
-        ..._students.map(_buildStudentDiagnostic),
-      ];
+  Widget _buildConnectionDiagnosticPanel() {
+    final diagnostics = <_BandDiagnosticViewData>[
+      _buildTeacherDiagnostic(),
+      ..._students.map(_buildStudentDiagnostic),
+    ];
 
-      return Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '连接诊断',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              '这里会显示每只手环当前是否已扫描、已连接、等待心率广播，或连接密钥是否有误。',
-              style: TextStyle(color: AppColors.muted, height: 1.4),
-            ),
-            const SizedBox(height: 12),
-            for (final item in diagnostics) ...[
-              _BandDiagnosticTile(item: item),
-              if (item != diagnostics.last) const SizedBox(height: 10),
-            ],
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            '连接诊断',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            '这里会显示每只手环当前是否已扫描、已连接、等待心率广播，或连接密钥是否有误。',
+            style: TextStyle(color: AppColors.muted, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          for (final item in diagnostics) ...[
+            _BandDiagnosticTile(item: item),
+            if (item != diagnostics.last) const SizedBox(height: 10),
           ],
-        ),
-      );
-    }
-      _attachTeacherClient(result.client!);
-    }
-    await _bleService.vibrateAlertBand(_teacherBandClient!);
+        ],
+      ),
+    );
   }
 
   void _attachTeacherClient(MiBand6Auth client) {

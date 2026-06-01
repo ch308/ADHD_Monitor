@@ -27,6 +27,12 @@ import 'footprint_page.dart';
 import 'weekly_report_page.dart';
 import 'xiaohongshu_draft_page.dart';
 
+class _ParentHeartRateSnapshot {
+  const _ParentHeartRateSnapshot({required this.recordedAt, required this.bpm});
+  final DateTime recordedAt;
+  final int bpm;
+}
+
 class AdhdMonitorApp extends StatefulWidget {
   const AdhdMonitorApp({
     super.key,
@@ -1846,10 +1852,45 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         Uri.parse('http://${widget.serverIp}:11760/submit_log'),
         headers: _apiHeaders(),
         body: json.encode({
+          'child_id': widget.activeChildId,
+          'bpm': submittedBpm.round(),
+          'observation': text,
+          'condition_type': submittedConditionType,
+        }),
+      );
+      if (!mounted) return;
+      Map<String, dynamic>? decoded;
+      try {
+        decoded = json.decode(response.body) as Map<String, dynamic>?;
+      } catch (_) {
+        decoded = null;
+      }
+      if (response.statusCode != 200 ||
+          decoded == null ||
+          decoded['status'] == 'error') {
+        final msg = (decoded?['message'] as String?)?.trim();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              msg != null && msg.isNotEmpty ? msg : '提交失败（${response.statusCode}）',
+            ),
+          ),
+        );
+        setState(() => _recordSubmitting = false);
+        return;
+      }
+      final advice = decoded['advice'] as String?;
+      final rawLogId = decoded['log_id'];
+      final logId = rawLogId is int
+          ? rawLogId
+          : int.tryParse(rawLogId?.toString() ?? '');
+      setState(() {
         _lastRecordLogId = logId;
         _lastRecordObservation = text;
         _lastRecordConditionType = submittedConditionType;
         _lastRecordBpm = submittedBpm;
+        _kimiAdvice = advice;
+        _kimiAdviceLabel = submittedConditionLabel;
         _selectedConditionType = null;
         _selectedConditionLabel = null;
         isDismissed = false;
@@ -1863,6 +1904,9 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       setState(() => _recordSubmitting = false);
     }
   }
+
+  /// 语音输入已移除时为空操作，避免 UI 回调未定义。
+  Future<void> _stopRecordSpeech() async {}
 
   void _openXiaohongshuDraft() {
     final advice = _kimiAdvice;
