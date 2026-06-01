@@ -904,13 +904,13 @@ class MiBand6Auth {
 
   /// 触发"查找设备"震动若干次。
   ///
-  /// 实现走的是小米运动健康 / Zepp Life 在 FEE1 上的私有 chunked-v3
-  /// 协议（端点 `0x000d` = FIND_DEVICE），等同于 App 内"查找设备"按钮：
-  /// 每次发 `[0x03, 0x01]` 启动震动，等待 [on] 后再发 `[0x03, 0x00]`
-  /// 主动停止；这样可以做出多段短震节奏。
+  /// 优先走 Huami chunked-v3（端点 `0x000d`，负载 `[0x03,0x01]` / `[0x03,0x00]`），
+  /// 与小米运动健康「查找手环」一致。
   ///
-  /// 标准 Immediate Alert（1802/2A06）在小米手环 6 / 6 NFC 上会被固件
-  /// 静默丢弃（GATT 会返回 SUCCESS 但手环不震），所以这里不再使用。
+  /// 不少 Mi Band 6 / 6 NFC 固件对 `0x000d` 写入成功但不震动；同时对
+  /// **标准 Immediate Alert（1802/2A06）** 的 `0x02` 也会「假成功」。
+  /// 社区逆向里 **`0x04`（振动、无 LED）** 在部分批次仍可触发马达，因此
+  /// 每次开/关震动都会 **双发**：先 `_pulseImmediateAlertLevel`，再 chunked。
   Future<bool> vibrateBandForTest({
     int times = 3,
     Duration on = const Duration(milliseconds: 650),
@@ -963,11 +963,36 @@ class MiBand6Auth {
     return true;
   }
 
+  /// 写蓝牙标准 Alert Level（2A06）。`0x04` 为小米系非扩展值，部分固件上比 `0x02` 更能真正触发马达。
+  Future<bool> _pulseImmediateAlertLevel(bool start) async {
+    final ch = _alertChar ?? await _ensureAlertCharacteristic();
+    if (ch == null) return false;
+    final noResp =
+        ch.properties.writeWithoutResponse && !ch.properties.write;
+    try {
+      if (start) {
+        try {
+          await ch.write(<int>[0x04], withoutResponse: noResp);
+        } catch (e) {
+          debugPrint('MiBand6Auth: alert 0x04 failed, trying 0x02 -> $e');
+          await ch.write(<int>[0x02], withoutResponse: noResp);
+        }
+      } else {
+        await ch.write(<int>[0x00], withoutResponse: noResp);
+      }
+      return true;
+    } catch (e) {
+      debugPrint('MiBand6Auth: immediate alert write failed -> $e');
+      return false;
+    }
+  }
+
   Future<bool> _writeFindDevice(
       BluetoothCharacteristic ch, bool start) async {
     // Huami chunked-v3 endpoint 0x000d (FIND_DEVICE):
     //   payload[0] = 0x03 (subtype: vibration)
     //   payload[1] = 0x01 / 0x00 (start / stop)
+    final pulseOk = await _pulseImmediateAlertLevel(start);
     final payload = <int>[0x03, start ? 0x01 : 0x00];
     try {
       final crypto = _huami2021Crypto;
@@ -987,7 +1012,7 @@ class MiBand6Auth {
       return true;
     } catch (e) {
       debugPrint('MiBand6Auth: chunked-v3 write failed -> $e');
-      return false;
+      return pulseOk;
     }
   }
 
@@ -1083,8 +1108,8 @@ class MiBand6Auth {
     return candidate;
   }
 
-  /// 老路径兜底：写 1802/2A06。已知在 Mi Band 6 NFC 上无效，仅在
-  /// 设备没有 FEE1/0x0016 时尝试一次，方便兼容更老的固件。
+  /// 老路径兜底：写 1802/2A06。优先 `0x04`（部分新固件上仍能真震动），失败再试 `0x02`。
+  /// 若设备没有 FEE0/0x0016，仅靠此路径。
   Future<bool> _legacyImmediateAlertVibrate({
     required int times,
     required Duration on,
@@ -1095,7 +1120,12 @@ class MiBand6Auth {
     final noResp = ch.properties.writeWithoutResponse && !ch.properties.write;
     try {
       for (var i = 0; i < times; i++) {
-        await ch.write(<int>[0x02], withoutResponse: noResp);
+        try {
+          await ch.write(<int>[0x04], withoutResponse: noResp);
+        } catch (e) {
+          debugPrint('MiBand6Auth: legacy alert 0x04 failed, trying 0x02 -> $e');
+          await ch.write(<int>[0x02], withoutResponse: noResp);
+        }
         await Future<void>.delayed(on);
         await ch.write(<int>[0x00], withoutResponse: noResp);
         if (i < times - 1) {
