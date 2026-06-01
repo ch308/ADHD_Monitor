@@ -2212,6 +2212,33 @@ def my_children_list():
     return jsonify({"children": out}), 200
 
 
+@app.route("/my/config/xiaomi-band-auth-key", methods=["GET"])
+def my_config_xiaomi_band_auth_key():
+    """已登录用户拉取服务器配置的小米手环 BLE 鉴权密钥（32 hex）。来源：环境变量 XIAOMI_AUTH_KEY（见 ~/.config/adhd-monitor.env）。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    raw = (os.getenv("XIAOMI_AUTH_KEY") or "").strip()
+    if not raw:
+        return (
+            jsonify(
+                {
+                    "status": "error",
+                    "message": "server XIAOMI_AUTH_KEY not configured",
+                }
+            ),
+            503,
+        )
+    nk = re.sub(r"\s+", "", raw).lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", nk):
+        print(
+            "⚠️ XIAOMI_AUTH_KEY 应为 32 位十六进制（去空格后校验失败），已拒绝下发",
+            file=sys.stderr,
+        )
+        return jsonify({"status": "error", "message": "invalid XIAOMI_AUTH_KEY on server"}), 500
+    return jsonify({"status": "ok", "auth_hex_key": nk}), 200
+
+
 @app.route("/my/children", methods=["POST"])
 def my_children_create():
     user = _get_request_user()

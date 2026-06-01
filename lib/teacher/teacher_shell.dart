@@ -6,7 +6,9 @@ import 'package:vibration/vibration.dart';
 
 import '../theme/app_theme.dart';
 import '../models/heart_rate_data.dart';
+import '../services/cloud_service.dart';
 import '../services/miband_service.dart';
+import '../services/session_store.dart';
 import 'teacher_ble_service.dart';
 import 'teacher_local_store.dart';
 import 'teacher_models.dart';
@@ -260,9 +262,12 @@ class _TeacherShellState extends State<TeacherShell> {
       });
     }
 
+    final serverKey = await _tryFetchServerXiaomiBandAuthKey();
+    if (!mounted) return;
+
     final authKey = await _showAuthKeyDialog(
       title: '填写 ${student.name} 手环的连接密钥',
-      initialValue: student.bandAuthHexKey,
+      initialValue: serverKey ?? student.bandAuthHexKey,
     );
     if (authKey == null) return;
 
@@ -332,9 +337,12 @@ class _TeacherShellState extends State<TeacherShell> {
         });
       }
 
+      final serverKey = await _tryFetchServerXiaomiBandAuthKey();
+      if (!mounted) return;
+
       final authKey = await _showAuthKeyDialog(
         title: '填写老师手环的连接密钥',
-        initialValue: _teacherBand?.authHexKey,
+        initialValue: serverKey ?? _teacherBand?.authHexKey,
       );
       if (authKey == null) return;
 
@@ -918,6 +926,19 @@ class _TeacherShellState extends State<TeacherShell> {
   void _showSnack(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 若本机曾登录家长版且服务器已配置 [XIAOMI_AUTH_KEY]，则预填教师绑定里的密钥输入框。
+  Future<String?> _tryFetchServerXiaomiBandAuthKey() async {
+    try {
+      final token = await SessionStore.getToken();
+      if (token == null || token.isEmpty) return null;
+      final host = await SessionStore.getServerHost();
+      final cloud = CloudService(serverHost: host)..authToken = token;
+      return await cloud.fetchXiaomiBandAuthKey();
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<TeacherBandScanResult?> _pickNearbyBand({required String title}) async {

@@ -117,15 +117,15 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   Timer? _statusTimer;
   Timer? _historyTimer;
 
-    static const int _defaultHeartRateHighThreshold = 120;
-    static const int _defaultHeartRateLowThreshold = 70;
-    static const Duration _heartRateRapidRiseWindow = Duration(minutes: 5);
+  static const int _defaultHeartRateHighThreshold = 120;
+  static const int _defaultHeartRateLowThreshold = 70;
+  static const Duration _heartRateRapidRiseWindow = Duration(minutes: 5);
 
-    double get _alertBpm =>
+  double get _alertBpm =>
       (_childProfile?.highThresholdBpm ?? _defaultHeartRateHighThreshold)
-        .toDouble();
+          .toDouble();
 
-    int get _lowAlertBpm =>
+  int get _lowAlertBpm =>
       _childProfile?.lowThresholdBpm ?? _defaultHeartRateLowThreshold;
 
   /// 家长手动消除报警后，再次进入「全量报警」前的一段抑制窗口（防抖动），
@@ -136,18 +136,16 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   /// 消除报警后，是否已至少看到一次服务器 `alert == false`（认为生理上缓和过）
   bool _sawNoAlertSinceDismiss = true;
 
-  // ── 蓝牙手环（小米手环 6 / 兼容设备）──
-  /// 小米手环 6 NFC 鉴权密钥（32 位 Hex，与设备绑定；勿提交到公开仓库）。
-  /// 来源：设备详情 `detail.authKey`（MAC: EA:3B:1F:FA:1C:9B）。
-  static const String _miBand6AuthKey = '665d528be071c1ca4da3432c09a6479d';
-
   final StressCalculator _stressCalc = StressCalculator();
 
   late final CloudService _cloudService =
       CloudService(serverHost: widget.serverIp);
+
+  // ── 蓝牙手环（小米手环 6 / 兼容设备）──
+  /// 鉴权密钥由服务器环境变量 `XIAOMI_AUTH_KEY` 经 GET /my/config/xiaomi-band-auth-key 下发（见 [CloudService.fetchXiaomiBandAuthKey]）。
   late final MiBand6Auth _miBandService = MiBand6Auth(
     cloudService: _cloudService,
-    authHexKey: _miBand6AuthKey,
+    authHexKey: null,
     // Mi Band 6 压力值为私有协议，这些是 FEE1 服务下可能的候选 UUID。
     // 若仍读取不到，查看 logcat 中 "auto-probe char" 日志定位真实 UUID。
     stressCharacteristicUuids: const <String>[
@@ -264,6 +262,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
         oldWidget.authToken != widget.authToken ||
         oldWidget.serverIp != widget.serverIp) {
       _cloudService.serverHost = widget.serverIp;
+      if (oldWidget.authToken != widget.authToken ||
+          oldWidget.serverIp != widget.serverIp) {
+        _miBandService.authHexKey = null;
+      }
       _syncMacToCloudService();
     }
     if (oldWidget.activeChildId != widget.activeChildId) {
@@ -973,10 +975,23 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     await _autoConnectToBand();
   }
 
+  /// 从服务器 `XIAOMI_AUTH_KEY` 拉取 32 位 hex，写入 [MiBand6Auth.authHexKey]（须已登录且尚未有有效密钥）。
+  Future<void> _ensureMiBandAuthHexKeyFromServer() async {
+    final tok = widget.authToken;
+    if (tok == null || tok.isEmpty) return;
+    final cur = _miBandService.authHexKey?.trim();
+    if (cur != null && cur.length == 32) return;
+    _syncMacToCloudService();
+    final key = await _cloudService.fetchXiaomiBandAuthKey();
+    if (!mounted || key == null) return;
+    _miBandService.authHexKey = key;
+  }
+
   Future<void> _autoConnectToBand() async {
     if (_btBootstrapping || _miBandService.isStreaming) return;
     _btBootstrapping = true;
     try {
+      await _ensureMiBandAuthHexKeyFromServer();
       // 1. 先尝试从系统已连接设备中直接捞取手环
       BluetoothDevice? targetBand =
           await _miBandService.findAlreadyConnectedBand();

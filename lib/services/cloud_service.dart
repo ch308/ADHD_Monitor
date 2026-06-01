@@ -334,4 +334,33 @@ class CloudService {
       return false;
     }
   }
+
+  /// 从服务器 `XIAOMI_AUTH_KEY` 拉取小米手环 32 位鉴权密钥（须已设置 [authToken]）。
+  /// 成功返回小写 hex；未配置 / 未登录 / 网络错误返回 null。
+  Future<String?> fetchXiaomiBandAuthKey() async {
+    final t = authToken;
+    if (t == null || t.isEmpty) return null;
+    try {
+      final r = await http
+          .get(
+            Uri.parse('${_base()}/my/config/xiaomi-band-auth-key'),
+            headers: _authHeaders(jsonBody: false),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint(
+          'CloudService: xiaomi band auth key ${r.statusCode}: ${r.body}',
+        );
+        return null;
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      if (data['status'] != 'ok') return null;
+      final key = (data['auth_hex_key'] as String?)?.trim().toLowerCase();
+      if (key == null || key.length != 32) return null;
+      return key;
+    } catch (e) {
+      debugPrint('CloudService: fetch xiaomi band auth key error $e');
+      return null;
+    }
+  }
 }

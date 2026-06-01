@@ -207,25 +207,35 @@ class TeacherBleService {
     );
   }
 
+  bool _sameBleRemoteId(String a, String b) {
+    String norm(String s) =>
+        s.toUpperCase().replaceAll(RegExp(r'[-:]'), '');
+    return norm(a) == norm(b);
+  }
+
   Future<BluetoothDevice?> _findDeviceByRemoteId(
     String remoteId, {
     required Duration timeout,
   }) async {
     for (final device in FlutterBluePlus.connectedDevices) {
-      if (device.remoteId.str == remoteId) return device;
+      if (_sameBleRemoteId(device.remoteId.str, remoteId)) return device;
     }
 
+    // 与家长端 [MiBand6Auth.findAlreadyConnectedBand] 一致：带心率服务 UUID，
+    // 否则空列表在 Android 上往往拿不到「刚用过小米运动 / 本 App」的手环缓存。
     try {
-      final systemDevices = await FlutterBluePlus.systemDevices(const <Guid>[]);
+      final systemDevices = await FlutterBluePlus.systemDevices(<Guid>[
+        Guid(MiBand6Auth.heartRateServiceUuid),
+      ]);
       for (final device in systemDevices) {
-        if (device.remoteId.str == remoteId) return device;
+        if (_sameBleRemoteId(device.remoteId.str, remoteId)) return device;
       }
     } catch (_) {}
 
     final completer = Completer<BluetoothDevice?>();
     final subscription = FlutterBluePlus.scanResults.listen((items) {
       for (final item in items) {
-        if (item.device.remoteId.str == remoteId) {
+        if (_sameBleRemoteId(item.device.remoteId.str, remoteId)) {
           if (!completer.isCompleted) completer.complete(item.device);
           return;
         }
@@ -237,15 +247,24 @@ class TeacherBleService {
         await FlutterBluePlus.stopScan();
       } catch (_) {}
       await FlutterBluePlus.startScan(timeout: timeout);
-      return await completer.future.timeout(
+      final fromScan = await completer.future.timeout(
         timeout + const Duration(seconds: 1),
         onTimeout: () => null,
       );
+      if (fromScan != null) return fromScan;
     } finally {
       try {
         await FlutterBluePlus.stopScan();
       } catch (_) {}
       await subscription.cancel();
+    }
+
+    // 已知 MAC（Android）时可直接构造设备引用再连，不必等广播进扫描结果。
+    try {
+      final direct = BluetoothDevice.fromId(remoteId);
+      return direct;
+    } catch (_) {
+      return null;
     }
   }
 

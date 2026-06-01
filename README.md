@@ -597,7 +597,7 @@ flowchart TB
 
 | 分组 | 路由 |
 | --- | --- |
-| **认证 / 家庭** | `POST /auth/register`, `POST /auth/login`, `GET\|POST /my/children`, `POST /my/children/<id>/members` |
+| **认证 / 家庭** | `POST /auth/register`, `POST /auth/login`, `GET\|POST /my/children`, `POST /my/children/<id>/members`, `GET /my/config/xiaomi-band-auth-key`（手环 BLE 密钥，Bearer） |
 | **心率 / 状态** | `POST\|GET /webhook`, `GET /history` |
 | **AI 单次建议** | `POST /submit_log`（写记录 + 调 Kimi + **对孩子名下星星设备入队 `xiaozhi_invoke_chat`**） |
 | **AI 足迹 / 周报** | `GET /footprint/today`, `GET /weekly_report/latest`, `GET /weekly_report/history`, `POST /weekly_report/generate` |
@@ -737,8 +737,7 @@ sequenceDiagram
     Band-->>App: notify [0x10, 0x03, 0x01] success
 ```
 
-Auth Key 是 32 位 hex（用户从 Mi Fit / Zepp Life 抓包取），在 `home_screen.dart` 常量
-`_miBand6AuthKey` 占位，**真机使用前必须替换为该手环对应的真实 key**，否则 step3 校验失败。
+Auth Key 是 32 位 hex（用户从 Mi Fit / Zepp Life / Gadgetbridge 等取得）。**推荐**在服务器 `~/.config/adhd-monitor.env` 中配置 `XIAOMI_AUTH_KEY`（见 `server/.env.example`），由 `GET /my/config/xiaomi-band-auth-key`（须登录）下发给 App；家长端在自动连接手环前会拉取并写入 `MiBand6Auth.authHexKey`。勿把密钥提交到 Git。
 
 ### 6.3 ESP32 BLE 配网协议（自实现 protocomm）
 
