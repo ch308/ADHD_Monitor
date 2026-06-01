@@ -117,6 +117,10 @@ class MiBand6Auth {
   /// 上报通道，可在 host 切换后由外部直接更新 [CloudService.serverHost]。
   CloudService? cloudService;
 
+  /// 家长端：用于自动心率告警时在 2A46 文案里带上孩子称呼（与状态拼接为短句）。
+  /// 教师端可置空，由每次 [vibrateBandForTest] 的 [newAlertMessage] 显式传入。
+  String? bandAlertSubjectName;
+
   /// 32 位 Hex（16 字节）厂商鉴权密钥。
   ///
   /// 来源：从 Mi Fit / Zepp Life 抓包或厂商工具中提取，每只手环唯一。
@@ -378,26 +382,30 @@ class MiBand6Auth {
     if (hex != null && hex.isNotEmpty) {
       _setStage(MiBandStage.authenticating, message: '已连接，正在与手环完成安全握手…');
       try {
-        if (_hasHuami2021ChunkedPair(services)) {
-          await _runHuami2021Handshake(services, hex);
-        } else {
+        if (_hasLegacyAuthChar(services)) {
           await _runMiBand6Handshake(services, hex);
+        } else {
+          await _runHuami2021Handshake(services, hex);
         }
         _authenticated = true;
         debugPrint('MiBand6Auth: 🎉 private handshake unlocked.');
       } catch (e) {
         debugPrint('MiBand6Auth: primary private handshake failed -> $e');
-        if (_hasHuami2021ChunkedPair(services)) {
-          _setStage(
-              MiBandStage.authenticating, message: '新协议握手失败，正在尝试旧式校验…');
-        }
         try {
-          await _runMiBand6Handshake(services, hex);
+          if (_hasLegacyAuthChar(services) && _hasHuami2021ChunkedPair(services)) {
+            _setStage(
+                MiBandStage.authenticating, message: '旧式校验未通过，正在尝试新协议…');
+            await _runHuami2021Handshake(services, hex);
+          } else {
+            _setStage(
+                MiBandStage.authenticating, message: '新协议握手失败，正在尝试旧式校验…');
+            await _runMiBand6Handshake(services, hex);
+          }
           _authenticated = true;
-          debugPrint('MiBand6Auth: 🎉 legacy private handshake unlocked.');
-        } catch (legacyError) {
-          debugPrint('MiBand6Auth: private handshake failed -> $legacyError');
-          if (legacyError.toString().contains('未找到')) {
+          debugPrint('MiBand6Auth: 🎉 fallback private handshake unlocked.');
+        } catch (fallbackError) {
+          debugPrint('MiBand6Auth: private handshake failed -> $fallbackError');
+          if (fallbackError.toString().contains('未找到')) {
             _setStage(
               MiBandStage.awaitingBroadcast,
               message: '已经连上手环，但还不能直接接收心率。'
@@ -610,6 +618,19 @@ class MiBand6Auth {
       }
     }
     return writeChar != null && readChar != null;
+  }
+
+  bool _hasLegacyAuthChar(List<BluetoothService> services) {
+    for (final s in services) {
+      if (!s.uuid.str.toLowerCase().contains(miAuthServiceShort)) continue;
+      for (final c in s.characteristics) {
+        final id = c.uuid.str.toLowerCase();
+        if (id.length >= 8 && id.substring(0, 8) == '00000009') {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   Future<void> _runHuami2021Handshake(
@@ -936,7 +957,11 @@ class MiBand6Auth {
     Duration on = const Duration(milliseconds: 650),
     Duration off = const Duration(milliseconds: 350),
     @Deprecated('No longer used; kept for source compat.') int command = 0x04,
+
+    /// 写入 1811/2A46 的 UTF-8 短句（建议「称呼 + 状态」）。为 null 时用 [bandAlertSubjectName] 拼默认句。
+    String? newAlertMessage,
   }) async {
+    final alertText = _resolveBandNewAlertText(newAlertMessage);
     final ch = await _ensureChunkedV3WriteChar();
     if (ch == null) {
       debugPrint(
@@ -947,7 +972,7 @@ class MiBand6Auth {
     bool anyOk = false;
     try {
       for (var i = 0; i < times; i++) {
-        final startOk = await _writeFindDevice(ch, true);
+        final startOk = await _writeFindDevice(ch, true, incomingCallText: alertText);
         if (startOk) anyOk = true;
         await Future<void>.delayed(on);
         await _writeFindDevice(ch, false);
@@ -969,12 +994,14 @@ class MiBand6Auth {
   /// 一次性"查找设备"：开 → 等 [duration] → 关。返回是否成功写入。
   Future<bool> findBandLikeMiFit({
     Duration duration = const Duration(seconds: 5),
+    String? newAlertMessage,
   }) async {
+    final alertText = _resolveBandNewAlertText(newAlertMessage);
     final ch = await _ensureChunkedV3WriteChar();
     if (ch == null) {
       debugPrint('MiBand6Auth: chunked-v3 write char not found; using NEW_ALERT only.');
     }
-    final startOk = await _writeFindDevice(ch, true);
+    final startOk = await _writeFindDevice(ch, true, incomingCallText: alertText);
     if (!startOk) return false;
     await Future<void>.delayed(duration);
     await _writeFindDevice(ch, false);
@@ -1046,15 +1073,46 @@ class MiBand6Auth {
     return null;
   }
 
+  /// 2A46 文案上限（字节），避免过长写入失败或固件截断异常。
+  static const int _bandNewAlertMaxUtf8Bytes = 96;
+
+  String _resolveBandNewAlertText(String? explicit) {
+    final trimmed = explicit?.trim();
+    if (trimmed != null && trimmed.isNotEmpty) {
+      return _clampBandAlertUtf8(trimmed);
+    }
+    final subject = bandAlertSubjectName?.trim();
+    if (subject != null && subject.isNotEmpty) {
+      return _clampBandAlertUtf8('$subject 提醒');
+    }
+    return _clampBandAlertUtf8('手环提醒');
+  }
+
+  String _clampBandAlertUtf8(String raw) {
+    var s = raw;
+    while (true) {
+      final b = utf8.encode(s);
+      if (b.length <= _bandNewAlertMaxUtf8Bytes) return s;
+      if (s.isEmpty) return '…';
+      s = s.substring(0, s.length - 1);
+    }
+  }
+
   Future<bool> _writeFindDevice(
-      BluetoothCharacteristic? ch, bool start) async {
+    BluetoothCharacteristic? ch,
+    bool start, {
+    String incomingCallText = '提醒',
+  }) async {
     // 触发 / 停止「查找设备」三路并发尝试，命中任意一路就算成功：
     //   1) 1811/2A46 写 IncomingCall 通知（Mi Band 6 主路径）
     //   2) 1802/2A06 写 0x04/0x02（启动） / 0x00（停止）
     //   3) FEE0/0x0016 chunked-v3 端点 0x000d（ZeppOS 兜底）
     bool anyOk = false;
     if (start) {
-      anyOk = await _pulseIncomingCallNotification('Alert') || anyOk;
+      final label = _clampBandAlertUtf8(incomingCallText.trim().isEmpty
+          ? '提醒'
+          : incomingCallText.trim());
+      anyOk = await _pulseIncomingCallNotification(label) || anyOk;
     } else {
       // 收尾以 ALERT_LEVEL_NONE 停掉来电震动。
       anyOk = await _pulseImmediateAlertLevel(false) || anyOk;
@@ -1551,8 +1609,15 @@ class MiBand6Auth {
             now.difference(_lastAutoVibrationAt!) >
                 const Duration(seconds: 30))) {
       _lastAutoVibrationAt = now;
-      unawaited(vibrateBandForTest(times: 2, on: const Duration(milliseconds: 400))
-          .then((ok) {
+      final subject = bandAlertSubjectName?.trim();
+      final autoMsg = (subject == null || subject.isEmpty)
+          ? '心率偏高'
+          : '$subject 心率偏高';
+      unawaited(vibrateBandForTest(
+        times: 2,
+        on: const Duration(milliseconds: 400),
+        newAlertMessage: autoMsg,
+      ).then((ok) {
         if (!ok) {
           debugPrint('MiBand6Auth: auto-vibration failed (band may be disconnected)');
         }

@@ -23,6 +23,19 @@ String teacherAlertEventLabel(String eventType) {
   }
 }
 
+/// 手环 2A46 短句用状态词（与 [teacherAlertEventLabel] 区分，尽量短）。
+String teacherBandAlertShortStatus(String eventType) {
+  switch (eventType) {
+    case 'rapidRiseHeartRate':
+      return '心率骤升';
+    case 'lowHeartRate':
+      return '心率偏低';
+    case 'highHeartRate':
+    default:
+      return '心率偏高';
+  }
+}
+
 String teacherStudentThresholdSummary(TeacherStudent student) {
   return '自动提醒线：过高 >${student.thresholdBpm} / 过低 <${student.lowThresholdBpm} 次/分钟';
 }
@@ -53,6 +66,7 @@ class _TeacherShellState extends State<TeacherShell> {
   bool _monitorBusy = false;
   bool _teacherBindingBusy = false;
   bool _teacherVibrationBusy = false;
+  Color? _teacherBandVibrationTestColor;
   String? _teacherBandMessage;
   MiBandStatus? _teacherBandStatus;
   String? _teacherBandLastFailure;
@@ -427,18 +441,76 @@ class _TeacherShellState extends State<TeacherShell> {
         _attachTeacherClient(connectResult.client!);
       }
 
-      _showSnack('正在向老师手环发送测试震动...');
-      final result = await _bleService.vibrateConnectedBand(_teacherBandClient!);
-      if (!mounted) return;
-      if (!result.success) {
-        await _phoneFallbackAlert();
-        _showSnack(result.message);
-        return;
+      final client = _teacherBandClient!;
+      final nameLabel = (binding.displayName?.trim().isNotEmpty ?? false)
+          ? binding.displayName!.trim()
+          : '老师';
+
+      _showSnack('正在运行红屏/绿屏与手环震动测试，请稍候…');
+
+      var paused = false;
+      var phasesOk = false;
+      try {
+        paused = await client.pauseHeartRateReceptionForTest();
+        if (!paused) {
+          if (mounted) {
+            _showSnack('无法暂停心率接收，测试已取消。');
+          }
+          return;
+        }
+
+        if (!mounted) return;
+        setState(() => _teacherBandVibrationTestColor = const Color(0xFFE84B4B));
+        final redOk = await client.vibrateBandForTest(
+          times: 3,
+          newAlertMessage: '$nameLabel 红屏测试',
+        );
+        if (!redOk) {
+          throw StateError('手环未响应「查找设备」命令（私有协议可能未握手成功）。');
+        }
+
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
+        setState(() => _teacherBandVibrationTestColor = const Color(0xFF47B276));
+        final greenOk = await client.vibrateBandForTest(
+          times: 3,
+          newAlertMessage: '$nameLabel 绿屏测试',
+        );
+        if (!greenOk) {
+          throw StateError('第二轮震动失败，请确认手环仍在附近并保持连接。');
+        }
+        phasesOk = true;
+        if (mounted) {
+          _showSnack('红绿屏与震动测试完成，已断开蓝牙，方便官方 App 重新连接。');
+        }
+      } catch (e) {
+        if (mounted) {
+          final s = e.toString();
+          _showSnack(
+            (s.contains('SocketException') ||
+                    s.contains('Connection refused') ||
+                    s.contains('Failed host lookup') ||
+                    s.contains('TimeoutException'))
+                ? '手环测试没有完成，请确认网络和蓝牙状态后再试'
+                : '手环测试暂时没有成功，请确认手环靠近手机后再试',
+          );
+        }
+      } finally {
+        if (paused) {
+          await client.disconnect();
+        }
+        if (mounted) {
+          setState(() => _teacherBandVibrationTestColor = null);
+        }
       }
 
-      final ok = await _confirmBandVibration(result.message);
-      if (!ok) {
-        _showSnack('这次没有确认到老师手环震动，请靠近手机后再试。');
+      if (!phasesOk || !mounted) return;
+
+      final confirmed = await _confirmBandVibration(
+        '屏幕会先泛红再泛绿，手环在每段是否各震动三次？若均已感受到，请点「震动了」。',
+      );
+      if (!confirmed) {
+        _showSnack('这次没有确认到手环震动，请靠近手机后再试。');
         return;
       }
 
@@ -590,7 +662,7 @@ class _TeacherShellState extends State<TeacherShell> {
   }) async {
     final teacherBandReady = _teacherBand?.vibrationVerified == true;
     if (teacherBandReady && _teacherBand != null && (_teacherBand!.authHexKey ?? '').isNotEmpty) {
-      unawaited(_vibrateTeacherBandForAlert());
+      unawaited(_vibrateTeacherBandForAlert(student, eventType));
     }
     await _phoneFallbackAlert();
     final alertLabel = teacherAlertEventLabel(eventType);
@@ -1096,7 +1168,10 @@ class _TeacherShellState extends State<TeacherShell> {
     await _bleService.dispose();
   }
 
-  Future<void> _vibrateTeacherBandForAlert() async {
+  Future<void> _vibrateTeacherBandForAlert(
+    TeacherStudent student,
+    String eventType,
+  ) async {
     final binding = _teacherBand;
     if (binding == null || (binding.authHexKey ?? '').isEmpty) return;
 
@@ -1109,7 +1184,11 @@ class _TeacherShellState extends State<TeacherShell> {
       await _disposeTeacherClient();
       _attachTeacherClient(result.client!);
     }
-    await _bleService.vibrateAlertBand(_teacherBandClient!);
+    await _bleService.vibrateAlertBand(
+      _teacherBandClient!,
+      newAlertMessage:
+          '${student.name} ${teacherBandAlertShortStatus(eventType)}',
+    );
   }
 
   _BandDiagnosticViewData _buildTeacherDiagnostic() {
@@ -1402,6 +1481,7 @@ class _TeacherShellState extends State<TeacherShell> {
 
     final teacherReady = _teacherBand?.vibrationVerified == true;
     final activeStudents = _students.where((student) => student.enabled).length;
+    final bandTestColor = _teacherBandVibrationTestColor;
 
     return Scaffold(
       backgroundColor: AppColors.canvas,
@@ -1410,6 +1490,16 @@ class _TeacherShellState extends State<TeacherShell> {
         backgroundColor: AppColors.canvas,
         foregroundColor: AppColors.ink,
         elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 400),
+            height: 1,
+            color: bandTestColor != null
+                ? bandTestColor.withValues(alpha: 0.75)
+                : AppColors.border,
+          ),
+        ),
         actions: [
           IconButton(
             tooltip: '本地提醒记录',
@@ -1431,9 +1521,23 @@ class _TeacherShellState extends State<TeacherShell> {
         icon: const Icon(Icons.person_add_alt_1_rounded),
         label: const Text('添加学生'),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
-        children: [
+      body: AnimatedContainer(
+        duration: const Duration(milliseconds: 500),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: bandTestColor != null
+                ? [
+                    bandTestColor.withValues(alpha: 0.92),
+                    bandTestColor.withValues(alpha: 0.68),
+                  ]
+                : const [AppColors.canvas, AppColors.canvasAlt],
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+          children: [
           _StatusPanel(
             teacherReady: teacherReady,
             studentCount: activeStudents,
@@ -1463,7 +1567,8 @@ class _TeacherShellState extends State<TeacherShell> {
             ),
             const SizedBox(height: 10),
           ],
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1591,7 +1696,7 @@ class _StatusPanel extends StatelessWidget {
               OutlinedButton.icon(
                 onPressed: busy ? null : onVerifyVibration,
                 icon: const Icon(Icons.vibration_rounded),
-                label: const Text('测试震动'),
+                label: const Text('测试震动/红绿屏'),
               ),
               FilledButton.icon(
                 onPressed: busy ? null : () => onToggleMonitoring(),

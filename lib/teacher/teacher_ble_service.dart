@@ -177,41 +177,10 @@ class TeacherBleService {
     }
   }
 
-  Future<TeacherBandVibrationResult> vibrateConnectedBand(MiBand6Auth client) async {
-    final status = client.status.value;
-    if (!status.isConnected) {
-      return const TeacherBandVibrationResult(
-        success: false,
-        message: '手环当前还没有连好，请重新绑定后再试。',
-      );
-    }
-
-    final paused = await client.pauseHeartRateReceptionForTest();
-    if (!paused) {
-      return const TeacherBandVibrationResult(
-        success: false,
-        message: '这次还没准备好测试震动，请稍后再试。',
-      );
-    }
-
-    try {
-      final ok = await client.vibrateBandForTest(times: 3);
-      if (!ok) {
-        return const TeacherBandVibrationResult(
-          success: false,
-          message: '已经连上手环，但这次没有成功触发震动。',
-        );
-      }
-      return const TeacherBandVibrationResult(
-        success: true,
-        message: '已向手环发送 3 次测试震动，请确认是否有明显震感。',
-      );
-    } finally {
-      await client.resumeHeartRateReceptionAfterTest();
-    }
-  }
-
-  Future<TeacherBandVibrationResult> vibrateAlertBand(MiBand6Auth client) async {
+  Future<TeacherBandVibrationResult> vibrateAlertBand(
+    MiBand6Auth client, {
+    required String newAlertMessage,
+  }) async {
     final status = client.status.value;
     if (!status.isConnected) {
       return const TeacherBandVibrationResult(
@@ -224,6 +193,7 @@ class TeacherBleService {
       times: 2,
       on: const Duration(milliseconds: 420),
       off: const Duration(milliseconds: 240),
+      newAlertMessage: newAlertMessage,
     );
     if (!ok) {
       return const TeacherBandVibrationResult(
