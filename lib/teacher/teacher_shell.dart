@@ -1492,6 +1492,8 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
   late final TextEditingController interestsController;
   late final TextEditingController categoryController;
   late final TextEditingController noteController;
+  late final TextEditingController thresholdController;
+  late final TextEditingController lowThresholdController;
 
   String? selectedGender;
   String? errorText;
@@ -1508,9 +1510,16 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
     interestsController = TextEditingController(text: student?.interests ?? '');
     categoryController = TextEditingController(text: student?.category ?? '');
     noteController = TextEditingController(text: student?.note ?? '');
+    final defaultThresholds = teacherHeartRateThresholdsForAge(student?.age);
     selectedGender = (student?.gender?.trim().isNotEmpty ?? false)
         ? student!.gender!.trim()
         : null;
+    thresholdController = TextEditingController(
+      text: (student?.thresholdBpm ?? defaultThresholds.high).toString(),
+    );
+    lowThresholdController = TextEditingController(
+      text: (student?.lowThresholdBpm ?? defaultThresholds.low).toString(),
+    );
   }
 
   @override
@@ -1522,6 +1531,8 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
     interestsController.dispose();
     categoryController.dispose();
     noteController.dispose();
+    thresholdController.dispose();
+    lowThresholdController.dispose();
     super.dispose();
   }
 
@@ -1616,6 +1627,58 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
               decoration: const InputDecoration(labelText: '补充说明，可选'),
               maxLines: 2,
             ),
+            const SizedBox(height: 12),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '提醒阈值',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.ink,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text('已根据年龄自动填充，可按需手动调整。'),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: thresholdController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '过高提醒阈值',
+                            hintText: '例如 120',
+                          ),
+                          onChanged: (_) => setState(() => errorText = null),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: lowThresholdController,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: '过低提醒阈值',
+                            hintText: '例如 70',
+                          ),
+                          onChanged: (_) => setState(() => errorText = null),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
             if (errorText != null) ...[
               const SizedBox(height: 10),
               Text(
@@ -1635,6 +1698,11 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
           onPressed: () {
             final name = nameController.text.trim();
             final ageValue = int.tryParse(ageController.text.trim());
+            final thresholdValue =
+                int.tryParse(thresholdController.text.trim());
+            final lowThresholdValue =
+                int.tryParse(lowThresholdController.text.trim());
+
             if (name.isEmpty) {
               setState(() => errorText = '请先填写学生姓名。');
               return;
@@ -1643,7 +1711,18 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
               setState(() => errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。');
               return;
             }
-            final nextThresholds = teacherHeartRateThresholdsForAge(ageValue);
+            if (thresholdValue == null || thresholdValue <= 0) {
+              setState(() => errorText = '请填写正确的过高提醒阈值。');
+              return;
+            }
+            if (lowThresholdValue == null || lowThresholdValue <= 0) {
+              setState(() => errorText = '请填写正确的过低提醒阈值。');
+              return;
+            }
+            if (lowThresholdValue >= thresholdValue) {
+              setState(() => errorText = '过低提醒阈值必须小于过高提醒阈值。');
+              return;
+            }
             Navigator.pop(
               context,
               _StudentDialogResult(
@@ -1655,8 +1734,8 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
                 interests: interestsController.text.trim(),
                 category: categoryController.text.trim(),
                 note: noteController.text.trim(),
-                thresholdBpm: nextThresholds.high,
-                lowThresholdBpm: nextThresholds.low,
+                thresholdBpm: thresholdValue,
+                lowThresholdBpm: lowThresholdValue,
               ),
             );
           },
