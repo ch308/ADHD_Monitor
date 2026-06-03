@@ -22,6 +22,7 @@ import '../services/parent_child_profile_store.dart';
 import '../services/session_store.dart';
 import '../services/stress_calculator.dart';
 import 'breathing_ball_page.dart';
+import 'child_skill_page.dart';
 import 'esp_provision_page.dart';
 import 'footprint_page.dart';
 import 'weekly_report_page.dart';
@@ -300,8 +301,11 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   Future<void> _restoreParentChildProfile() async {
-    final profile =
-        await ParentChildProfileStore.getProfile(widget.activeChildId);
+    _syncMacToCloudService();
+    final profile = await ParentChildProfileStore.getProfile(
+      widget.activeChildId,
+      cloudService: _cloudService,
+    );
     if (!mounted) return;
     _syncMiBandBandAlertSubject(profile);
     setState(() => _childProfile = profile);
@@ -471,23 +475,46 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   Future<void> _showParentChildProfileDialog() async {
     final result = await showDialog<ParentChildProfile>(
       context: context,
-      builder: (ctx) => _ParentChildProfileDialog(profile: _childProfile),
+      builder: (ctx) => _ParentChildProfileDialog(
+        childId: widget.activeChildId,
+        profile: _childProfile,
+      ),
     );
 
     if (result == null || !mounted) return;
-    await ParentChildProfileStore.saveProfile(result);
-    _syncMiBandBandAlertSubject(result);
+    final saved = await ParentChildProfileStore.saveProfile(
+      result,
+      cloudService: _cloudService,
+    );
+    _syncMiBandBandAlertSubject(saved);
     setState(() {
-      _childProfile = result;
+      _childProfile = saved;
       _heartRateAlertTriggered = false;
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '已保存孩子资料，当前心率提醒线为 >${result.highThresholdBpm} / <${result.lowThresholdBpm}',
+          '已保存孩子资料，并根据最新信息优化 Skill。当前心率提醒线为 >${saved.highThresholdBpm} / <${saved.lowThresholdBpm}',
         ),
       ),
     );
+  }
+
+  Future<void> _openChildSkillPage() async {
+    _syncMacToCloudService();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChildSkillPage(
+          cloudService: _cloudService,
+          childId: widget.activeChildId,
+          fallbackProfile: _childProfile,
+        ),
+      ),
+    );
+    if (mounted) {
+      unawaited(_restoreParentChildProfile());
+    }
   }
 
   void _applyStressThreshold(int next, {bool evaluateCurrent = true}) {
@@ -1935,9 +1962,18 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   ],
                 ),
               ),
-              TextButton(
-                onPressed: _showParentChildProfileDialog,
-                child: Text(profile == null ? '录入' : '编辑'),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton(
+                    onPressed: _showParentChildProfileDialog,
+                    child: Text(profile == null ? '录入' : '编辑'),
+                  ),
+                  TextButton(
+                    onPressed: _openChildSkillPage,
+                    child: const Text('Skill'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -2127,6 +2163,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
             onSelected: (v) async {
               if (v == 'switch') await _showSwitchChildDialog();
               if (v == 'child_profile') await _showParentChildProfileDialog();
+              if (v == 'child_skill') await _openChildSkillPage();
               if (v == 'invite') await _showInviteMemberDialog();
               if (v == 'band_bind') await _bindCurrentDevice();
               if (v == 'band_unbind') await _unbindCurrentDevice();
@@ -2152,6 +2189,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
               const PopupMenuItem(
                   value: 'child_profile', child: Text('录入孩子资料')),
+              const PopupMenuItem(value: 'child_skill', child: Text('查看孩子 Skill')),
               const PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
               const PopupMenuDivider(),
               const PopupMenuItem(
@@ -3142,9 +3180,11 @@ class _BandStatusBanner extends StatelessWidget {
 class _ParentChildProfileDialog extends StatefulWidget {
   const _ParentChildProfileDialog({
     super.key,
+    required this.childId,
     this.profile,
   });
 
+  final int childId;
   final ParentChildProfile? profile;
 
   @override
@@ -3296,7 +3336,7 @@ class _ParentChildProfileDialogState extends State<_ParentChildProfileDialog> {
             final thresholds = parentHeartRateThresholdsForAge(ageValue);
             Navigator.of(context).pop(
               ParentChildProfile(
-                childId: widget.profile?.childId ?? 1,
+                childId: widget.childId,
                 name: nameController.text.trim().isEmpty
                     ? null
                     : nameController.text.trim(),

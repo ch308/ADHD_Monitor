@@ -69,6 +69,9 @@ class ParentChildProfile {
     this.interests,
     this.category,
     this.note,
+    this.avatarStyle,
+    this.skillSummary,
+    this.skillUpdatedAt,
     required this.highThresholdBpm,
     required this.lowThresholdBpm,
     required this.updatedAt,
@@ -83,6 +86,9 @@ class ParentChildProfile {
   final String? interests;
   final String? category;
   final String? note;
+  final String? avatarStyle;
+  final String? skillSummary;
+  final DateTime? skillUpdatedAt;
   final int highThresholdBpm;
   final int lowThresholdBpm;
   final DateTime updatedAt;
@@ -96,6 +102,9 @@ class ParentChildProfile {
     String? interests,
     String? category,
     String? note,
+    String? avatarStyle,
+    String? skillSummary,
+    DateTime? skillUpdatedAt,
     int? highThresholdBpm,
     int? lowThresholdBpm,
     DateTime? updatedAt,
@@ -110,6 +119,9 @@ class ParentChildProfile {
       interests: interests ?? this.interests,
       category: category ?? this.category,
       note: note ?? this.note,
+      avatarStyle: avatarStyle ?? this.avatarStyle,
+      skillSummary: skillSummary ?? this.skillSummary,
+      skillUpdatedAt: skillUpdatedAt ?? this.skillUpdatedAt,
       highThresholdBpm: highThresholdBpm ?? this.highThresholdBpm,
       lowThresholdBpm: lowThresholdBpm ?? this.lowThresholdBpm,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -134,6 +146,9 @@ class ParentChildProfile {
         'interests': interests,
         'category': category,
         'note': note,
+        'avatarStyle': avatarStyle,
+        'skillSummary': skillSummary,
+        'skillUpdatedAt': skillUpdatedAt?.toIso8601String(),
         'highThresholdBpm': highThresholdBpm,
         'lowThresholdBpm': lowThresholdBpm,
         'updatedAt': updatedAt.toIso8601String(),
@@ -143,7 +158,7 @@ class ParentChildProfile {
     final age = _optionalInt(json['age']);
     final thresholds = parentHeartRateThresholdsForAge(age);
     return ParentChildProfile(
-      childId: (_optionalInt(json['childId']) ?? 1).clamp(1, 1 << 30),
+      childId: (_optionalInt(json['childId']) ?? 1).clamp(1, 1 << 30).toInt(),
       name: json['name']?.toString(),
       nickname: json['nickname']?.toString(),
       age: age,
@@ -152,13 +167,115 @@ class ParentChildProfile {
       interests: json['interests']?.toString(),
       category: json['category']?.toString(),
       note: json['note']?.toString(),
+      avatarStyle: json['avatarStyle']?.toString(),
+      skillSummary: json['skillSummary']?.toString(),
+      skillUpdatedAt:
+          DateTime.tryParse(json['skillUpdatedAt']?.toString() ?? ''),
       highThresholdBpm: (_optionalInt(json['highThresholdBpm']) ?? thresholds.high)
           .clamp(80, 180)
           .toInt(),
       lowThresholdBpm: (_optionalInt(json['lowThresholdBpm']) ?? thresholds.low)
           .clamp(40, 120)
           .toInt(),
-      updatedAt: DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
+      updatedAt:
+          DateTime.tryParse(json['updatedAt']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
+class ChildSkillAvatar {
+  const ChildSkillAvatar({
+    required this.theme,
+    required this.primaryColor,
+    required this.accentColor,
+  });
+
+  final String theme;
+  final String primaryColor;
+  final String accentColor;
+
+  factory ChildSkillAvatar.fromJson(Map<String, dynamic>? json) {
+    final data = json ?? const <String, dynamic>{};
+    return ChildSkillAvatar(
+      theme: data['theme']?.toString() ?? 'sunny',
+      primaryColor: data['primaryColor']?.toString() ?? '#F2B35D',
+      accentColor: data['accentColor']?.toString() ?? '#6FAF8E',
+    );
+  }
+}
+
+class ChildSkillData {
+  const ChildSkillData({
+    required this.childId,
+    required this.profile,
+    required this.displayName,
+    required this.summary,
+    required this.selfIntroduction,
+    required this.conversationStyle,
+    required this.avatar,
+    required this.quickQuestions,
+    this.recentContext = const <String, dynamic>{},
+  });
+
+  final int childId;
+  final ParentChildProfile profile;
+  final String displayName;
+  final String summary;
+  final String selfIntroduction;
+  final String conversationStyle;
+  final ChildSkillAvatar avatar;
+  final List<String> quickQuestions;
+  final Map<String, dynamic> recentContext;
+
+  factory ChildSkillData.fromJson(Map<String, dynamic> json) {
+    final profileRaw =
+        Map<String, dynamic>.from((json['profile'] as Map?) ?? const {});
+    final skillRaw =
+        Map<String, dynamic>.from((json['skill'] as Map?) ?? const {});
+    final childId =
+        _optionalInt(json['child_id']) ?? _optionalInt(profileRaw['childId']) ?? 1;
+    profileRaw['childId'] = childId;
+    final questions = (skillRaw['quickQuestions'] as List?)
+            ?.map((item) => item.toString())
+            .where((item) => item.trim().isNotEmpty)
+            .toList() ??
+        const <String>[];
+    return ChildSkillData(
+      childId: childId,
+      profile: ParentChildProfile.fromJson(profileRaw),
+      displayName: skillRaw['displayName']?.toString() ??
+          profileRaw['nickname']?.toString() ??
+          profileRaw['name']?.toString() ??
+          '孩子',
+      summary: skillRaw['summary']?.toString() ?? '',
+      selfIntroduction: skillRaw['selfIntroduction']?.toString() ?? '',
+      conversationStyle: skillRaw['conversationStyle']?.toString() ?? '',
+      avatar: ChildSkillAvatar.fromJson(skillRaw['avatar'] is Map
+          ? Map<String, dynamic>.from(skillRaw['avatar'] as Map)
+          : null),
+      quickQuestions: questions.isEmpty
+          ? const ['我可以怎样帮助你？', '你最近感觉如何？', '你可以介绍下自己吗？']
+          : questions,
+      recentContext: Map<String, dynamic>.from(
+        (json['recent_context'] as Map?) ?? const <String, dynamic>{},
+      ),
+    );
+  }
+}
+
+class ChildSkillChatResponse {
+  const ChildSkillChatResponse({
+    required this.answer,
+    required this.source,
+  });
+
+  final String answer;
+  final String source;
+
+  factory ChildSkillChatResponse.fromJson(Map<String, dynamic> json) {
+    return ChildSkillChatResponse(
+      answer: json['answer']?.toString() ?? '',
+      source: json['source']?.toString() ?? 'template',
     );
   }
 }

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/device_binding.dart';
 import '../models/heart_rate_data.dart';
+import '../models/parent_child_profile.dart';
 
 /// 异步把端侧采样批量打包，送到运行在腾讯云上的 Flask 后端
 /// （[serverHost]:11760/webhook）。和 UI 层使用的轮询 GET /webhook
@@ -360,6 +361,103 @@ class CloudService {
       return key;
     } catch (e) {
       debugPrint('CloudService: fetch xiaomi band auth key error $e');
+      return null;
+    }
+  }
+
+  Future<ParentChildProfile?> fetchChildProfile(int childIdToFetch) async {
+    try {
+      final r = await http
+          .get(
+            Uri.parse('${_base()}/my/children/$childIdToFetch/profile'),
+            headers: _authHeaders(jsonBody: false),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: fetch child profile ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      final profile = Map<String, dynamic>.from((data['profile'] as Map?) ?? const {});
+      profile['childId'] = childIdToFetch;
+      final skill = Map<String, dynamic>.from((data['skill'] as Map?) ?? const {});
+      profile['skillSummary'] = skill['summary'];
+      profile['avatarStyle'] = (skill['avatar'] as Map?)?['theme'];
+      profile['skillUpdatedAt'] = skill['updatedAt'] ?? data['updated_at'];
+      return ParentChildProfile.fromJson(profile);
+    } catch (e) {
+      debugPrint('CloudService: fetch child profile error $e');
+      return null;
+    }
+  }
+
+  Future<ParentChildProfile?> saveChildProfile(ParentChildProfile profile) async {
+    try {
+      final r = await http
+          .put(
+            Uri.parse('${_base()}/my/children/${profile.childId}/profile'),
+            headers: _authHeaders(),
+            body: json.encode({'profile': profile.toJson()}),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: save child profile ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      final next = Map<String, dynamic>.from((data['profile'] as Map?) ?? const {});
+      next['childId'] = profile.childId;
+      final skill = Map<String, dynamic>.from((data['skill'] as Map?) ?? const {});
+      next['skillSummary'] = skill['summary'];
+      next['avatarStyle'] = (skill['avatar'] as Map?)?['theme'];
+      next['skillUpdatedAt'] = skill['updatedAt'] ?? data['updated_at'];
+      return ParentChildProfile.fromJson(next);
+    } catch (e) {
+      debugPrint('CloudService: save child profile error $e');
+      return null;
+    }
+  }
+
+  Future<ChildSkillData?> fetchChildSkill(int childIdToFetch) async {
+    try {
+      final r = await http
+          .get(
+            Uri.parse('${_base()}/my/children/$childIdToFetch/skill'),
+            headers: _authHeaders(jsonBody: false),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: fetch child skill ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      return ChildSkillData.fromJson(data);
+    } catch (e) {
+      debugPrint('CloudService: fetch child skill error $e');
+      return null;
+    }
+  }
+
+  Future<ChildSkillChatResponse?> askChildSkill(
+    int childIdToAsk,
+    String question,
+  ) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/my/children/$childIdToAsk/skill/chat'),
+            headers: _authHeaders(),
+            body: json.encode({'question': question}),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: child skill chat ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      return ChildSkillChatResponse.fromJson(data);
+    } catch (e) {
+      debugPrint('CloudService: child skill chat error $e');
       return null;
     }
   }

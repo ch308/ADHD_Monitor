@@ -317,6 +317,19 @@ def init_db():
     )
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS child_profiles (
+            child_id INTEGER PRIMARY KEY,
+            profile_json TEXT NOT NULL,
+            skill_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            updated_by_user_id INTEGER,
+            FOREIGN KEY (child_id) REFERENCES children(id),
+            FOREIGN KEY (updated_by_user_id) REFERENCES users(id)
+        )
+        """
+    )
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             token TEXT NOT NULL UNIQUE,
@@ -639,6 +652,263 @@ def fetch_kimi_advice(bpm, observation, condition_type):
         if condition_type == "autism":
             return "建议家长先放慢节奏，降低环境刺激，用简短句子陪伴，观察孩子是否需要安静或感官安抚。"
         return "建议家长先帮孩子把任务拆小、降低干扰，温和引导深呼吸或短暂休息，再一起继续。"
+
+
+def _compact_text(value, limit=120):
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:limit]
+
+
+def _child_profile_default(child_id, nickname):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    profile = {
+        "childId": child_id,
+        "nickname": nickname or "孩子",
+        "updatedAt": now,
+    }
+    return profile, _build_child_skill(profile, now)
+
+
+def _profile_display_name(profile):
+    for key in ("nickname", "name"):
+        value = _compact_text(profile.get(key), 40)
+        if value:
+            return value
+    return "孩子"
+
+
+def _build_child_skill(profile, updated_at=None):
+    display_name = _profile_display_name(profile)
+    age = profile.get("age")
+    gender = _compact_text(profile.get("gender"), 20)
+    personality = _compact_text(profile.get("personality"), 80)
+    interests = _compact_text(profile.get("interests"), 80)
+    category = _compact_text(profile.get("category"), 60)
+    note = _compact_text(profile.get("note"), 100)
+    traits = []
+    if age not in (None, ""):
+        traits.append(f"{age} 岁")
+    if gender:
+        traits.append(gender)
+    if category:
+        traits.append(category)
+    if personality:
+        traits.append(f"性格：{personality}")
+    if interests:
+        traits.append(f"喜欢：{interests}")
+    intro_parts = [f"你好呀，我是 {display_name}。"]
+    if traits:
+        intro_parts.append("我有这些小特点：" + "，".join(traits) + "。")
+    if note:
+        intro_parts.append(f"家人还希望你记住：{note}。")
+    intro_parts.append("你可以温柔地问问我今天的感受，也可以帮爸爸妈妈更懂我。")
+    support_hints = []
+    if personality:
+        support_hints.append(f"沟通时先照顾我的性格特点：{personality}。")
+    if interests:
+        support_hints.append(f"可以用我喜欢的 {interests} 作为进入对话或转移注意力的入口。")
+    if category:
+        support_hints.append(f"支持我时请结合 {category} 相关的节奏、感官和注意力需求。")
+    if note:
+        support_hints.append(f"额外注意：{note}。")
+    if not support_hints:
+        support_hints.append("先用短句、慢节奏和明确选择帮助我表达感受。")
+    conversation_style_parts = ["像一个被家人认真理解的卡通小孩，回答简短、真诚、温暖。"]
+    if personality:
+        conversation_style_parts.append(f"回答要体现「{personality}」这类性格特点。")
+    if interests:
+        conversation_style_parts.append(f"可以自然提到「{interests}」，但不要每句都重复。")
+    quick_questions = [
+        "我可以怎样帮助你？",
+        "你最近感觉如何？",
+        "你可以介绍下自己吗？",
+    ]
+    if interests:
+        quick_questions.append(f"我喜欢的 {interests} 可以怎么帮我放松？")
+    palette_seed = sum(ord(ch) for ch in display_name) % 3
+    avatar_styles = [
+        {"theme": "sunny", "primaryColor": "#F2B35D", "accentColor": "#6FAF8E"},
+        {"theme": "calm", "primaryColor": "#74A6D6", "accentColor": "#E7A6B8"},
+        {"theme": "forest", "primaryColor": "#78B783", "accentColor": "#E6C16A"},
+    ]
+    return {
+        "version": 1,
+        "displayName": display_name,
+        "summary": " ".join(intro_parts),
+        "selfIntroduction": " ".join(intro_parts),
+        "conversationStyle": " ".join(conversation_style_parts),
+        "supportHints": support_hints,
+        "avatar": avatar_styles[palette_seed],
+        "quickQuestions": quick_questions[:4],
+        "optimizedFromProfileAt": updated_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "updatedAt": updated_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def _read_child_profile_row(cursor, child_id):
+    cursor.execute(
+        """
+        SELECT c.nickname, p.profile_json, p.skill_json, p.updated_at, p.updated_by_user_id
+        FROM children c
+        LEFT JOIN child_profiles p ON p.child_id = c.id
+        WHERE c.id = ?
+        """,
+        (child_id,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    nickname, profile_raw, skill_raw, updated_at, updated_by = row
+    if profile_raw:
+        try:
+            profile = json.loads(profile_raw)
+        except Exception:
+            profile = {}
+    else:
+        profile = {}
+    if skill_raw:
+        try:
+            skill = json.loads(skill_raw)
+        except Exception:
+            skill = {}
+    else:
+        skill = {}
+    if not profile:
+        profile, skill = _child_profile_default(child_id, nickname)
+    if not skill:
+        skill = _build_child_skill(profile, updated_at)
+    profile["childId"] = child_id
+    return {
+        "child_id": child_id,
+        "nickname": nickname,
+        "profile": profile,
+        "skill": skill,
+        "updated_at": updated_at or profile.get("updatedAt") or skill.get("updatedAt"),
+        "updated_by_user_id": updated_by,
+    }
+
+
+def _recent_child_skill_context(cursor, child_id):
+    cursor.execute(
+        """
+        SELECT observation, ai_advice, bpm, condition_type, timestamp
+        FROM parent_logs
+        WHERE child_id = ?
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+        """,
+        (child_id,),
+    )
+    log = cursor.fetchone()
+    cursor.execute(
+        """
+        SELECT bpm, timestamp
+        FROM heart_rate_history
+        WHERE child_id = ? AND bpm > 0
+        ORDER BY timestamp DESC, id DESC
+        LIMIT 1
+        """,
+        (child_id,),
+    )
+    hr = cursor.fetchone()
+    context = {}
+    if log:
+        context["latestObservation"] = {
+            "observation": log[0],
+            "advice": log[1],
+            "bpm": log[2],
+            "conditionType": log[3],
+            "timestamp": log[4],
+        }
+    if hr:
+        context["latestHeartRate"] = {"bpm": hr[0], "timestamp": hr[1]}
+    return context
+
+
+def _fixed_child_skill_answer(question, profile, skill, context):
+    q = re.sub(r"\s+", "", str(question or "")).lower()
+    display_name = skill.get("displayName") or _profile_display_name(profile)
+    interests = _compact_text(profile.get("interests"), 80)
+    personality = _compact_text(profile.get("personality"), 80)
+    support_hints = skill.get("supportHints") if isinstance(skill.get("supportHints"), list) else []
+    latest_hr = (context.get("latestHeartRate") or {}).get("bpm")
+    latest_obs = _compact_text((context.get("latestObservation") or {}).get("observation"), 80)
+    if any(key in q for key in ("介绍", "自己", "你是谁", "自我")):
+        return skill.get("selfIntroduction") or _build_child_skill(profile).get("selfIntroduction")
+    if any(key in q for key in ("感觉", "最近", "今天", "心情")):
+        parts = [f"我是 {display_name}，我希望大人先慢慢听我说。"]
+        if latest_hr:
+            parts.append(f"最近一次心率大约是 {latest_hr:.0f}，可以结合当时环境一起看看我是不是有点紧绷。")
+        if latest_obs:
+            parts.append(f"家人最近记录到：{latest_obs}。")
+        if not latest_hr and not latest_obs:
+            parts.append("现在还没有太多近期记录，你可以从表情、动作和我愿不愿意继续玩来观察我。")
+        return "".join(parts)
+    if any(key in q for key in ("帮助", "帮你", "需要什么", "怎样帮")):
+        tips = [f"你可以先叫我的小名 {display_name}，蹲下来用短句问我。"]
+        if personality:
+            tips.append(f"记得我的性格特点是：{personality}。")
+        if interests:
+            tips.append(f"也可以从我喜欢的 {interests} 开始，让我更容易放松。")
+        for hint in support_hints[:2]:
+            hint_text = _compact_text(hint, 80)
+            if hint_text:
+                tips.append(hint_text)
+        tips.append("如果我心率或压力偏高，先减少刺激、给我一点选择，再继续沟通。")
+        return "".join(tips)
+    return None
+
+
+def fetch_kimi_child_skill_answer(question, profile, skill, context):
+    display_name = skill.get("displayName") or _profile_display_name(profile)
+    profile_brief = json.dumps(
+        {
+            "name": profile.get("name"),
+            "nickname": profile.get("nickname"),
+            "age": profile.get("age"),
+            "gender": profile.get("gender"),
+            "category": profile.get("category"),
+            "personality": profile.get("personality"),
+            "interests": profile.get("interests"),
+            "note": profile.get("note"),
+        },
+        ensure_ascii=False,
+    )
+    context_brief = json.dumps(context or {}, ensure_ascii=False)
+    skill_brief = json.dumps(
+        {
+            "conversationStyle": skill.get("conversationStyle"),
+            "supportHints": skill.get("supportHints"),
+            "optimizedFromProfileAt": skill.get("optimizedFromProfileAt"),
+        },
+        ensure_ascii=False,
+    )
+    system = (
+        "你是家长版 App 里的孩子画像 skill，不是小智机器人。"
+        "请基于家长录入的孩子资料，用卡通小孩第一人称回答家长问题。"
+        "回答要温暖、简短、具体，避免诊断结论，不编造未提供的事实。"
+    )
+    prompt = (
+        f"孩子称呼：{display_name}\n"
+        f"孩子资料 JSON：{profile_brief}\n"
+        f"当前已优化 skill JSON：{skill_brief}\n"
+        f"近期行为和心率上下文 JSON：{context_brief}\n"
+        f"家长问题：{_compact_text(question, 300)}\n"
+        "请用 80 字以内中文回答。"
+    )
+    try:
+        response = _kimi_chat_create(
+            model=_moonshot_chat_model(),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.6,
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"Kimi child skill 错误: {e}")
+        return _fixed_child_skill_answer("我可以怎样帮助你？", profile, skill, context)
 
 
 def _extract_json_object(text):
@@ -2302,6 +2572,135 @@ def my_children_add_member(child_id):
         return jsonify({"status": "error", "message": "already a member"}), 409
     conn.close()
     return jsonify({"status": "ok", "child_id": child_id, "username": invite_username, "role": role}), 200
+
+
+@app.route("/my/children/<int:child_id>/profile", methods=["GET"])
+def my_child_profile_get(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    row = _read_child_profile_row(cursor, child_id)
+    conn.close()
+    if not row:
+        return jsonify({"status": "error", "message": "child not found"}), 404
+    return jsonify({"status": "ok", **row}), 200
+
+
+@app.route("/my/children/<int:child_id>/profile", methods=["PUT"])
+def my_child_profile_put(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    raw_profile = data.get("profile") if isinstance(data.get("profile"), dict) else data
+    profile = dict(raw_profile or {})
+    profile["childId"] = child_id
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    profile["updatedAt"] = now
+    skill = _build_child_skill(profile, now)
+    nickname = _compact_text(profile.get("nickname") or profile.get("name"), 40)
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute("SELECT 1 FROM children WHERE id = ?", (child_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return jsonify({"status": "error", "message": "child not found"}), 404
+    if nickname:
+        cursor.execute("UPDATE children SET nickname = ? WHERE id = ?", (nickname, child_id))
+    cursor.execute(
+        """
+        INSERT INTO child_profiles
+        (child_id, profile_json, skill_json, updated_at, updated_by_user_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(child_id) DO UPDATE SET
+            profile_json = excluded.profile_json,
+            skill_json = excluded.skill_json,
+            updated_at = excluded.updated_at,
+            updated_by_user_id = excluded.updated_by_user_id
+        """,
+        (
+            child_id,
+            json.dumps(profile, ensure_ascii=False),
+            json.dumps(skill, ensure_ascii=False),
+            now,
+            user["id"],
+        ),
+    )
+    conn.commit()
+    row = _read_child_profile_row(cursor, child_id)
+    conn.close()
+    return jsonify({"status": "ok", **row}), 200
+
+
+@app.route("/my/children/<int:child_id>/skill", methods=["GET"])
+def my_child_skill_get(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    row = _read_child_profile_row(cursor, child_id)
+    if not row:
+        conn.close()
+        return jsonify({"status": "error", "message": "child not found"}), 404
+    context = _recent_child_skill_context(cursor, child_id)
+    conn.close()
+    return jsonify(
+        {
+            "status": "ok",
+            "child_id": child_id,
+            "profile": row["profile"],
+            "skill": row["skill"],
+            "recent_context": context,
+        }
+    ), 200
+
+
+@app.route("/my/children/<int:child_id>/skill/chat", methods=["POST"])
+def my_child_skill_chat(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    question = _compact_text(data.get("question"), 300)
+    if not question:
+        return jsonify({"status": "error", "message": "question required"}), 400
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    row = _read_child_profile_row(cursor, child_id)
+    if not row:
+        conn.close()
+        return jsonify({"status": "error", "message": "child not found"}), 404
+    context = _recent_child_skill_context(cursor, child_id)
+    conn.close()
+    answer = _fixed_child_skill_answer(question, row["profile"], row["skill"], context)
+    source = "template"
+    if not answer:
+        answer = fetch_kimi_child_skill_answer(question, row["profile"], row["skill"], context)
+        source = "kimi"
+    return jsonify(
+        {
+            "status": "ok",
+            "child_id": child_id,
+            "question": question,
+            "answer": answer,
+            "source": source,
+        }
+    ), 200
 
 
 @app.route("/weekly_report/generate", methods=["POST"])
