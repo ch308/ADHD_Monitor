@@ -22,7 +22,7 @@ import '../services/parent_child_profile_store.dart';
 import '../services/session_store.dart';
 import '../services/stress_calculator.dart';
 import 'breathing_ball_page.dart';
-import '../services/child_skill_page.dart';
+import '../screens/child_skill_page.dart';
 import 'esp_provision_page.dart';
 import 'footprint_page.dart';
 import 'weekly_report_page.dart';
@@ -2189,7 +2189,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               const PopupMenuItem(value: 'switch', child: Text('切换关注的孩子')),
               const PopupMenuItem(
                   value: 'child_profile', child: Text('录入孩子资料')),
-              const PopupMenuItem(value: 'child_skill', child: Text('查看孩子 Skill')),
+              const PopupMenuItem(
+                  value: 'child_skill', child: Text('查看孩子 Skill')),
               const PopupMenuItem(value: 'invite', child: Text('邀请家庭成员')),
               const PopupMenuDivider(),
               const PopupMenuItem(

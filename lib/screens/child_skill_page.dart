@@ -119,12 +119,15 @@ class _ChildSkillPageState extends State<ChildSkillPage>
       setState(() {
         _skill = fallbackSkill;
         _loading = false;
-        _errorText = fallback == null ? '暂时无法从云端读取孩子 Skill。' : '云端暂不可用，正在展示本机缓存。';
+        _errorText =
+            fallback == null ? '暂时无法从云端读取孩子 Skill。' : '云端暂不可用，正在展示本机缓存。';
         _messages
           ..clear()
           ..addAll(fallbackSkill == null
               ? const <_SkillMessage>[]
-              : <_SkillMessage>[_SkillMessage.bot(fallbackSkill.selfIntroduction)]);
+              : <_SkillMessage>[
+                  _SkillMessage.bot(fallbackSkill.selfIntroduction)
+                ]);
       });
       if (fallbackSkill != null) _greetOnce();
       return;
@@ -134,7 +137,9 @@ class _ChildSkillPageState extends State<ChildSkillPage>
       _loading = false;
       _messages
         ..clear()
-        ..add(_SkillMessage.bot(data.selfIntroduction.isEmpty ? data.summary : data.selfIntroduction));
+        ..add(_SkillMessage.bot(data.selfIntroduction.isEmpty
+            ? data.summary
+            : data.selfIntroduction));
     });
     _greetOnce();
   }
@@ -144,10 +149,13 @@ class _ChildSkillPageState extends State<ChildSkillPage>
     final traits = <String>[
       if (profile.age != null) '${profile.age} 岁',
       if ((profile.gender ?? '').trim().isNotEmpty) profile.gender!.trim(),
-      if ((profile.personality ?? '').trim().isNotEmpty) '性格：${profile.personality!.trim()}',
-      if ((profile.interests ?? '').trim().isNotEmpty) '喜欢：${profile.interests!.trim()}',
+      if ((profile.personality ?? '').trim().isNotEmpty)
+        '性格：${profile.personality!.trim()}',
+      if ((profile.interests ?? '').trim().isNotEmpty)
+        '喜欢：${profile.interests!.trim()}',
     ];
-    final intro = '你好呀，我是 $displayName。${traits.isEmpty ? '' : '我有这些小特点：${traits.join('，')}。'}你可以问问我最近感觉如何。';
+    final intro =
+        '你好呀，我是 $displayName。${traits.isEmpty ? '' : '我有这些小特点：${traits.join('，')}。'}你可以问问我最近感觉如何。';
     return ChildSkillData(
       childId: profile.childId,
       profile: profile,
@@ -172,7 +180,8 @@ class _ChildSkillPageState extends State<ChildSkillPage>
       _messages.add(_SkillMessage.parent(question));
       _questionController.clear();
     });
-    final response = await widget.cloudService.askChildSkill(widget.childId, question);
+    final response =
+        await widget.cloudService.askChildSkill(widget.childId, question);
     if (!mounted) return;
     final answer = response?.answer.trim().isNotEmpty == true
         ? response!.answer.trim()
@@ -190,14 +199,16 @@ class _ChildSkillPageState extends State<ChildSkillPage>
     return Scaffold(
       backgroundColor: _warmCanvas,
       appBar: AppBar(
-        title: Text(skill == null ? '孩子 Skill' : '${skill.displayName} 的 Skill'),
+        title:
+            Text(skill == null ? '孩子 Skill' : '${skill.displayName} 的 Skill'),
         backgroundColor: _warmSurface,
         foregroundColor: _ink,
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : skill == null
-              ? _ErrorState(message: _errorText ?? '孩子 Skill 暂不可用', onRetry: _loadSkill)
+              ? _ErrorState(
+                  message: _errorText ?? '孩子 Skill 暂不可用', onRetry: _loadSkill)
               : SafeArea(
                   child: ListView(
                     padding: const EdgeInsets.all(16),
@@ -281,7 +292,8 @@ class _SkillHeroCard extends StatelessWidget {
             ),
             if (errorText != null) ...[
               const SizedBox(height: 10),
-              Text(errorText!, style: const TextStyle(color: _coral, fontSize: 12)),
+              Text(errorText!,
+                  style: const TextStyle(color: _coral, fontSize: 12)),
             ],
           ],
         ),
@@ -319,8 +331,10 @@ class _ImageChildAvatar extends StatelessWidget {
         final t = animation.value;
         final bob = math.sin(t * math.pi) * 8;
         final waveTilt = math.sin(t * math.pi * 2) * 0.08;
-        final speakScale = speaking ? 1 + math.sin(t * math.pi * 2) * 0.025 : 1.0;
-        final idleScale = speaking ? speakScale : 1 + math.sin(t * math.pi) * 0.012;
+        final speakScale =
+            speaking ? 1 + math.sin(t * math.pi * 2) * 0.025 : 1.0;
+        final idleScale =
+            speaking ? speakScale : 1 + math.sin(t * math.pi) * 0.012;
         final angle = waving ? waveTilt : math.sin(t * math.pi * 2) * 0.015;
         return Transform.translate(
           offset: Offset(0, -bob),
@@ -462,8 +476,10 @@ class _MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final align = message.isParent ? Alignment.centerRight : Alignment.centerLeft;
-    final color = message.isParent ? _sage.withValues(alpha: 0.16) : _warmCanvas;
+    final align =
+        message.isParent ? Alignment.centerRight : Alignment.centerLeft;
+    final color =
+        message.isParent ? _sage.withValues(alpha: 0.16) : _warmCanvas;
     return Align(
       alignment: align,
       child: Container(
@@ -475,7 +491,8 @@ class _MessageBubble extends StatelessWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: _warmBorder),
         ),
-        child: Text(message.text, style: const TextStyle(color: _ink, height: 1.35)),
+        child: Text(message.text,
+            style: const TextStyle(color: _ink, height: 1.35)),
       ),
     );
   }
@@ -500,7 +517,9 @@ class _ErrorState extends StatelessWidget {
           children: [
             const Icon(Icons.cloud_off_rounded, color: _coral, size: 42),
             const SizedBox(height: 12),
-            Text(message, textAlign: TextAlign.center, style: const TextStyle(color: _mutedInk)),
+            Text(message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: _mutedInk)),
             const SizedBox(height: 12),
             FilledButton(onPressed: onRetry, child: const Text('重试')),
           ],
