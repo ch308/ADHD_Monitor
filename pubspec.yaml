@@ -29,3 +29,4 @@ flutter:
   assets:
     - assets/audio/432Hz/
     - assets/audio/528Hz/
+    - assets/images/
