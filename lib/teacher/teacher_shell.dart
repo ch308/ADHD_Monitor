@@ -1088,17 +1088,6 @@ class _TeacherShellState extends State<TeacherShell> {
     );
   }
 
-  _BandDiagnosticViewData _buildTeacherDiagnostic() {
-    return _describeBandDiagnostic(
-      title: '老师手环',
-      displayName: _teacherBand?.displayName,
-      hasBinding: _teacherBand != null,
-      status: _teacherBandStatus,
-      lastFailureReason: _teacherBandLastFailure,
-      verified: _teacherBand?.vibrationVerified == true,
-    );
-  }
-
   _BandDiagnosticViewData _buildStudentDiagnostic(TeacherStudent student) {
     return _describeBandDiagnostic(
       title: student.name,
@@ -1288,7 +1277,6 @@ class _TeacherShellState extends State<TeacherShell> {
 
   Widget _buildConnectionDiagnosticPanel() {
     final diagnostics = <_BandDiagnosticViewData>[
-      _buildTeacherDiagnostic(),
       ..._students.map(_buildStudentDiagnostic),
     ];
 
@@ -1308,14 +1296,20 @@ class _TeacherShellState extends State<TeacherShell> {
           ),
           const SizedBox(height: 6),
           const Text(
-            '这里会显示每只手环当前是否已扫描、已连接、等待心率广播，或连接密钥是否有误。',
+            '这里只显示学生手环状态：是否已扫描、已连接、等待心率广播，或连接密钥是否有误。',
             style: TextStyle(color: AppColors.muted, height: 1.4),
           ),
           const SizedBox(height: 12),
-          for (final item in diagnostics) ...[
-            _BandDiagnosticTile(item: item),
-            if (item != diagnostics.last) const SizedBox(height: 10),
-          ],
+          if (diagnostics.isEmpty)
+            const Text(
+              '暂无学生手环，请先添加学生并完成绑定。',
+              style: TextStyle(color: AppColors.muted),
+            )
+          else
+            for (final item in diagnostics) ...[
+              _BandDiagnosticTile(item: item),
+              if (item != diagnostics.last) const SizedBox(height: 10),
+            ],
         ],
       ),
     );
@@ -1452,8 +1446,6 @@ class _TeacherShellState extends State<TeacherShell> {
               onToggleMonitoring: _toggleMonitoring,
             ),
             const SizedBox(height: 12),
-            _buildConnectionDiagnosticPanel(),
-            const SizedBox(height: 12),
             if (_students.isEmpty) const _EmptyTeacherState(),
             for (final student in _students) ...[
               _StudentCard(
@@ -1497,6 +1489,8 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
 
   String? selectedGender;
   String? errorText;
+  String? aiThresholdNote;
+  bool aiThresholdBusy = false;
 
   @override
   void initState() {
@@ -1534,6 +1528,71 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
     thresholdController.dispose();
     lowThresholdController.dispose();
     super.dispose();
+  }
+
+  Future<void> _suggestThresholdsWithAi() async {
+    final name = nameController.text.trim();
+    final ageValue = int.tryParse(ageController.text.trim());
+    if (ageValue == null || ageValue < 0) {
+      setState(() => errorText = '请先填写正确年龄，再进行 AI 阈值分析。');
+      return;
+    }
+    setState(() {
+      aiThresholdBusy = true;
+      errorText = null;
+      aiThresholdNote = null;
+    });
+    try {
+      final thresholds = teacherHeartRateThresholdsForAge(ageValue);
+      final token = await SessionStore.getToken();
+      final host = await SessionStore.getServerHost();
+      final cloud = CloudService(
+        serverHost: host,
+        timeout: const Duration(seconds: 20),
+      )..authToken = token;
+      final suggestion = await cloud.suggestTeacherHeartRateThresholds(
+        profile: <String, dynamic>{
+          'name': name.isEmpty ? '学生' : name,
+          'nickname': nicknameController.text.trim(),
+          'age': ageValue,
+          'gender': selectedGender?.trim() ?? '',
+          'category': categoryController.text.trim(),
+          'personality': personalityController.text.trim(),
+          'interests': interestsController.text.trim(),
+          'note': noteController.text.trim(),
+        },
+        currentRule: <String, dynamic>{
+          'low': thresholds.low,
+          'high': thresholds.high,
+          'ageBandLabel': thresholds.ageBandLabel,
+          'normalRangeLabel': thresholds.normalRangeLabel,
+        },
+      );
+      if (!mounted) return;
+      if (suggestion == null) {
+        setState(() {
+          errorText = 'AI 阈值分析暂不可用，请稍后重试或继续使用年龄规则。';
+        });
+        return;
+      }
+      final low = (suggestion['lowThresholdBpm'] as num?)?.toInt();
+      final high = (suggestion['highThresholdBpm'] as num?)?.toInt();
+      if (low == null || high == null || low <= 0 || high <= low) {
+        setState(() {
+          errorText = 'AI 返回的阈值不可用，请继续使用年龄规则。';
+        });
+        return;
+      }
+      setState(() {
+        lowThresholdController.text = '$low';
+        thresholdController.text = '$high';
+        aiThresholdNote = suggestion['reason']?.toString() ?? '已基于学生资料生成建议阈值。';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => aiThresholdBusy = false);
+      }
+    }
   }
 
   @override
@@ -1676,6 +1735,32 @@ class _TeacherStudentDialogState extends State<_TeacherStudentDialog> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 10),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed:
+                          aiThresholdBusy ? null : _suggestThresholdsWithAi,
+                      icon: aiThresholdBusy
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.auto_awesome_rounded),
+                      label: Text(aiThresholdBusy ? 'AI 分析中...' : 'AI 分析阈值'),
+                    ),
+                  ),
+                  if (aiThresholdNote != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      aiThresholdNote!,
+                      style: const TextStyle(
+                        color: AppColors.muted,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -2002,6 +2087,119 @@ class _BandDiagnosticViewData {
   final IconData icon;
 }
 
+class _StudentHeartPulse extends StatefulWidget {
+  const _StudentHeartPulse({
+    required this.bpm,
+    required this.alerting,
+    required this.monitoring,
+  });
+
+  final int? bpm;
+  final bool alerting;
+  final bool monitoring;
+
+  @override
+  State<_StudentHeartPulse> createState() => _StudentHeartPulseState();
+}
+
+class _StudentHeartPulseState extends State<_StudentHeartPulse>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 820),
+    );
+    if (widget.monitoring && widget.bpm != null) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _StudentHeartPulse oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.monitoring && widget.bpm != null) {
+      if (!_controller.isAnimating) {
+        _controller.repeat(reverse: true);
+      }
+    } else if (_controller.isAnimating) {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = widget.monitoring && widget.bpm != null;
+    final color = widget.alerting
+        ? AppColors.coral
+        : active
+            ? const Color(0xFFD95F7A)
+            : AppColors.muted;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AnimatedBuilder(
+          animation: _controller,
+          builder: (context, child) {
+            final scale = active ? 0.92 + (_controller.value * 0.22) : 0.9;
+            return Transform.scale(
+              scale: scale,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: active ? 0.14 : 0.08),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.favorite_rounded,
+                  color: color,
+                  size: widget.alerting ? 28 : 25,
+                ),
+              ),
+            );
+          },
+        ),
+        const SizedBox(width: 8),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              widget.bpm == null ? '--' : '${widget.bpm}',
+              style: TextStyle(
+                fontSize: 28,
+                height: 1,
+                fontWeight: FontWeight.w900,
+                color: widget.alerting ? AppColors.coral : AppColors.ink,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              active ? '次/分钟' : '等待心率',
+              style: const TextStyle(
+                color: AppColors.muted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _StudentCard extends StatelessWidget {
   const _StudentCard({
     required this.student,
@@ -2092,16 +2290,11 @@ class _StudentCard extends StatelessWidget {
                   ],
                 ),
               ),
-              Text(
-                bpm == null ? '--' : '$bpm',
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
-                  color: alerting ? AppColors.coral : AppColors.ink,
-                ),
+              _StudentHeartPulse(
+                bpm: bpm,
+                alerting: alerting,
+                monitoring: monitoring && student.enabled && hasBand,
               ),
-              const SizedBox(width: 4),
-              const Text('次/分钟'),
             ],
           ),
           const SizedBox(height: 10),

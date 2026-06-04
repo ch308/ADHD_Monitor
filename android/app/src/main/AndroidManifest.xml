@@ -7,11 +7,9 @@
     <!-- BLE / 手环（小米手环 6 心率） -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"
-        android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <!-- Android 12+ 蓝牙运行时权限 -->
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
-        android:usesPermissionFlags="neverForLocation" tools:targetApi="s"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
     <!-- 前台服务保活：息屏后仍可保持手环 BLE 推送 -->
@@ -29,7 +27,7 @@
         </intent>
     </queries>
     <application
-        android:label="adhd_monitor"
+        android:label="星星守护者"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

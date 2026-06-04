@@ -461,4 +461,34 @@ class CloudService {
       return null;
     }
   }
+
+  Future<Map<String, dynamic>?> suggestTeacherHeartRateThresholds({
+    required Map<String, dynamic> profile,
+    required Map<String, dynamic> currentRule,
+  }) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/teacher/threshold_suggest'),
+            headers: _authHeaders(),
+            body: json.encode({
+              'profile': profile,
+              'current_rule': currentRule,
+            }),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint(
+          'CloudService: teacher threshold suggest ${r.statusCode}: ${r.body}',
+        );
+        return null;
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      if (data['status'] != 'ok') return null;
+      return data;
+    } catch (e) {
+      debugPrint('CloudService: teacher threshold suggest error $e');
+      return null;
+    }
+  }
 }

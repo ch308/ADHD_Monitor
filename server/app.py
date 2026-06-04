@@ -911,6 +911,78 @@ def fetch_kimi_child_skill_answer(question, profile, skill, context):
         return _fixed_child_skill_answer("我可以怎样帮助你？", profile, skill, context)
 
 
+def fetch_kimi_teacher_threshold_suggestion(profile, current_rule):
+    """为教师版学生生成个性化心率提醒阈值建议。
+
+    这是课堂提醒阈值，不是诊断结论；AI 只能在年龄规则基础上做温和调整。
+    """
+    age = profile.get("age")
+    low = int(current_rule.get("low") or 70)
+    high = int(current_rule.get("high") or 120)
+    fallback = {
+        "lowThresholdBpm": low,
+        "highThresholdBpm": high,
+        "reason": "AI 暂不可用，已沿用当前年龄规则阈值。建议结合课堂表现和持续心率记录再微调。",
+        "source": "fallback",
+    }
+    profile_brief = json.dumps(
+        {
+            "name": profile.get("name"),
+            "nickname": profile.get("nickname"),
+            "age": age,
+            "gender": profile.get("gender"),
+            "category": profile.get("category"),
+            "personality": profile.get("personality"),
+            "interests": profile.get("interests"),
+            "note": profile.get("note"),
+        },
+        ensure_ascii=False,
+    )
+    rule_brief = json.dumps(current_rule or {}, ensure_ascii=False)
+    system = (
+        "你是儿童课堂心率监测阈值建议助手。"
+        "你只能基于年龄规则、性别、年龄、性格、兴趣、支持类别和备注，给老师一个课堂提醒阈值建议。"
+        "不要给医学诊断，不要声称可以替代医生。阈值应保守、可解释，避免过度告警。"
+        "必须只输出 JSON 对象。"
+    )
+    prompt = (
+        f"当前年龄规则阈值 JSON：{rule_brief}\n"
+        f"学生资料 JSON：{profile_brief}\n"
+        "请输出 JSON："
+        "{\"lowThresholdBpm\":整数,\"highThresholdBpm\":整数,\"reason\":\"80字以内中文理由\"}。"
+        "约束：lowThresholdBpm 必须小于 highThresholdBpm；low 在 45-120；high 在 90-180；"
+        "如果资料不足，尽量接近年龄规则。"
+    )
+    try:
+        response = _kimi_chat_create(
+            model=_moonshot_chat_model(),
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        parsed = _extract_json_object(response.choices[0].message.content)
+        if not parsed:
+            return fallback
+        next_low = int(parsed.get("lowThresholdBpm", low))
+        next_high = int(parsed.get("highThresholdBpm", high))
+        next_low = max(45, min(120, next_low))
+        next_high = max(90, min(180, next_high))
+        if next_low >= next_high:
+            next_low, next_high = low, high
+        return {
+            "lowThresholdBpm": next_low,
+            "highThresholdBpm": next_high,
+            "reason": _compact_text(parsed.get("reason"), 160)
+            or "已基于当前年龄规则和学生资料生成课堂提醒阈值。",
+            "source": "kimi",
+        }
+    except Exception as e:
+        print(f"Kimi teacher threshold 错误: {e}")
+        return fallback
+
+
 def _extract_json_object(text):
     text = (text or "").strip()
     if text.startswith("```"):
@@ -2701,6 +2773,19 @@ def my_child_skill_chat(child_id):
             "source": source,
         }
     ), 200
+
+
+@app.route("/teacher/threshold_suggest", methods=["POST"])
+def teacher_threshold_suggest():
+    data = request.json or {}
+    profile = data.get("profile") if isinstance(data.get("profile"), dict) else {}
+    current_rule = (
+        data.get("current_rule") if isinstance(data.get("current_rule"), dict) else {}
+    )
+    if not profile:
+        return jsonify({"status": "error", "message": "profile required"}), 400
+    suggestion = fetch_kimi_teacher_threshold_suggestion(profile, current_rule)
+    return jsonify({"status": "ok", **suggestion}), 200
 
 
 @app.route("/weekly_report/generate", methods=["POST"])
