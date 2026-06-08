@@ -22,7 +22,7 @@ extern const lv_image_dsc_t wear_clothes;
 extern const lv_image_dsc_t wear_shoes;
 extern const lv_image_dsc_t wash_hands;
 extern const lv_image_dsc_t take_bath;
-extern const lv_image_dsc_t sleep;
+extern const lv_image_dsc_t action_card_sleep;
 
 struct ActionCard {
     const lv_image_dsc_t* image;  // 240x240 RGB565 picture
@@ -42,5 +42,5 @@ static const std::array<ActionCard, 10> kActionCards = {{
     { &wear_shoes, "穿鞋子", Lang::Sounds::OGG_ACT_WEAR_SHOES },
     { &wash_hands, "洗手", Lang::Sounds::OGG_ACT_WASH_HANDS },
     { &take_bath, "洗澡", Lang::Sounds::OGG_ACT_TAKE_BATH },
-    { &sleep, "睡觉", Lang::Sounds::OGG_ACT_SLEEP },
+    { &action_card_sleep, "睡觉", Lang::Sounds::OGG_ACT_SLEEP },
 }};

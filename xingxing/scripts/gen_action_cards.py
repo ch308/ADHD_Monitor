@@ -41,7 +41,8 @@ import tempfile
 # The ten daily-routine actions, in the order the slideshow walks through them.
 # (chinese_name, ascii_slug, source_png_filename)
 # - chinese_name is spoken by TTS and shown as the label (no file extension).
-# - ascii_slug becomes the C identifier, the ogg filename and the OGG_ symbol.
+# - ascii_slug becomes the ogg filename and the OGG_ symbol.
+# - image_symbol() derives the C identifier used by LVGLImage.py.
 # ---------------------------------------------------------------------------
 ACTIONS = [
     ("起床",     "get_up",       "起床.png"),
@@ -55,6 +56,12 @@ ACTIONS = [
     ("洗澡",     "take_bath",    "洗澡.png"),
     ("睡觉",     "sleep",        "睡觉.png"),
 ]
+
+# Avoid names exported by libc/POSIX headers. LVGL image descriptors are linked as
+# globals, so a card named "sleep" collides with unistd.h's sleep().
+IMAGE_SYMBOL_OVERRIDES = {
+    "sleep": "action_card_sleep",
+}
 
 # Paths are resolved relative to the repo (.../xingxing) which is the parent of
 # this script's directory.
@@ -77,6 +84,10 @@ def log(msg):
     print("[gen_action_cards] " + msg)
 
 
+def image_symbol(slug):
+    return IMAGE_SYMBOL_OVERRIDES.get(slug, slug)
+
+
 def generate_images():
     """Convert each source PNG to a 240x240 RGB565 LVGL C array."""
     try:
@@ -87,6 +98,10 @@ def generate_images():
         raise SystemExit("LVGLImage.py not found at %s" % LVGL_IMAGE_PY)
 
     os.makedirs(IMAGES_OUT_DIR, exist_ok=True)
+    expected_outputs = set("%s.c" % image_symbol(slug) for _cn, slug, _png in ACTIONS)
+    for filename in os.listdir(IMAGES_OUT_DIR):
+        if filename.endswith(".c") and filename not in expected_outputs:
+            os.remove(os.path.join(IMAGES_OUT_DIR, filename))
     tmp_dir = tempfile.mkdtemp(prefix="action_cards_img_")
     try:
         for cn_name, slug, png_name in ACTIONS:
@@ -98,7 +113,8 @@ def generate_images():
             img = Image.open(src).convert("RGB")
             if img.size != (IMAGE_SIZE, IMAGE_SIZE):
                 img = img.resize((IMAGE_SIZE, IMAGE_SIZE), Image.LANCZOS)
-            ascii_png = os.path.join(tmp_dir, slug + ".png")
+            symbol = image_symbol(slug)
+            ascii_png = os.path.join(tmp_dir, symbol + ".png")
             img.save(ascii_png)
 
             cmd = [
@@ -109,7 +125,7 @@ def generate_images():
                 "-o", IMAGES_OUT_DIR,
                 ascii_png,
             ]
-            log("converting %s -> images/%s.c" % (png_name, slug))
+            log("converting %s -> images/%s.c" % (png_name, symbol))
             subprocess.check_call(cmd)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -151,7 +167,7 @@ def generate_audio():
             mp3_path = os.path.join(tmp_dir, slug + ".mp3")
             ogg_path = os.path.join(AUDIO_OUT_DIR, "act_%s.ogg" % slug)
             log("TTS '%s' -> %s" % (cn_name, os.path.basename(ogg_path)))
-                        asyncio.run(synth(cn_name, mp3_path))
+            asyncio.run(synth(cn_name, mp3_path))
             # Match the project's mp3_to_ogg.sh format exactly.
             subprocess.check_call([
                 ffmpeg, "-y", "-i", mp3_path,
@@ -194,7 +210,7 @@ def write_manifest():
     lines.append("#endif")
     lines.append("")
     for _cn, slug, _png in ACTIONS:
-        lines.append("extern const lv_image_dsc_t %s;" % slug)
+        lines.append("extern const lv_image_dsc_t %s;" % image_symbol(slug))
     lines.append("")
     lines.append("struct ActionCard {")
     lines.append("    const lv_image_dsc_t* image;  // 240x240 RGB565 picture")
@@ -206,11 +222,12 @@ def write_manifest():
     lines.append("")
     lines.append("static const std::array<ActionCard, %d> kActionCards = {{" % len(ACTIONS))
     for cn_name, slug, _png in ACTIONS:
+        symbol = image_symbol(slug)
         if have_audio:
             lines.append('    { &%s, "%s", Lang::Sounds::OGG_ACT_%s },'
-                         % (slug, cn_name, slug.upper()))
+                         % (symbol, cn_name, slug.upper()))
         else:
-            lines.append('    { &%s, "%s" },' % (slug, cn_name))
+            lines.append('    { &%s, "%s" },' % (symbol, cn_name))
     lines.append("}};")
     lines.append("")
 
