@@ -99,12 +99,15 @@ set(EMOTE_RESOLUTION "320_240")
 
 # Slim fork: single hardware — 星智 CUBE 1.54" TFT WiFi (ST7789 240×240 SPI).
 # No multi-board CMake matrix; other boards are not compiled.
-if(CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI)
-    set(BOARD_TYPE "xingzhi-cube-1.54tft-wifi")
-    set(BUILTIN_TEXT_FONT font_puhui_16_4)
-    set(BUILTIN_ICON_FONT font_awesome_20_4)
-    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
-else()
+#
+# ESP-IDF runs this file during component_get_requirements before Kconfig symbols
+# exist in the CMake scope, so CONFIG_BOARD_TYPE_* is often undefined there.
+# Always set BOARD_TYPE for this tree; only fatal if Kconfig later says "not this board".
+set(BOARD_TYPE "xingzhi-cube-1.54tft-wifi")
+set(BUILTIN_TEXT_FONT font_puhui_16_4)
+set(BUILTIN_ICON_FONT font_awesome_20_4)
+set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+if(DEFINED CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI AND NOT CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI)
     message(FATAL_ERROR "This project tree is slimmed to CONFIG_BOARD_TYPE_XINGZHI_CUBE_1_54TFT_WIFI only. Fix sdkconfig / sdkconfig.defaults or restore upstream CMake board matrix.")
 endif()
 
