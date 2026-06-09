@@ -18,12 +18,21 @@
 #include <esp_lcd_panel_ops.h>
 #include <wifi_manager.h>
 
+#include <driver/i2c_master.h>
 #include <driver/rtc_io.h>
+#include <esp_timer.h>
 #include <esp_sleep.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #define TAG "XINGZHI_CUBE_1_54TFT_WIFI"
+
+#define MPU6050_ADDR 0x68
+#define MPU6050_REG_ACCEL_XOUT_H 0x3B
+#define MPU6050_REG_PWR_MGMT_1 0x6B
+#define MPU6050_REG_WHO_AM_I 0x75
+#define MPU6050_SHAKE_DELTA_THRESHOLD 16000
+#define MPU6050_SHAKE_COOLDOWN_US 800000
 
 class XINGZHI_CUBE_1_54TFT_WIFI : public WifiBoard {
 private:
@@ -35,7 +44,17 @@ private:
     PowerManager* power_manager_;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
+    i2c_master_bus_handle_t mpu_i2c_bus_ = nullptr;
+    i2c_master_dev_handle_t mpu6050_ = nullptr;
     bool app_sleep_lcd_off_ = false;
+    bool mpu6050_ready_ = false;
+    uint8_t mpu6050_who_am_i_ = 0;
+    esp_err_t mpu6050_init_err_ = ESP_FAIL;
+    int16_t mpu6050_initial_ax_ = 0;
+    int16_t mpu6050_initial_ay_ = 0;
+    int16_t mpu6050_initial_az_ = 0;
+    bool mpu6050_initial_accel_valid_ = false;
+    TaskHandle_t mpu6050_task_ = nullptr;
 
     void InitializePowerManager() {
         power_manager_ = new PowerManager(GPIO_NUM_38);
@@ -209,6 +228,146 @@ private:
         ESP_LOGI(TAG, "LCD self-test finished");
     }
 
+    esp_err_t Mpu6050WriteReg(uint8_t reg, uint8_t value) {
+        uint8_t buffer[2] = {reg, value};
+        return i2c_master_transmit(mpu6050_, buffer, sizeof(buffer), 100);
+    }
+
+    esp_err_t Mpu6050ReadRegs(uint8_t reg, uint8_t* buffer, size_t len) {
+        return i2c_master_transmit_receive(mpu6050_, &reg, 1, buffer, len, 100);
+    }
+
+    bool Mpu6050ReadAccel(int16_t& ax, int16_t& ay, int16_t& az) {
+        uint8_t buffer[6] = {};
+        esp_err_t err = Mpu6050ReadRegs(MPU6050_REG_ACCEL_XOUT_H, buffer, sizeof(buffer));
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "MPU6050 accel read failed: %s", esp_err_to_name(err));
+            return false;
+        }
+
+        ax = static_cast<int16_t>((buffer[0] << 8) | buffer[1]);
+        ay = static_cast<int16_t>((buffer[2] << 8) | buffer[3]);
+        az = static_cast<int16_t>((buffer[4] << 8) | buffer[5]);
+        return true;
+    }
+
+    void InitializeMpu6050() {
+        mpu6050_init_err_ = ESP_FAIL;
+        i2c_master_bus_config_t bus_config = {};
+        bus_config.i2c_port = I2C_NUM_0;
+        bus_config.sda_io_num = MPU6050_I2C_SDA;
+        bus_config.scl_io_num = MPU6050_I2C_SCL;
+        bus_config.clk_source = I2C_CLK_SRC_DEFAULT;
+        bus_config.glitch_ignore_cnt = 7;
+        bus_config.flags.enable_internal_pullup = true;
+
+        esp_err_t err = i2c_new_master_bus(&bus_config, &mpu_i2c_bus_);
+        if (err != ESP_OK) {
+            mpu6050_init_err_ = err;
+            ESP_LOGW(TAG, "MPU6050 I2C bus init failed: %s", esp_err_to_name(err));
+            return;
+        }
+
+        i2c_device_config_t dev_config = {};
+        dev_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
+        dev_config.device_address = MPU6050_ADDR;
+        dev_config.scl_speed_hz = 400 * 1000;
+
+        err = i2c_master_bus_add_device(mpu_i2c_bus_, &dev_config, &mpu6050_);
+        if (err != ESP_OK) {
+            mpu6050_init_err_ = err;
+            ESP_LOGW(TAG, "MPU6050 add device failed: %s", esp_err_to_name(err));
+            return;
+        }
+
+        uint8_t who_am_i = 0;
+        err = Mpu6050ReadRegs(MPU6050_REG_WHO_AM_I, &who_am_i, 1);
+        mpu6050_who_am_i_ = who_am_i;
+        if (err != ESP_OK || (who_am_i != 0x68 && who_am_i != 0x69)) {
+            mpu6050_init_err_ = err != ESP_OK ? err : ESP_ERR_NOT_FOUND;
+            ESP_LOGW(TAG, "MPU6050 not found on SDA=%d SCL=%d, who=0x%02x err=%s",
+                     MPU6050_I2C_SDA, MPU6050_I2C_SCL, who_am_i, esp_err_to_name(mpu6050_init_err_));
+            return;
+        }
+
+        ESP_ERROR_CHECK(Mpu6050WriteReg(MPU6050_REG_PWR_MGMT_1, 0x00));
+        vTaskDelay(pdMS_TO_TICKS(100));
+        mpu6050_initial_accel_valid_ = Mpu6050ReadAccel(mpu6050_initial_ax_, mpu6050_initial_ay_, mpu6050_initial_az_);
+        mpu6050_ready_ = true;
+        mpu6050_init_err_ = ESP_OK;
+        ESP_LOGI(TAG, "MPU6050 SELFTEST OK: SDA=%d SCL=%d addr=0x%02x who=0x%02x accel=(%d,%d,%d)",
+                 MPU6050_I2C_SDA, MPU6050_I2C_SCL, MPU6050_ADDR, mpu6050_who_am_i_,
+                 mpu6050_initial_ax_, mpu6050_initial_ay_, mpu6050_initial_az_);
+    }
+
+    void ShowMpu6050ValidationResult() {
+        char message[96];
+        if (mpu6050_ready_) {
+            snprintf(message, sizeof(message), "MPU6050 OK\nWHO=0x%02X\nshake to switch",
+                     mpu6050_who_am_i_);
+        } else {
+            snprintf(message, sizeof(message), "MPU6050 FAIL\nSDA=12 SCL=11\n%s",
+                     esp_err_to_name(mpu6050_init_err_));
+        }
+        GetDisplay()->ShowNotification(message, 5000);
+    }
+
+    void StartMpu6050Task() {
+        if (!mpu6050_ready_ || mpu6050_task_ != nullptr) {
+            return;
+        }
+
+        xTaskCreate([](void* arg) {
+            auto* board = static_cast<XINGZHI_CUBE_1_54TFT_WIFI*>(arg);
+            int16_t last_ax = 0;
+            int16_t last_ay = 0;
+            int16_t last_az = 0;
+            int64_t last_switch_us = 0;
+
+            if (!board->Mpu6050ReadAccel(last_ax, last_ay, last_az)) {
+                board->mpu6050_task_ = nullptr;
+                vTaskDelete(nullptr);
+                return;
+            }
+
+            while (true) {
+                vTaskDelay(pdMS_TO_TICKS(50));
+
+                int16_t ax = 0;
+                int16_t ay = 0;
+                int16_t az = 0;
+                if (!board->Mpu6050ReadAccel(ax, ay, az)) {
+                    continue;
+                }
+
+                int delta = abs(static_cast<int>(ax) - static_cast<int>(last_ax)) +
+                            abs(static_cast<int>(ay) - static_cast<int>(last_ay)) +
+                            abs(static_cast<int>(az) - static_cast<int>(last_az));
+                last_ax = ax;
+                last_ay = ay;
+                last_az = az;
+
+                int64_t now_us = esp_timer_get_time();
+                if (delta < MPU6050_SHAKE_DELTA_THRESHOLD ||
+                    now_us - last_switch_us < MPU6050_SHAKE_COOLDOWN_US) {
+                    continue;
+                }
+
+                last_switch_us = now_us;
+                board->power_save_timer_->WakeUp();
+                auto& cards = ActionCards::GetInstance();
+                if (cards.IsActive()) {
+                    cards.Next();
+                } else {
+                    cards.Toggle();
+                }
+                board->GetDisplay()->ShowNotification("MPU6050 SHAKE", 1000);
+                ESP_LOGI(TAG, "MPU6050 shake detected, delta=%d accel=(%d,%d,%d)",
+                         delta, ax, ay, az);
+            }
+        }, "mpu6050", 4096, this, 4, &mpu6050_task_);
+    }
+
 public:
     XINGZHI_CUBE_1_54TFT_WIFI() :
         boot_button_(BOOT_BUTTON_GPIO),
@@ -219,6 +378,7 @@ public:
         InitializeSpi();
         InitializeButtons();
         InitializeSt7789Display();
+        InitializeMpu6050();
         RunDisplaySelfTest();
     }
 
@@ -261,6 +421,13 @@ public:
             }
             vTaskDelete(nullptr);
         }, "show_cards", 3072, nullptr, 2, nullptr);
+        xTaskCreate([](void* arg) {
+            auto* board = static_cast<XINGZHI_CUBE_1_54TFT_WIFI*>(arg);
+            vTaskDelay(pdMS_TO_TICKS(800));
+            board->ShowMpu6050ValidationResult();
+            vTaskDelete(nullptr);
+        }, "mpu6050_report", 3072, this, 2, nullptr);
+        StartMpu6050Task();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
