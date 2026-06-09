@@ -16,6 +16,7 @@
 #include <esp_heap_caps.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_ops.h>
+#include <wifi_manager.h>
 
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -219,6 +220,47 @@ public:
         InitializeButtons();
         InitializeSt7789Display();
         RunDisplaySelfTest();
+    }
+
+    virtual void StartNetwork() override {
+        auto& wifi_manager = WifiManager::GetInstance();
+
+        WifiManagerConfig config;
+        config.ssid_prefix = "Xiaozhi";
+        config.language = Lang::CODE;
+        wifi_manager.Initialize(config);
+        wifi_manager.SetEventCallback([this](WifiEvent event, const std::string& data) {
+            switch (event) {
+                case WifiEvent::Scanning:
+                    OnNetworkEvent(NetworkEvent::Scanning);
+                    break;
+                case WifiEvent::Connecting:
+                    OnNetworkEvent(NetworkEvent::Connecting, data);
+                    break;
+                case WifiEvent::Connected:
+                    OnNetworkEvent(NetworkEvent::Connected, data);
+                    break;
+                case WifiEvent::Disconnected:
+                    OnNetworkEvent(NetworkEvent::Disconnected);
+                    break;
+                case WifiEvent::ConfigModeEnter:
+                    OnNetworkEvent(NetworkEvent::WifiConfigModeEnter);
+                    break;
+                case WifiEvent::ConfigModeExit:
+                    OnNetworkEvent(NetworkEvent::WifiConfigModeExit);
+                    break;
+            }
+        });
+
+        ESP_LOGI(TAG, "Skipping automatic WiFi provisioning; showing action cards by default");
+        xTaskCreate([](void*) {
+            vTaskDelay(pdMS_TO_TICKS(300));
+            auto& cards = ActionCards::GetInstance();
+            if (!cards.IsActive()) {
+                cards.Toggle();
+            }
+            vTaskDelete(nullptr);
+        }, "show_cards", 3072, nullptr, 2, nullptr);
     }
 
     virtual AudioCodec* GetAudioCodec() override {
