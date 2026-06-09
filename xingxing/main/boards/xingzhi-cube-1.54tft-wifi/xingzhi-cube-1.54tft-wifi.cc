@@ -49,6 +49,7 @@ private:
     bool app_sleep_lcd_off_ = false;
     bool mpu6050_ready_ = false;
     uint8_t mpu6050_who_am_i_ = 0;
+    uint8_t mpu6050_addr_ = MPU6050_ADDR;
     esp_err_t mpu6050_init_err_ = ESP_FAIL;
     int16_t mpu6050_initial_ax_ = 0;
     int16_t mpu6050_initial_ay_ = 0;
@@ -251,6 +252,23 @@ private:
         return true;
     }
 
+    void Mpu6050ScanBus() {
+        // Probe the whole 7-bit address range so we can tell whether ANY device
+        // is electrically present on the bus (helps distinguish wiring problems
+        // from a wrong/clone address).
+        int found = 0;
+        for (uint8_t addr = 0x08; addr <= 0x77; addr++) {
+            if (i2c_master_probe(mpu_i2c_bus_, addr, 50) == ESP_OK) {
+                found++;
+                ESP_LOGI(TAG, "I2C scan: device responded at 0x%02x", addr);
+            }
+        }
+        if (found == 0) {
+            ESP_LOGW(TAG, "I2C scan: no devices found on SDA=%d SCL=%d "
+                          "(check wiring/power/pull-ups)", MPU6050_I2C_SDA, MPU6050_I2C_SCL);
+        }
+    }
+
     void InitializeMpu6050() {
         mpu6050_init_err_ = ESP_FAIL;
         i2c_master_bus_config_t bus_config = {};
@@ -268,10 +286,34 @@ private:
             return;
         }
 
+        // List everything that ACKs first; this output is the key diagnostic.
+        Mpu6050ScanBus();
+
+        // The MPU6050 lives at 0x68 (AD0 low) or 0x69 (AD0 high). Pick whichever
+        // actually acknowledges on the bus.
+        uint8_t candidates[] = {0x68, 0x69};
+        uint8_t addr = 0;
+        for (uint8_t c : candidates) {
+            if (i2c_master_probe(mpu_i2c_bus_, c, 50) == ESP_OK) {
+                addr = c;
+                break;
+            }
+        }
+        if (addr == 0) {
+            mpu6050_init_err_ = ESP_ERR_NOT_FOUND;
+            ESP_LOGW(TAG, "MPU6050 did not ACK at 0x68/0x69 on SDA=%d SCL=%d "
+                          "(no response - check VCC/GND/SDA/SCL wiring)",
+                     MPU6050_I2C_SDA, MPU6050_I2C_SCL);
+            return;
+        }
+        mpu6050_addr_ = addr;
+
         i2c_device_config_t dev_config = {};
         dev_config.dev_addr_length = I2C_ADDR_BIT_LEN_7;
-        dev_config.device_address = MPU6050_ADDR;
-        dev_config.scl_speed_hz = 400 * 1000;
+        dev_config.device_address = addr;
+        // Use 100 kHz: the ESP32 internal pull-ups are weak (~45 kOhm), so a slower
+        // bus is far more tolerant when there are no dedicated external pull-ups.
+        dev_config.scl_speed_hz = 100 * 1000;
 
         err = i2c_master_bus_add_device(mpu_i2c_bus_, &dev_config, &mpu6050_);
         if (err != ESP_OK) {
@@ -280,13 +322,22 @@ private:
             return;
         }
 
+        // The bus can be noisy on the first transaction; retry the WHO_AM_I read.
         uint8_t who_am_i = 0;
-        err = Mpu6050ReadRegs(MPU6050_REG_WHO_AM_I, &who_am_i, 1);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            err = Mpu6050ReadRegs(MPU6050_REG_WHO_AM_I, &who_am_i, 1);
+            if (err == ESP_OK && (who_am_i == 0x68 || who_am_i == 0x69)) {
+                break;
+            }
+            ESP_LOGW(TAG, "MPU6050 WHO_AM_I attempt %d: who=0x%02x err=%s",
+                     attempt, who_am_i, esp_err_to_name(err));
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
         mpu6050_who_am_i_ = who_am_i;
         if (err != ESP_OK || (who_am_i != 0x68 && who_am_i != 0x69)) {
-            mpu6050_init_err_ = err != ESP_OK ? err : ESP_ERR_NOT_FOUND;
-            ESP_LOGW(TAG, "MPU6050 not found on SDA=%d SCL=%d, who=0x%02x err=%s",
-                     MPU6050_I2C_SDA, MPU6050_I2C_SCL, who_am_i, esp_err_to_name(mpu6050_init_err_));
+            mpu6050_init_err_ = err != ESP_OK ? err : ESP_ERR_INVALID_RESPONSE;
+            ESP_LOGW(TAG, "MPU6050 found at 0x%02x but WHO_AM_I invalid: who=0x%02x err=%s",
+                     addr, who_am_i, esp_err_to_name(mpu6050_init_err_));
             return;
         }
 
@@ -296,17 +347,17 @@ private:
         mpu6050_ready_ = true;
         mpu6050_init_err_ = ESP_OK;
         ESP_LOGI(TAG, "MPU6050 SELFTEST OK: SDA=%d SCL=%d addr=0x%02x who=0x%02x accel=(%d,%d,%d)",
-                 MPU6050_I2C_SDA, MPU6050_I2C_SCL, MPU6050_ADDR, mpu6050_who_am_i_,
+                 MPU6050_I2C_SDA, MPU6050_I2C_SCL, addr, mpu6050_who_am_i_,
                  mpu6050_initial_ax_, mpu6050_initial_ay_, mpu6050_initial_az_);
     }
 
     void ShowMpu6050ValidationResult() {
         char message[96];
         if (mpu6050_ready_) {
-            snprintf(message, sizeof(message), "MPU6050 OK\nWHO=0x%02X\nshake to switch",
-                     mpu6050_who_am_i_);
+            snprintf(message, sizeof(message), "MPU6050 OK\naddr=0x%02X WHO=0x%02X\nshake to switch",
+                     mpu6050_addr_, mpu6050_who_am_i_);
         } else {
-            snprintf(message, sizeof(message), "MPU6050 FAIL\nSDA=12 SCL=11\n%s",
+            snprintf(message, sizeof(message), "MPU6050 FAIL\nSDA=12 SCL=11\ncheck wiring: %s",
                      esp_err_to_name(mpu6050_init_err_));
         }
         GetDisplay()->ShowNotification(message, 5000);
