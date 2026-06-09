@@ -7,7 +7,6 @@
 #include <esp_system.h>
 #include <esp_partition.h>
 #include <esp_app_desc.h>
-#include <esp_ota_ops.h>
 #include <esp_pm.h>
 #if CONFIG_IDF_TARGET_ESP32P4
 #include "esp_wifi_remote.h"

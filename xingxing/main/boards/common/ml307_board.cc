@@ -166,7 +166,7 @@ const char* Ml307Board::GetNetworkStateIcon() {
 }
 
 std::string Ml307Board::GetBoardJson() {
-    // Set the board type for OTA
+    // Include board and modem details in the system-info payload.
     std::string board_json = std::string("{\"type\":\"" BOARD_TYPE "\",");
     board_json += "\"name\":\"" BOARD_NAME "\",";
     board_json += "\"revision\":\"" + modem_->GetModuleRevision() + "\",";

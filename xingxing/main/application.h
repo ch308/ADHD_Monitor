@@ -13,7 +13,6 @@
 #include <memory>
 
 #include "protocol.h"
-#include "ota.h"
 #include "audio_service.h"
 #include "device_state.h"
 #include "device_state_machine.h"
@@ -106,7 +105,6 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
-    bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
@@ -117,7 +115,7 @@ public:
     /**
      * Reset protocol resources (thread-safe)
      * Can be called from any task to release resources allocated after network connected
-     * This includes closing audio channel, resetting protocol and ota objects
+     * This includes closing audio channel and resetting protocol objects
      */
     void ResetProtocol();
 
@@ -145,7 +143,6 @@ private:
     // network the board joined and that the cloud handshake succeeded.
     std::string last_connected_network_;
     AudioService audio_service_;
-    std::unique_ptr<Ota> ota_;
 
     bool has_server_time_ = false;
     bool aborted_ = false;
@@ -185,7 +182,6 @@ private:
 
     // Helper methods
     void CheckAssetsVersion();
-    void CheckNewVersion();
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
     bool SyncClockFromMonitorServer();

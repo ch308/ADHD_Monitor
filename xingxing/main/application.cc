@@ -16,6 +16,7 @@
 #include <ctime>
 #include <sys/time.h>
 #include <esp_log.h>
+#include <esp_app_desc.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
@@ -494,8 +495,6 @@ void Application::HandleActivationDoneEvent() {
     SystemInfo::PrintHeapStats();
     SetDeviceState(kDeviceStateIdle);
 
-    has_server_time_ = has_server_time_ || ota_->HasServerTime();
-
     auto display = Board::GetInstance().GetDisplay();
     // 屏幕上显式打出"已连接到云端 + 当前 AP 名 + 固件版本"，6 秒。
     // 之前这里只显示 "版本 2.2.4" 一条，没有云端就绪的反馈，
@@ -508,15 +507,14 @@ void Application::HandleActivationDoneEvent() {
         message += last_connected_network_;
         message += "\n";
     }
-    message += std::string(Lang::Strings::VERSION) + ota_->GetCurrentVersion();
+    auto app_desc = esp_app_get_description();
+    const char* app_version = app_desc != nullptr ? app_desc->version : "unknown";
+    message += std::string(Lang::Strings::VERSION) + app_version;
     display->ShowNotification(message.c_str(), 6000);
     display->SetChatMessage("system", "");
     ESP_LOGI(TAG, "Cloud ready, ssid=%s, version=%s",
              last_connected_network_.c_str(),
-             ota_->GetCurrentVersion().c_str());
-
-    // Release OTA object after activation is complete
-    ota_.reset();
+             app_version);
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
@@ -535,8 +533,7 @@ void Application::HandleActivationDoneEvent() {
 
 bool Application::SyncClockFromMonitorServer() {
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
-    // Path A bypasses xiaozhi OTA, so the original OTA `server_time` never
-    // arrives. Ask the ADHD Monitor Flask service for a small UTC timestamp.
+    // Ask the ADHD Monitor Flask service for a small UTC timestamp.
     setenv("TZ", "CST-8", 1);
     tzset();
 
@@ -591,21 +588,12 @@ bool Application::SyncClockFromMonitorServer() {
 }
 
 void Application::ActivationTask() {
-    // Create OTA object for activation process
-    ota_ = std::make_unique<Ota>();
-
 #if CONFIG_ADHD_MONITOR_BYPASS_OTA
-    // Path A: skip both CheckAssetsVersion and CheckNewVersion entirely.
-    // The websocket NVS is seeded from Kconfig before protocol init.
-    ESP_LOGI(TAG, "ADHD bypass OTA: seeding websocket NVS from Kconfig");
+    ESP_LOGI(TAG, "ADHD local firmware mode: seeding websocket NVS from Kconfig");
     adhd_remote_cmd_seed_settings();
     SyncClockFromMonitorServer();
 #else
-    // Check for new assets version
     CheckAssetsVersion();
-
-    // Check for new firmware version
-    CheckNewVersion();
 #endif
 
     // Initialize the protocol
@@ -673,81 +661,6 @@ void Application::CheckAssetsVersion() {
     display->SetEmotion("microchip_ai");
 }
 
-void Application::CheckNewVersion() {
-    const int MAX_RETRY = 10;
-    int retry_count = 0;
-    int retry_delay = 10; // Initial retry delay in seconds
-
-    auto& board = Board::GetInstance();
-    while (true) {
-        auto display = board.GetDisplay();
-        display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
-
-        esp_err_t err = ota_->CheckVersion();
-        if (err != ESP_OK) {
-            retry_count++;
-            if (retry_count >= MAX_RETRY) {
-                ESP_LOGE(TAG, "Too many retries, exit version check");
-                return;
-            }
-
-            char error_message[128];
-            snprintf(error_message, sizeof(error_message), "code=%d, url=%s", err, ota_->GetCheckVersionUrl().c_str());
-            char buffer[256];
-            snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, error_message);
-            Alert(Lang::Strings::ERROR, buffer, "cloud_slash", Lang::Sounds::OGG_EXCLAMATION);
-
-            ESP_LOGW(TAG, "Check new version failed, retry in %d seconds (%d/%d)", retry_delay, retry_count, MAX_RETRY);
-            for (int i = 0; i < retry_delay; i++) {
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                if (GetDeviceState() == kDeviceStateIdle) {
-                    break;
-                }
-            }
-            retry_delay *= 2; // Double the retry delay
-            continue;
-        }
-        retry_count = 0;
-        retry_delay = 10; // Reset retry delay
-
-        if (ota_->HasNewVersion()) {
-            if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
-                return; // This line will never be reached after reboot
-            }
-            // If upgrade failed, continue to normal operation
-        }
-
-        // No new version, mark the current version as valid
-        ota_->MarkCurrentVersionValid();
-        if (!ota_->HasActivationCode() && !ota_->HasActivationChallenge()) {
-            // Exit the loop if done checking new version
-            break;
-        }
-
-        display->SetStatus(Lang::Strings::ACTIVATION);
-        // Activation code is shown to the user and waiting for the user to input
-        if (ota_->HasActivationCode()) {
-            ShowActivationCode(ota_->GetActivationCode(), ota_->GetActivationMessage());
-        }
-
-        // This will block the loop until the activation is done or timeout
-        for (int i = 0; i < 10; ++i) {
-            ESP_LOGI(TAG, "Activating... %d/%d", i + 1, 10);
-            esp_err_t err = ota_->Activate();
-            if (err == ESP_OK) {
-                break;
-            } else if (err == ESP_ERR_TIMEOUT) {
-                vTaskDelay(pdMS_TO_TICKS(3000));
-            } else {
-                vTaskDelay(pdMS_TO_TICKS(10000));
-            }
-            if (GetDeviceState() == kDeviceStateIdle) {
-                break;
-            }
-        }
-    }
-}
-
 void Application::InitializeProtocol() {
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
@@ -757,17 +670,11 @@ void Application::InitializeProtocol() {
 
 #if CONFIG_ADHD_MONITOR_BYPASS_OTA
     // Path A always speaks WebSocket against ADHD_Monitor Flask.
-    ESP_LOGI(TAG, "ADHD bypass OTA: forcing WebsocketProtocol");
+    ESP_LOGI(TAG, "ADHD local firmware mode: forcing WebsocketProtocol");
     protocol_ = std::make_unique<WebsocketProtocol>();
 #else
-    if (ota_->HasMqttConfig()) {
-        protocol_ = std::make_unique<MqttProtocol>();
-    } else if (ota_->HasWebsocketConfig()) {
-        protocol_ = std::make_unique<WebsocketProtocol>();
-    } else {
-        ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
-        protocol_ = std::make_unique<MqttProtocol>();
-    }
+    ESP_LOGI(TAG, "Using MQTT protocol");
+    protocol_ = std::make_unique<MqttProtocol>();
 #endif
 
     protocol_->OnConnected([this]() {
@@ -880,7 +787,6 @@ void Application::InitializeProtocol() {
             if (cJSON_IsString(command)) {
                 ESP_LOGI(TAG, "System command: %s", command->valuestring);
                 if (strcmp(command->valuestring, "reboot") == 0) {
-                    // Do a reboot if user requests a OTA update
                     Schedule([this]() {
                         Reboot();
                     });
@@ -1612,58 +1518,6 @@ void Application::Reboot() {
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
-}
-
-bool Application::UpgradeFirmware(const std::string& url, const std::string& version) {
-    auto& board = Board::GetInstance();
-    auto display = board.GetDisplay();
-
-    std::string upgrade_url = url;
-    std::string version_info = version.empty() ? "(Manual upgrade)" : version;
-
-    // Close audio channel if it's open
-    if (protocol_ && protocol_->IsAudioChannelOpened()) {
-        ESP_LOGI(TAG, "Closing audio channel before firmware upgrade");
-        protocol_->CloseAudioChannel();
-    }
-    ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
-
-    Alert(Lang::Strings::OTA_UPGRADE, Lang::Strings::UPGRADING, "download", Lang::Sounds::OGG_UPGRADE);
-    vTaskDelay(pdMS_TO_TICKS(3000));
-
-    SetDeviceState(kDeviceStateUpgrading);
-
-    std::string message = std::string(Lang::Strings::NEW_VERSION) + version_info;
-    display->SetChatMessage("system", message.c_str());
-
-    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
-    audio_service_.Stop();
-    vTaskDelay(pdMS_TO_TICKS(1000));
-
-    bool upgrade_success = Ota::Upgrade(upgrade_url, [this, display](int progress, size_t speed) {
-        char buffer[32];
-        snprintf(buffer, sizeof(buffer), "%d%% %uKB/s", progress, speed / 1024);
-        Schedule([display, message = std::string(buffer)]() {
-            display->SetChatMessage("system", message.c_str());
-        });
-    });
-
-    if (!upgrade_success) {
-        // Upgrade failed, restart audio service and continue running
-        ESP_LOGE(TAG, "Firmware upgrade failed, restarting audio service and continuing operation...");
-        audio_service_.Start(); // Restart audio service
-        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER); // Restore power save level
-        Alert(Lang::Strings::ERROR, Lang::Strings::UPGRADE_FAILED, "circle_xmark", Lang::Sounds::OGG_EXCLAMATION);
-        vTaskDelay(pdMS_TO_TICKS(3000));
-        return false;
-    } else {
-        // Upgrade success, reboot immediately
-        ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
-        display->SetChatMessage("system", "Upgrade successful, rebooting...");
-        vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show message
-        Reboot();
-        return true;
-    }
 }
 
 void Application::WakeWordInvoke(const std::string& wake_word) {

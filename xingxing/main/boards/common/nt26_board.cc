@@ -178,7 +178,7 @@ void Nt26Board::SetPowerSaveLevel(PowerSaveLevel level) {
 }
 
 std::string Nt26Board::GetBoardJson() {
-    // Set the board type for OTA
+    // Include board and modem details in the system-info payload.
     std::string board_json = std::string("{\"type\":\"" BOARD_TYPE "\",");
     board_json += "\"name\":\"" BOARD_NAME "\",";
     if (modem_) {
