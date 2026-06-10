@@ -3,9 +3,8 @@
 
 // Daily-routine "action cards": ten fullscreen 240x240 pictures embedded in the
 // firmware as RGB565 C arrays. The user advances with shake or button; confirming
-// the current card (double-tap on touch LCD if present, or MPU6050 double knock)
-// plays an offline Ogg/Opus clip ("妈妈，我要" + the card's Chinese label) via
-// AudioService::PlaySound().
+// the current card is a single tap on the touch LCD (or boot flow); plays an offline
+// Ogg/Opus clip ("妈妈，我要" + the card's Chinese label) via AudioService::PlaySound().
 //
 // Assets are produced by scripts/gen_action_cards.py (pictures + voice clips +
 // the action_cards/action_cards_generated.h table). Until the voice clips are
@@ -20,7 +19,7 @@ public:
     void Next();
     bool IsActive() const { return active_; }
 
-    // Play the confirmation voice for the current card (e.g. MPU6050 double knock).
+    // Play the confirmation voice for the current card (e.g. single tap on image).
     void ConfirmSelection();
 
 private:

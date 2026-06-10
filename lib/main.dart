@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'models/child_condition.dart';
+import 'screens/autism_family_shell.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_page.dart';
 import 'services/app_mode_store.dart';
+import 'services/cloud_service.dart';
 import 'services/session_store.dart';
 import 'teacher/teacher_shell.dart';
 import 'theme/app_theme.dart';
@@ -206,11 +209,33 @@ class _FamilyShellState extends State<FamilyShell> {
   bool _loadingPrefs = true;
   String? _token;
   int _childId = 1;
+  ChildCondition _homeCondition = ChildCondition.adhd;
+  bool _categoryLoaded = false;
 
   @override
   void initState() {
     super.initState();
     _restore();
+  }
+
+  Future<void> _loadChildCategory() async {
+    final t = _token;
+    if (t == null || t.isEmpty) {
+      if (!mounted) return;
+      setState(() => _categoryLoaded = true);
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _categoryLoaded = false);
+    final cloud = CloudService(serverHost: _serviceHost)
+      ..authToken = t
+      ..childId = _childId;
+    final profile = await cloud.fetchChildProfile(_childId);
+    if (!mounted) return;
+    setState(() {
+      _homeCondition = profile?.childCondition ?? ChildCondition.adhd;
+      _categoryLoaded = true;
+    });
   }
 
   Future<void> _restore() async {
@@ -224,6 +249,7 @@ class _FamilyShellState extends State<FamilyShell> {
       _serviceHost = h;
       _loadingPrefs = false;
     });
+    await _loadChildCategory();
   }
 
   Future<void> _onLoggedIn(String token, int childId) async {
@@ -233,7 +259,9 @@ class _FamilyShellState extends State<FamilyShell> {
       _token = token;
       _childId = childId;
       _serviceHost = h;
+      _categoryLoaded = false;
     });
+    await _loadChildCategory();
   }
 
   Future<void> _logout() async {
@@ -242,13 +270,23 @@ class _FamilyShellState extends State<FamilyShell> {
     setState(() {
       _token = null;
       _childId = 1;
+      _categoryLoaded = true;
     });
   }
 
   Future<void> _switchChild(int id) async {
     await SessionStore.saveChildId(id);
     if (!mounted) return;
-    setState(() => _childId = id);
+    setState(() {
+      _childId = id;
+      _categoryLoaded = false;
+    });
+    await _loadChildCategory();
+  }
+
+  void _onChildCategoryChanged(ChildCondition c) {
+    if (_homeCondition == c) return;
+    setState(() => _homeCondition = c);
   }
 
   @override
@@ -268,16 +306,40 @@ class _FamilyShellState extends State<FamilyShell> {
         ),
       );
     }
+    if (!_categoryLoaded) {
+      return MaterialApp(
+        theme: AppTheme.light,
+        home: const Scaffold(
+          body: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+    if (_homeCondition.isAutism) {
+      return MaterialApp(
+        theme: AppTheme.light,
+        home: AutismFamilyShell(
+          key: ValueKey<Object>('autism_${_childId}_${_homeCondition.name}'),
+          serverIp: _serviceHost,
+          authToken: _token,
+          activeChildId: _childId,
+          onLogout: _logout,
+          onSwitchChild: _switchChild,
+          onSwitchMode: widget.onSwitchMode,
+          onChildCategoryChanged: _onChildCategoryChanged,
+        ),
+      );
+    }
     return MaterialApp(
       theme: AppTheme.light,
       home: AdhdMonitorApp(
-        key: ValueKey<int>(_childId),
+        key: ValueKey<Object>('adhd_${_childId}_${_homeCondition.name}'),
         serverIp: _serviceHost,
         authToken: _token,
         activeChildId: _childId,
         onLogout: _logout,
         onSwitchChild: _switchChild,
         onSwitchMode: widget.onSwitchMode,
+        onChildCategoryChanged: _onChildCategoryChanged,
       ),
     );
   }

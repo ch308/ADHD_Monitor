@@ -26,6 +26,7 @@
 // broke.
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 #include <cstdio>
+#include <cstdint>
 #include <cJSON.h>
 #include <esp_http_client.h>
 #include <freertos/FreeRTOS.h>
@@ -131,6 +132,75 @@ void adhd_remote_cmd_announce_sync_once(void) {
     DoAnnounceOnce();
 }
 
+bool adhd_post_autism_need_event(const char* card_slug, const char* label, const char* voice_text) {
+    const std::string id = PathADeviceIdUpper();
+    if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
+        return false;
+    }
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        return false;
+    }
+    if (card_slug && card_slug[0]) {
+        cJSON_AddStringToObject(root, "card_slug", card_slug);
+    } else {
+        cJSON_AddStringToObject(root, "card_slug", "");
+    }
+    cJSON_AddStringToObject(root, "label", label ? label : "");
+    const char* vt = (voice_text && voice_text[0]) ? voice_text : label;
+    cJSON_AddStringToObject(root, "voice_text", vt ? vt : "");
+    char* out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!out) {
+        return false;
+    }
+    std::string body(out);
+    cJSON_free(out);
+    std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
+                       std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/" + id +
+                       "/autism/need-event";
+    const bool ok = HttpPostJson(url, body);
+    if (!ok) {
+        ESP_LOGW(TAG, "autism need-event POST failed");
+    }
+    return ok;
+}
+
+static void AutismTrainingAckTask(void* arg) {
+    const int sid = static_cast<int>(reinterpret_cast<intptr_t>(arg));
+    if (sid <= 0) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    const std::string id = PathADeviceIdUpper();
+    if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    cJSON_AddNumberToObject(root, "session_id", sid);
+    cJSON_AddStringToObject(root, "phase", "robot_received");
+    cJSON_AddStringToObject(root, "scene", "training");
+    cJSON_AddStringToObject(root, "ts", "");
+    char* out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!out) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    std::string body(out);
+    cJSON_free(out);
+    std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
+                       std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/" + id +
+                       "/autism/training-event";
+    (void)HttpPostJson(url, body);
+    vTaskDelete(nullptr);
+}
+
 static void HandleOneCommand(cJSON* root) {
     cJSON* action = cJSON_GetObjectItem(root, "action");
     if (!cJSON_IsString(action)) {
@@ -162,6 +232,56 @@ static void HandleOneCommand(cJSON* root) {
 #else
         ESP_LOGW(TAG, "reset_provisioning received but BLE provisioning disabled — ignoring");
 #endif
+    } else if (strcmp(act, "autism_session") == 0) {
+        cJSON* sj = cJSON_GetObjectItem(root, "session_json");
+        if (!cJSON_IsString(sj) || !sj->valuestring) {
+            ESP_LOGW(TAG, "autism_session: missing session_json");
+            return;
+        }
+        cJSON* session = cJSON_Parse(sj->valuestring);
+        if (!session) {
+            ESP_LOGW(TAG, "autism_session: invalid JSON");
+            return;
+        }
+        cJSON* kind = cJSON_GetObjectItem(session, "kind");
+        const char* k = cJSON_IsString(kind) ? kind->valuestring : "";
+        if (strcmp(k, "training_start") == 0) {
+            cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
+            std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
+            if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
+                line = tts->valuestring;
+            }
+            cJSON* sidn = cJSON_GetObjectItem(session, "session_id");
+            const int sid = cJSON_IsNumber(sidn) ? sidn->valueint : 0;
+            Application::GetInstance().Schedule([line]() {
+                Application::GetInstance().WakeWordInvoke(line);
+            });
+            if (sid > 0) {
+                BaseType_t tr = xTaskCreate(AutismTrainingAckTask, "autism_ack", 8192,
+                                            reinterpret_cast<void*>(static_cast<intptr_t>(sid)), 3, nullptr);
+                if (tr != pdPASS) {
+                    ESP_LOGW(TAG, "autism_ack task create failed");
+                }
+            }
+        } else if (strcmp(k, "daily_plan") == 0) {
+            cJSON* slots = cJSON_GetObjectItem(session, "slots");
+            std::string line(reinterpret_cast<const char*>(
+                u8"\u4eca\u5929\u7684\u5b89\u6392\u5df2\u540c\u6b65\uff0c\u6211\u4eec\u4e00\u8d77\u770b\u770b\u5427"));
+            if (cJSON_IsArray(slots) && cJSON_GetArraySize(slots) > 0) {
+                cJSON* first = cJSON_GetArrayItem(slots, 0);
+                cJSON* tt = cJSON_GetObjectItem(first, "tts");
+                if (cJSON_IsString(tt) && tt->valuestring && strlen(tt->valuestring) > 0) {
+                    line = tt->valuestring;
+                }
+            }
+            ESP_LOGI(TAG, "autism_session daily_plan → WakeWordInvoke len=%u", (unsigned)line.size());
+            Application::GetInstance().Schedule([line]() {
+                Application::GetInstance().WakeWordInvoke(line);
+            });
+        } else {
+            ESP_LOGW(TAG, "autism_session: unknown kind %s", k);
+        }
+        cJSON_Delete(session);
     }
 }
 
@@ -278,5 +398,8 @@ void adhd_remote_cmd_start(void) {
 
 void adhd_remote_cmd_announce_sync_once(void) {}
 void adhd_remote_cmd_start(void) {}
+bool adhd_post_autism_need_event(const char*, const char*, const char*) {
+    return false;
+}
 
 #endif

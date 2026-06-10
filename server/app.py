@@ -10,7 +10,7 @@ import hmac
 import secrets
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, jsonify, Response, send_file, abort
 from flask_cors import CORS
 from openai import OpenAI
 
@@ -32,6 +32,25 @@ def server_time():
             "timezone_offset": int(offset.total_seconds() // 60),
         }
     )
+
+
+_AUTISM_LOCAL_IMAGE_STORE = os.path.normpath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "autism_action_store", "action")
+)
+
+
+@app.route("/autism/action-images/<fn>", methods=["GET"])
+def autism_action_image_public(fn: str):
+    """未配置腾讯云 COS 时，240×240 PNG 落盘于此，供星星机器人通过 HTTP 拉取。"""
+    if not fn or ".." in fn or "/" in fn or "\\" in fn:
+        abort(404)
+    if not re.match(r"^[\w\u4e00-\u9fff\-.]+\.png$", fn):
+        abort(404)
+    path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
+    if not os.path.isfile(path):
+        abort(404)
+    return send_file(path, mimetype="image/png")
+
 
 try:
     from flask_sock import Sock
@@ -368,12 +387,93 @@ def init_db():
         )
         """
     )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS autism_child_needs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            child_id INTEGER NOT NULL,
+            device_id TEXT,
+            card_slug TEXT,
+            label TEXT,
+            voice_text TEXT,
+            created_at TEXT NOT NULL,
+            parent_confirmed_at TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS autism_training_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            child_id INTEGER NOT NULL,
+            scene_id TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS autism_daily_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            child_id INTEGER NOT NULL,
+            plan_json TEXT NOT NULL,
+            images_json TEXT,
+            created_at TEXT NOT NULL,
+            applied_at TEXT
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS autism_training_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            child_id INTEGER NOT NULL,
+            device_id TEXT,
+            scene TEXT NOT NULL,
+            phase TEXT NOT NULL,
+            payload_json TEXT,
+            ts TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS autism_image_cache (
+            cache_key TEXT PRIMARY KEY,
+            label_zh TEXT NOT NULL,
+            cos_key TEXT NOT NULL,
+            public_url TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_autism_image_cache_label_zh
+        ON autism_image_cache(label_zh)
+        """
+    )
     conn.commit()
     conn.close()
     print("✅ 数据库 adhd_data.db 初始化成功")
 
 # 启动时执行初始化
 init_db()
+
+
+def _session_id_from_json(raw):
+    """JSON 里的 session_id 可能是 int / str / float；bool 拒绝。"""
+    if raw is None or isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _default_status():
@@ -2712,6 +2812,365 @@ def my_child_profile_put(child_id):
     return jsonify({"status": "ok", **row}), 200
 
 
+@app.route("/my/children/<int:child_id>/autism/needs/pending", methods=["GET"])
+def autism_needs_pending(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute(
+        """
+        SELECT id, device_id, card_slug, label, voice_text, created_at, status
+        FROM autism_child_needs
+        WHERE child_id = ? AND status = 'pending'
+        ORDER BY id DESC
+        LIMIT 50
+        """,
+        (child_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    items = [
+        {
+            "id": r[0],
+            "device_id": r[1],
+            "card_slug": r[2],
+            "label": r[3],
+            "voice_text": r[4],
+            "created_at": r[5],
+            "status": r[6],
+        }
+        for r in rows
+    ]
+    return jsonify({"status": "ok", "items": items}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/needs/<int:need_id>/confirm", methods=["POST"])
+def autism_need_confirm(child_id, need_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute(
+        """
+        UPDATE autism_child_needs
+        SET status = 'confirmed', parent_confirmed_at = ?
+        WHERE id = ? AND child_id = ? AND status = 'pending'
+        """,
+        (now, need_id, child_id),
+    )
+    conn.commit()
+    n = cursor.rowcount
+    conn.close()
+    if not n:
+        return jsonify({"status": "error", "message": "not found or already confirmed"}), 404
+    return jsonify({"status": "ok", "id": need_id}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/training/start", methods=["POST"])
+def autism_training_start(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    scene_id = (data.get("scene_id") or "preference_choice").strip()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    payload = {
+        "kind": "training_start",
+        "scene_id": scene_id,
+        "options": data.get("options") or [],
+        "follow_up": bool(data.get("follow_up")),
+        "tts_intro": (data.get("tts_intro") or "").strip(),
+    }
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute(
+        """
+        INSERT INTO autism_training_sessions
+        (child_id, scene_id, payload_json, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'queued', ?, ?)
+        """,
+        (child_id, scene_id, json.dumps(payload, ensure_ascii=False), now, now),
+    )
+    sid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    queued = _enqueue_autism_session_for_child(child_id, {"session_id": sid, **payload})
+    st = "sent" if queued else "queued_no_device"
+    now2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn2 = sqlite3.connect("adhd_data.db")
+    cur2 = conn2.cursor()
+    cur2.execute(
+        """
+        UPDATE autism_training_sessions SET status = ?, updated_at = ?
+        WHERE id = ? AND child_id = ?
+        """,
+        (st, now2, sid, child_id),
+    )
+    conn2.commit()
+    conn2.close()
+    return jsonify({"status": "ok", "session_id": sid, "queued_devices": queued}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/training/status", methods=["GET"])
+def autism_training_status(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    sid = request.args.get("session_id", type=int)
+    if not sid:
+        return jsonify({"status": "error", "message": "session_id required"}), 400
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute(
+        """
+        SELECT id, scene_id, payload_json, status, created_at, updated_at
+        FROM autism_training_sessions WHERE id = ? AND child_id = ?
+        """,
+        (sid, child_id),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({"status": "error", "message": "not found"}), 404
+    return jsonify(
+        {
+            "status": "ok",
+            "session": {
+                "id": row[0],
+                "scene_id": row[1],
+                "payload": json.loads(row[2] or "{}"),
+                "state": row[3],
+                "created_at": row[4],
+                "updated_at": row[5],
+            },
+        }
+    ), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/daily-plan", methods=["POST"])
+def autism_daily_plan(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    slots = [
+        {
+            "time": "07:00",
+            "tts": "早上7点，起床啦，你喜欢穿什么颜色的鞋子？",
+            "options": ["红色鞋子", "蓝色鞋子"],
+        },
+        {
+            "time": "11:00",
+            "tts": "中午11点，该吃中饭啦，你想吃什么？",
+            "options": ["米饭", "面条", "饺子"],
+        },
+        {
+            "time": "13:00",
+            "tts": "下午1点，该午睡咯",
+            "options": ["好的", "不好"],
+        },
+        {
+            "time": "14:00",
+            "tts": "下午2点，该起床咯，起床后你想玩什么",
+            "options": ["搭积木", "滑梯", "拍皮球"],
+        },
+        {
+            "time": "18:00",
+            "tts": "晚上6点，到了吃晚饭的时候啦，你喜欢吃什么菜",
+            "options": ["青菜", "胡萝卜", "肉"],
+        },
+    ]
+    images: dict[str, str | None] = {}
+    for i, slot in enumerate(slots):
+        for j, opt in enumerate(slot["options"]):
+            key = f"s{i}_o{j}"
+            url = _autism_square_image_url_cached(
+                chinese_label=opt,
+                prompt_core_zh=f"儿童插画风格，简洁明快，{opt}，正方形构图，无文字",
+            )
+            images[key] = url
+    plan_obj = {"kind": "daily_plan", "slots": slots, "images": images}
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute(
+        """
+        INSERT INTO autism_daily_plans (child_id, plan_json, images_json, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            child_id,
+            json.dumps(slots, ensure_ascii=False),
+            json.dumps(images, ensure_ascii=False),
+            now,
+        ),
+    )
+    pid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    session = {"kind": "daily_plan", "plan_id": pid, "slots": slots, "images": images}
+    queued = _enqueue_autism_session_for_child(child_id, session)
+    return jsonify(
+        {"status": "ok", "plan_id": pid, "queued_devices": queued, "images": images}
+    ), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/images", methods=["POST"])
+def autism_images_one(child_id):
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    prompt = (data.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify({"status": "error", "message": "prompt required"}), 400
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    conn.close()
+    label = (prompt[:80] or "配图").strip() or "配图"
+    url = _autism_square_image_url_cached(chinese_label=label, prompt_core_zh=prompt)
+    if url:
+        return jsonify({"status": "ok", "url": url}), 200
+    return jsonify({"status": "error", "message": "image generation failed"}), 502
+
+
+@app.route("/device/<device_id>/autism/need-event", methods=["POST"])
+def device_autism_need_event(device_id):
+    """星星机器人上报「孩子需求确认」事件（无需登录，凭已绑定 device 校验）。"""
+    device_id = _normalize_device_id(device_id)
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+    info = _get_esp32_device(device_id)
+    if not info or info.get("child_id") is None:
+        return jsonify({"status": "error", "message": "device not bound"}), 404
+    child_id = int(info["child_id"])
+    data = request.json or {}
+    slug = (data.get("card_slug") or "").strip()
+    label = (data.get("label") or "").strip()
+    voice = (data.get("voice_text") or label).strip()
+    if not label:
+        return jsonify({"status": "error", "message": "label required"}), 400
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO autism_child_needs
+        (child_id, device_id, card_slug, label, voice_text, created_at, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending')
+        """,
+        (child_id, device_id, slug or None, label, voice, now),
+    )
+    nid = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "need_id": nid, "child_id": child_id}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/events/training", methods=["POST"])
+def autism_events_training(child_id):
+    """家长端或脚本上报训练阶段事件（与设备上报 schema 对齐）。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    scene = (data.get("scene") or "").strip() or "unknown"
+    phase = (data.get("phase") or "").strip() or "unknown"
+    payload = data.get("payload")
+    ts = (data.get("ts") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    pj = json.dumps(payload, ensure_ascii=False) if payload is not None else "{}"
+    cursor.execute(
+        """
+        INSERT INTO autism_training_events
+        (child_id, device_id, scene, phase, payload_json, ts, created_at)
+        VALUES (?, NULL, ?, ?, ?, ?, ?)
+        """,
+        (child_id, scene, phase, pj, ts, now),
+    )
+    eid = cursor.lastrowid
+    sid_i = _session_id_from_json(data.get("session_id"))
+    if sid_i is not None:
+        cursor.execute(
+            """
+            UPDATE autism_training_sessions SET status = ?, updated_at = ?
+            WHERE id = ? AND child_id = ?
+            """,
+            (f"phase:{phase}", now, sid_i, child_id),
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "event_id": eid}), 200
+
+
+@app.route("/device/<device_id>/autism/training-event", methods=["POST"])
+def device_autism_training_event(device_id):
+    """星星机器人上报训练阶段 / 完成事件。"""
+    device_id = _normalize_device_id(device_id)
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+    info = _get_esp32_device(device_id)
+    if not info or info.get("child_id") is None:
+        return jsonify({"status": "error", "message": "device not bound"}), 404
+    child_id = int(info["child_id"])
+    data = request.json or {}
+    scene = (data.get("scene") or "").strip() or "unknown"
+    phase = (data.get("phase") or "").strip() or "unknown"
+    payload = data.get("payload")
+    ts = (data.get("ts") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    pj = json.dumps(payload, ensure_ascii=False) if payload is not None else "{}"
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO autism_training_events
+        (child_id, device_id, scene, phase, payload_json, ts, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (child_id, device_id, scene, phase, pj, ts, now),
+    )
+    eid = cursor.lastrowid
+    sid_i = _session_id_from_json(data.get("session_id"))
+    if sid_i is not None:
+        cursor.execute(
+            """
+            UPDATE autism_training_sessions SET status = ?, updated_at = ?
+            WHERE id = ? AND child_id = ?
+            """,
+            (f"phase:{phase}", now, sid_i, child_id),
+        )
+    conn.commit()
+    conn.close()
+    return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
+
+
 @app.route("/my/children/<int:child_id>/skill", methods=["GET"])
 def my_child_skill_get(child_id):
     user = _get_request_user()
@@ -3128,6 +3587,229 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
     return []
 
 
+# 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后上传腾讯云 COS
+# `action/` 目录（或本地 autism_action_store），并以完整 prompt 哈希缓存避免重复生成。
+_IMAGE_STYLE_SUFFIX_ZHIPU = (
+    " A minimalist 2D flat vector icon，Cute style, child-friendly, soft pastel colors, "
+    "solid clean background, bold clean lines, no complex details, no text. "
+    "Perfect square composition. --ar 1:1"
+)
+
+
+def _autism_public_base_url() -> str:
+    """星星拉图的绝对 URL 前缀（设备侧需可访问）。未设置时默认本机端口。"""
+    return (
+        os.getenv("FLASK_PUBLIC_BASE_URL")
+        or os.getenv("AUTISM_IMAGE_PUBLIC_BASE")
+        or "http://127.0.0.1:11760"
+    ).rstrip("/")
+
+
+def _http_download_bytes(url: str, timeout: int = 90) -> bytes | None:
+    try:
+        import requests as req_lib
+
+        r = req_lib.get(url, timeout=timeout)
+        if r.status_code != 200 or not r.content:
+            app.logger.warning("download image %s -> %s", url[:120], r.status_code)
+            return None
+        return r.content
+    except Exception as e:
+        app.logger.warning("download image error: %s", e)
+        return None
+
+
+def _png_bytes_240_square(raw: bytes) -> bytes | None:
+    """将任意智谱返回图中心裁成正方形并缩放为 240×240 PNG。"""
+    try:
+        from io import BytesIO
+
+        from PIL import Image
+
+        im = Image.open(BytesIO(raw))
+        im = im.convert("RGBA")
+        w, h = im.size
+        if w <= 0 or h <= 0:
+            return None
+        side = min(w, h)
+        left = (w - side) // 2
+        top = (h - side) // 2
+        im = im.crop((left, top, left + side, top + side))
+        im = im.resize((240, 240), Image.Resampling.LANCZOS)
+        buf = BytesIO()
+        im.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception as e:
+        app.logger.warning("autism image 240 resize error: %s", e)
+        return None
+
+
+def _zhipu_raw_image_temp_url(full_prompt: str) -> str | None:
+    """调用智谱 CogView，返回临时 URL（未裁切）。"""
+    key = (os.getenv("GLM_API_KEY") or "").strip()
+    if not key:
+        return None
+    try:
+        import requests as req_lib
+
+        body = {
+            "model": "cogview-3-flash",
+            "prompt": (full_prompt or "")[:1800],
+            "size": "1024x1024",
+        }
+        r = req_lib.post(
+            "https://open.bigmodel.cn/api/paas/v4/images/generations",
+            headers={
+                "Authorization": f"Bearer {key}",
+                "Content-Type": "application/json",
+            },
+            json=body,
+            timeout=120,
+        )
+        if r.status_code != 200:
+            app.logger.warning("zhipu image %s: %s", r.status_code, r.text[:500])
+            return None
+        data = r.json()
+        arr = data.get("data") or []
+        if not arr:
+            return None
+        u = (arr[0] or {}).get("url")
+        return u if isinstance(u, str) and u.startswith("http") else None
+    except Exception as e:
+        app.logger.warning("zhipu image error: %s", e)
+        return None
+
+
+def _cos_put_action_png(object_key: str, png_bytes: bytes) -> str | None:
+    """上传到腾讯云 COS，返回可公网访问的 URL；未配置密钥时返回 None。"""
+    sid = (os.getenv("TENCENT_COS_SECRET_ID") or "").strip()
+    sk = (os.getenv("TENCENT_COS_SECRET_KEY") or "").strip()
+    region = (os.getenv("TENCENT_COS_REGION") or "").strip()
+    bucket = (os.getenv("TENCENT_COS_BUCKET") or "").strip()
+    if not (sid and sk and region and bucket):
+        return None
+    try:
+        from qcloud_cos import CosConfig
+        from qcloud_cos import CosS3Client
+    except ImportError:
+        app.logger.warning("cos-python-sdk-v5 not installed; pip install cos-python-sdk-v5")
+        return None
+    try:
+        cfg = CosConfig(Region=region, SecretId=sid, SecretKey=sk, Scheme="https")
+        client = CosS3Client(cfg)
+        client.put_object(
+            Bucket=bucket,
+            Body=png_bytes,
+            Key=object_key,
+            ContentType="image/png",
+        )
+    except Exception as e:
+        app.logger.warning("COS put_object failed: %s", e)
+        return None
+    base = (os.getenv("TENCENT_COS_PUBLIC_URL_BASE") or "").rstrip("/")
+    if base:
+        return f"{base}/{object_key}"
+    return f"https://{bucket}.cos.{region}.myqcloud.com/{object_key}"
+
+
+def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> str | None:
+    """按完整 prompt（含固定英文风格）做缓存；中文 label 用于 COS/本地文件名。
+
+    环境变量（腾讯云）：
+      TENCENT_COS_SECRET_ID / TENCENT_COS_SECRET_KEY / TENCENT_COS_REGION / TENCENT_COS_BUCKET
+      TENCENT_COS_ACTION_PREFIX  默认 action  （对象键前缀，即 action/xxx.png）
+      TENCENT_COS_PUBLIC_URL_BASE  可选，CDN 或自定义域名，须不含末尾 /
+    公网访问 Flask 本地兜底图：
+      FLASK_PUBLIC_BASE_URL 或 AUTISM_IMAGE_PUBLIC_BASE（含端口），默认 http://127.0.0.1:11760
+    """
+    label = (chinese_label or "").strip() or "配图"
+    core = " ".join((prompt_core_zh or "").strip().split())
+    if not core:
+        core = " ".join(label.split()) or "配图"
+    full_prompt = core + _IMAGE_STYLE_SUFFIX_ZHIPU
+    if len(full_prompt) > 2000:
+        full_prompt = full_prompt[:2000]
+
+    ck = hashlib.sha256(full_prompt.encode("utf-8")).hexdigest()
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT public_url FROM autism_image_cache WHERE cache_key = ?",
+        (ck,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    if row and row[0]:
+        return row[0]
+
+    tmp_url = _zhipu_raw_image_temp_url(full_prompt)
+    if not tmp_url:
+        return None
+    raw = _http_download_bytes(tmp_url)
+    if not raw:
+        return None
+    png = _png_bytes_240_square(raw)
+    if not png:
+        return None
+
+    stem = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", label).strip("._")[:60] or "img"
+    short = ck[:8]
+    filename = f"{stem}_{short}.png"
+    prefix = (os.getenv("TENCENT_COS_ACTION_PREFIX") or "action").strip("/").strip() or "action"
+    cos_object_key = f"{prefix}/{filename}"
+
+    public_url = _cos_put_action_png(cos_object_key, png)
+    stored_cos_key = cos_object_key
+    if not public_url:
+        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
+        path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, filename)
+        with open(path, "wb") as f:
+            f.write(png)
+        public_url = f"{_autism_public_base_url()}/autism/action-images/{filename}"
+        stored_cos_key = f"local:{filename}"
+        app.logger.info("autism image stored locally (configure COS for Tencent Cloud): %s", filename)
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            INSERT INTO autism_image_cache (cache_key, label_zh, cos_key, public_url, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (ck, label, stored_cos_key, public_url, now),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        cursor.execute(
+            "SELECT public_url FROM autism_image_cache WHERE cache_key = ?",
+            (ck,),
+        )
+        row2 = cursor.fetchone()
+        if row2 and row2[0]:
+            public_url = row2[0]
+    finally:
+        conn.close()
+    return public_url
+
+
+def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:
+    """把孤独症训练/日程 JSON 推入星星机器人长轮询命令队列。"""
+    body = json.dumps(session, ensure_ascii=False)
+    if len(body) > 32000:
+        body = body[:32000]
+    ids = _xiaozhi_device_ids_for_child(child_id)
+    cmd_obj = {"action": "autism_session", "session_json": body}
+    with _esp32_cmd_lock:
+        for did in ids:
+            q = _esp32_cmd_queue.setdefault(did, deque())
+            q.append(dict(cmd_obj))
+        _esp32_cmd_lock.notify_all()
+    return ids
+
+
 def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str, condition_type: str = "") -> None:
     """家长记录一条行为 → 触发星星机器人主动跟孩子开口讲这件事。
 
@@ -3415,6 +4097,7 @@ _ESP32_ALLOWED_ACTIONS = {
     "xiaozhi_abort",
     "sdcard_audio_start",
     "sdcard_audio_stop",
+    "autism_session",
 }
 
 
@@ -3465,6 +4148,13 @@ def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
         payload["folder"] = folder
     if action == "sdcard_audio_stop":
         pass
+    if action == "autism_session":
+        sj = payload.get("session_json")
+        if not isinstance(sj, str) or not sj.strip():
+            return False, "session_json must be a non-empty string"
+        if len(sj) > 64000:
+            return False, "session_json too long (max 64000)"
+        payload["session_json"] = sj.strip()
     return True, ""
 
 

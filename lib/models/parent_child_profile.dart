@@ -1,3 +1,5 @@
+import 'child_condition.dart';
+
 class ParentHeartRateThresholds {
   const ParentHeartRateThresholds({
     required this.low,
@@ -135,6 +137,10 @@ class ParentChildProfile {
     if (real != null && real.isNotEmpty) return real;
     return '孩子';
   }
+
+  /// 家长版界面分流：多动症（心率）/ 孤独症（新界面）。
+  ChildCondition get childCondition =>
+      ChildCondition.fromCategoryString(category);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'childId': childId,

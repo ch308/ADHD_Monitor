@@ -21,13 +21,6 @@
 
 #define TAG "LcdDisplay"
 
-namespace {
-
-// Two taps within this window count as "double tap" to confirm an action card.
-constexpr int64_t kActionCardDoubleTapWindowUs = 450000;
-
-}  // namespace
-
 void LcdDisplay::ActionImageTapEvent(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
         return;
@@ -36,14 +29,9 @@ void LcdDisplay::ActionImageTapEvent(lv_event_t* e) {
     if (self == nullptr || self->action_card_confirm_cb_ == nullptr) {
         return;
     }
-    const int64_t now = esp_timer_get_time();
-    if (self->last_action_image_tap_us_ != 0 &&
-        (now - self->last_action_image_tap_us_) <= kActionCardDoubleTapWindowUs) {
-        self->last_action_image_tap_us_ = 0;
-        self->action_card_confirm_cb_(self->action_card_confirm_user_);
-    } else {
-        self->last_action_image_tap_us_ = now;
-    }
+    // 单击即确认（原双击在 1.54 屏上极易漏检）
+    self->last_action_image_tap_us_ = 0;
+    self->action_card_confirm_cb_(self->action_card_confirm_user_);
 }
 
 void LcdDisplay::SetActionCardConfirmCallback(Display::ActionCardConfirmCallback cb, void* user_data) {

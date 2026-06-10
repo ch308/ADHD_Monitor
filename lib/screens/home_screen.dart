@@ -11,6 +11,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:vibration/vibration.dart';
 
 import '../models/band_stress_data.dart';
+import '../models/child_condition.dart';
 import '../models/device_binding.dart';
 import '../models/heart_rate_data.dart';
 import '../models/parent_child_profile.dart';
@@ -27,6 +28,7 @@ import 'esp_provision_page.dart';
 import 'footprint_page.dart';
 import 'weekly_report_page.dart';
 import 'xiaohongshu_draft_page.dart';
+import '../widgets/parent_child_profile_dialog.dart';
 
 class _ParentHeartRateSnapshot {
   const _ParentHeartRateSnapshot({required this.recordedAt, required this.bpm});
@@ -43,6 +45,7 @@ class AdhdMonitorApp extends StatefulWidget {
     this.onLogout,
     this.onSwitchChild,
     this.onSwitchMode,
+    this.onChildCategoryChanged,
   });
 
   final String serverIp;
@@ -51,6 +54,8 @@ class AdhdMonitorApp extends StatefulWidget {
   final VoidCallback? onLogout;
   final void Function(int childId)? onSwitchChild;
   final VoidCallback? onSwitchMode;
+  /// 孩子资料里「类别」保存后通知外层，便于切换多动症/孤独症根界面。
+  final void Function(ChildCondition condition)? onChildCategoryChanged;
 
   @override
   State<AdhdMonitorApp> createState() => _AdhdMonitorAppState();
@@ -67,8 +72,6 @@ const Color _teal = Color(0xFF4B9B94);
 const Color _amber = Color(0xFFE7A84E);
 const Color _coral = Color(0xFFE87962);
 const Color _rose = Color(0xFFD95F7A);
-const List<String> _parentGenderOptions = <String>['男', '女', '其他', '不便说明'];
-
 // 增加TickerProviderStateMixin以支持动画
 class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     with TickerProviderStateMixin {
@@ -473,12 +476,10 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
   }
 
   Future<void> _showParentChildProfileDialog() async {
-    final result = await showDialog<ParentChildProfile>(
+    final result = await showParentChildProfileDialog(
       context: context,
-      builder: (ctx) => _ParentChildProfileDialog(
-        childId: widget.activeChildId,
-        profile: _childProfile,
-      ),
+      childId: widget.activeChildId,
+      profile: _childProfile,
     );
 
     if (result == null || !mounted) return;
@@ -491,6 +492,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
       _childProfile = saved;
       _heartRateAlertTriggered = false;
     });
+    widget.onChildCategoryChanged?.call(saved.childCondition);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -3175,201 +3177,6 @@ class _BandStatusBanner extends StatelessWidget {
           icon: Icons.bluetooth,
         );
     }
-  }
-}
-
-class _ParentChildProfileDialog extends StatefulWidget {
-  const _ParentChildProfileDialog({
-    super.key,
-    required this.childId,
-    this.profile,
-  });
-
-  final int childId;
-  final ParentChildProfile? profile;
-
-  @override
-  State<_ParentChildProfileDialog> createState() =>
-      _ParentChildProfileDialogState();
-}
-
-class _ParentChildProfileDialogState extends State<_ParentChildProfileDialog> {
-  late final TextEditingController nameController;
-  late final TextEditingController nicknameController;
-  late final TextEditingController ageController;
-  late final TextEditingController personalityController;
-  late final TextEditingController interestsController;
-  late final TextEditingController categoryController;
-  late final TextEditingController noteController;
-  String? selectedGender;
-  String? errorText;
-
-  @override
-  void initState() {
-    super.initState();
-    final profile = widget.profile;
-    nameController = TextEditingController(text: profile?.name ?? '');
-    nicknameController = TextEditingController(text: profile?.nickname ?? '');
-    ageController = TextEditingController(text: profile?.age?.toString() ?? '');
-    personalityController =
-        TextEditingController(text: profile?.personality ?? '');
-    interestsController = TextEditingController(text: profile?.interests ?? '');
-    categoryController = TextEditingController(text: profile?.category ?? '');
-    noteController = TextEditingController(text: profile?.note ?? '');
-    selectedGender = (profile?.gender?.trim().isNotEmpty ?? false)
-        ? profile!.gender!.trim()
-        : null;
-  }
-
-  @override
-  void dispose() {
-    nameController.dispose();
-    nicknameController.dispose();
-    ageController.dispose();
-    personalityController.dispose();
-    interestsController.dispose();
-    categoryController.dispose();
-    noteController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final age = int.tryParse(ageController.text.trim());
-    final thresholds = parentHeartRateThresholdsForAge(age);
-    return AlertDialog(
-      title: const Text('录入孩子资料'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: '孩子姓名，可选'),
-            ),
-            TextField(
-              controller: nicknameController,
-              decoration: const InputDecoration(labelText: '小名，可选'),
-            ),
-            TextField(
-              controller: ageController,
-              keyboardType: TextInputType.number,
-              onChanged: (_) => setState(() => errorText = null),
-              decoration: const InputDecoration(labelText: '年龄'),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: selectedGender,
-              decoration: const InputDecoration(labelText: '性别，可选'),
-              items: _parentGenderOptions
-                  .map((item) =>
-                      DropdownMenuItem<String>(value: item, child: Text(item)))
-                  .toList(),
-              onChanged: (value) => setState(() => selectedGender = value),
-            ),
-            TextField(
-              controller: categoryController,
-              decoration: const InputDecoration(
-                labelText: '类别',
-                hintText: '如多动症、自闭症、发育迟缓等',
-              ),
-            ),
-            TextField(
-              controller: personalityController,
-              decoration: const InputDecoration(labelText: '性格，可选'),
-            ),
-            TextField(
-              controller: interestsController,
-              decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: _warmSurface,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _warmBorder),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '自动提醒线',
-                    style: TextStyle(fontWeight: FontWeight.w700, color: _ink),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                      '${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}'),
-                  const SizedBox(height: 4),
-                  Text('过高提醒：>${thresholds.high} 次/分钟'),
-                  Text('过低提醒：<${thresholds.low} 次/分钟'),
-                ],
-              ),
-            ),
-            TextField(
-              controller: noteController,
-              maxLines: 2,
-              decoration: const InputDecoration(labelText: '补充说明，可选'),
-            ),
-            if (errorText != null) ...[
-              const SizedBox(height: 10),
-              Text(errorText!, style: const TextStyle(color: _coral)),
-            ],
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () {
-            final ageValue = int.tryParse(ageController.text.trim());
-            if (ageValue == null || ageValue < 0) {
-              setState(() {
-                errorText = '请填写正确的年龄，系统会按年龄自动配置提醒线。';
-              });
-              return;
-            }
-            final thresholds = parentHeartRateThresholdsForAge(ageValue);
-            Navigator.of(context).pop(
-              ParentChildProfile(
-                childId: widget.childId,
-                name: nameController.text.trim().isEmpty
-                    ? null
-                    : nameController.text.trim(),
-                nickname: nicknameController.text.trim().isEmpty
-                    ? null
-                    : nicknameController.text.trim(),
-                age: ageValue,
-                gender: selectedGender?.trim().isEmpty ?? true
-                    ? null
-                    : selectedGender!.trim(),
-                personality: personalityController.text.trim().isEmpty
-                    ? null
-                    : personalityController.text.trim(),
-                interests: interestsController.text.trim().isEmpty
-                    ? null
-                    : interestsController.text.trim(),
-                category: categoryController.text.trim().isEmpty
-                    ? null
-                    : categoryController.text.trim(),
-                note: noteController.text.trim().isEmpty
-                    ? null
-                    : noteController.text.trim(),
-                highThresholdBpm: thresholds.high,
-                lowThresholdBpm: thresholds.low,
-                updatedAt: DateTime.now(),
-              ),
-            );
-          },
-          child: const Text('保存'),
-        ),
-      ],
-    );
   }
 }
 

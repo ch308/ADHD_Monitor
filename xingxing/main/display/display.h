@@ -43,8 +43,8 @@ public:
     // everything else, and hide it again. No-op on displays that can't draw it.
     virtual void ShowFullscreenImage(const lv_image_dsc_t* image) {}
     virtual void HideFullscreenImage() {}
-    // When the fullscreen action image is shown, two quick taps on the screen
-    // invoke this callback (used to confirm the card and play the voice clip).
+    // When the fullscreen action image is shown, a tap on the screen invokes
+    // this callback (used to confirm the card and play the voice clip).
     using ActionCardConfirmCallback = void (*)(void* user_data);
     virtual void SetActionCardConfirmCallback(ActionCardConfirmCallback cb, void* user_data) {
         (void)cb;

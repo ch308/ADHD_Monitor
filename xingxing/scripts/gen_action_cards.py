@@ -2,7 +2,7 @@
 """Generate firmware assets for the "action cards" feature.
 
 The feature shows ten 240x240 pictures (one per daily routine action) embedded
-in the firmware as RGB565 LVGL C arrays. After the child double-taps the
+in the firmware as RGB565 LVGL C arrays. After the child taps the
 picture to confirm, the device plays an offline Ogg/Opus clip: the spoken
 sentence "妈妈，我要" plus the action label (e.g. 起床), via
 AudioService::PlaySound().

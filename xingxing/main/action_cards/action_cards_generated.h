@@ -28,7 +28,7 @@ struct ActionCard {
     const lv_image_dsc_t* image;  // 240x240 RGB565 picture
     const char* name;             // Chinese name, no extension
 #if ACTION_CARDS_HAVE_AUDIO
-    std::string_view sound;       // offline Ogg/Opus name clip
+    std::string_view sound;       // offline Ogg: 妈妈，我要 + name
 #endif
 };
 
