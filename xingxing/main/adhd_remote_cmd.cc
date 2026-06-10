@@ -29,11 +29,16 @@
 #include <cstdint>
 #include <cJSON.h>
 #include <esp_http_client.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_mac.h>
+#include <memory>
+#include <vector>
 
 #include "application.h"
+#include "board.h"
+#include "display/lvgl_display/lvgl_image.h"
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
 #include "adhd_prov_ble.h"
 #endif
@@ -121,6 +126,102 @@ static bool HttpPostJson(const std::string& url, const std::string& body) {
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     return err == ESP_OK && status >= 200 && status < 300;
+}
+
+static bool DownloadAndShowPreviewImage(const std::string& url) {
+    if (url.empty()) {
+        return false;
+    }
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+    ESP_LOGI(TAG, "autism image download: %s", url.c_str());
+    if (!http->Open("GET", url)) {
+        ESP_LOGW(TAG, "autism image open failed: %s", url.c_str());
+        return false;
+    }
+    int status_code = http->GetStatusCode();
+    if (status_code != 200) {
+        ESP_LOGW(TAG, "autism image http status=%d url=%s", status_code, url.c_str());
+        http->Close();
+        return false;
+    }
+    size_t content_length = http->GetBodyLength();
+    if (content_length == 0 || content_length > 256 * 1024) {
+        ESP_LOGW(TAG, "autism image invalid length=%u", (unsigned)content_length);
+        http->Close();
+        return false;
+    }
+    char* data = static_cast<char*>(heap_caps_malloc(content_length, MALLOC_CAP_8BIT));
+    if (data == nullptr) {
+        ESP_LOGW(TAG, "autism image malloc failed length=%u", (unsigned)content_length);
+        http->Close();
+        return false;
+    }
+    size_t total_read = 0;
+    while (total_read < content_length) {
+        int ret = http->Read(data + total_read, content_length - total_read);
+        if (ret < 0) {
+            ESP_LOGW(TAG, "autism image read failed: %s", url.c_str());
+            heap_caps_free(data);
+            http->Close();
+            return false;
+        }
+        if (ret == 0) {
+            break;
+        }
+        total_read += ret;
+    }
+    http->Close();
+    if (total_read == 0) {
+        heap_caps_free(data);
+        return false;
+    }
+    try {
+        auto image = std::make_unique<LvglAllocatedImage>(data, total_read);
+        Board::GetInstance().GetDisplay()->SetPreviewImage(std::move(image));
+        ESP_LOGI(TAG, "autism image shown bytes=%u", (unsigned)total_read);
+        return true;
+    } catch (...) {
+        ESP_LOGW(TAG, "autism image decode/show failed");
+        heap_caps_free(data);
+        return false;
+    }
+}
+
+static void AutismImageSequenceTask(void* arg) {
+    auto* urls = static_cast<std::vector<std::string>*>(arg);
+    if (urls == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    for (const auto& url : *urls) {
+        DownloadAndShowPreviewImage(url);
+        vTaskDelay(pdMS_TO_TICKS(4500));
+    }
+    delete urls;
+    vTaskDelete(nullptr);
+}
+
+static void StartAutismImageSequence(cJSON* images) {
+    if (!cJSON_IsObject(images)) {
+        return;
+    }
+    auto* urls = new std::vector<std::string>();
+    cJSON* child = nullptr;
+    cJSON_ArrayForEach(child, images) {
+        if (cJSON_IsString(child) && child->valuestring && strlen(child->valuestring) > 0) {
+            urls->push_back(child->valuestring);
+        }
+    }
+    if (urls->empty()) {
+        delete urls;
+        return;
+    }
+    ESP_LOGI(TAG, "autism image sequence start count=%u", (unsigned)urls->size());
+    BaseType_t tr = xTaskCreate(AutismImageSequenceTask, "autism_img", 8192, urls, 3, nullptr);
+    if (tr != pdPASS) {
+        ESP_LOGW(TAG, "autism_img task create failed");
+        delete urls;
+    }
 }
 
 static void DoAnnounceOnce() {
@@ -263,6 +364,7 @@ static void HandleOneCommand(cJSON* root) {
         cJSON* kind = cJSON_GetObjectItem(session, "kind");
         const char* k = cJSON_IsString(kind) ? kind->valuestring : "";
         if (strcmp(k, "training_start") == 0) {
+            StartAutismImageSequence(cJSON_GetObjectItem(session, "images"));
             cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
             std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
             if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
@@ -281,6 +383,7 @@ static void HandleOneCommand(cJSON* root) {
                 }
             }
         } else if (strcmp(k, "daily_plan") == 0) {
+            StartAutismImageSequence(cJSON_GetObjectItem(session, "images"));
             cJSON* slots = cJSON_GetObjectItem(session, "slots");
             std::string line(reinterpret_cast<const char*>(
                 u8"\u4eca\u5929\u7684\u5b89\u6392\u5df2\u540c\u6b65\uff0c\u6211\u4eec\u4e00\u8d77\u770b\u770b\u5427"));

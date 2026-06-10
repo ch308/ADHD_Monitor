@@ -70,3 +70,4 @@ server/adhd_data.db
 server/app.log
 server/app.error.log
 server/autism_action_store/
+server/action/

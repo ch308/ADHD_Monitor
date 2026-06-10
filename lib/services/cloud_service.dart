@@ -552,7 +552,7 @@ class CloudService {
               'tts_intro': ttsIntro,
             }),
           )
-          .timeout(timeout);
+          .timeout(const Duration(seconds: 120));
       if (r.statusCode != 200) {
         debugPrint('CloudService: autism training start ${r.statusCode}: ${r.body}');
         return null;

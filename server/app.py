@@ -35,7 +35,7 @@ def server_time():
 
 
 _AUTISM_LOCAL_IMAGE_STORE = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "autism_action_store", "action")
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "action")
 )
 
 
@@ -2884,18 +2884,29 @@ def autism_training_start(child_id):
     data = request.json or {}
     scene_id = (data.get("scene_id") or "preference_choice").strip()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    payload = {
-        "kind": "training_start",
-        "scene_id": scene_id,
-        "options": data.get("options") or [],
-        "follow_up": bool(data.get("follow_up")),
-        "tts_intro": (data.get("tts_intro") or "").strip(),
-    }
+    options = data.get("options") or []
+    if not isinstance(options, list):
+        options = []
+    options = [str(x).strip() for x in options if str(x).strip()]
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     if not _user_can_access_child(cursor, user["id"], child_id):
         conn.close()
         return jsonify({"status": "error", "message": "forbidden"}), 403
+    images: dict[str, str | None] = {}
+    for i, opt in enumerate(options):
+        images[f"o{i}"] = _autism_square_image_url_cached(
+            chinese_label=opt,
+            prompt_core_zh=f"儿童训练选项图标，{opt}，正方形构图，无文字",
+        )
+    payload = {
+        "kind": "training_start",
+        "scene_id": scene_id,
+        "options": options,
+        "images": images,
+        "follow_up": bool(data.get("follow_up")),
+        "tts_intro": (data.get("tts_intro") or "").strip(),
+    }
     cursor.execute(
         """
         INSERT INTO autism_training_sessions
@@ -3587,8 +3598,8 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
     return []
 
 
-# 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后上传腾讯云 COS
-# `action/` 目录（或本地 autism_action_store），并以完整 prompt 哈希缓存避免重复生成。
+# 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后先备份到本地
+# server/action 目录，再上传腾讯云 COS `action/`，并以完整 prompt 哈希缓存避免重复生成。
 _IMAGE_STYLE_SUFFIX_ZHIPU = (
     " A minimalist 2D flat vector icon，Cute style, child-friendly, soft pastel colors, "
     "solid clean background, bold clean lines, no complex details, no text. "
@@ -3758,16 +3769,22 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     prefix = (os.getenv("TENCENT_COS_ACTION_PREFIX") or "action").strip("/").strip() or "action"
     cos_object_key = f"{prefix}/{filename}"
 
+    # 无论是否配置腾讯云 COS，都先在 server/action 落一份本地备份，满足"先备份、可复用"。
+    try:
+        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
+        local_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, filename)
+        with open(local_path, "wb") as f:
+            f.write(png)
+        app.logger.info("autism image backup saved: %s", local_path)
+    except Exception as e:
+        app.logger.warning("autism image local backup failed: %s", e)
+
     public_url = _cos_put_action_png(cos_object_key, png)
     stored_cos_key = cos_object_key
     if not public_url:
-        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
-        path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, filename)
-        with open(path, "wb") as f:
-            f.write(png)
         public_url = f"{_autism_public_base_url()}/autism/action-images/{filename}"
         stored_cos_key = f"local:{filename}"
-        app.logger.info("autism image stored locally (configure COS for Tencent Cloud): %s", filename)
+        app.logger.info("autism image served locally (configure COS for Tencent Cloud): %s", filename)
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = sqlite3.connect("adhd_data.db")
@@ -3793,6 +3810,68 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     finally:
         conn.close()
     return public_url
+
+
+@app.route("/diag/glm-image", methods=["GET"])
+def diag_glm_image():
+    """快速自检智谱生图全链路：Key 是否生效、智谱是否返图、240×240 裁切、落盘/COS。
+
+    用法（浏览器或 curl 即可）：
+      GET /diag/glm-image                 用默认提示词「起床」
+      GET /diag/glm-image?prompt=洗手&label=洗手
+    返回 JSON，逐步标注每一环节成功与否，方便定位失败点。
+    """
+    label = (request.args.get("label") or request.args.get("prompt") or "起床").strip()
+    core = (request.args.get("prompt") or label).strip()
+
+    key = (os.getenv("GLM_API_KEY") or "").strip()
+    steps: dict = {
+        "glm_api_key_present": bool(key),
+        "glm_api_key_len": len(key),
+        "glm_endpoint": "https://open.bigmodel.cn/api/paas/v4/images/generations",
+        "model": "cogview-3-flash",
+        "cos_configured": all(
+            (os.getenv(k) or "").strip()
+            for k in (
+                "TENCENT_COS_SECRET_ID",
+                "TENCENT_COS_SECRET_KEY",
+                "TENCENT_COS_REGION",
+                "TENCENT_COS_BUCKET",
+            )
+        ),
+        "local_store_dir": _AUTISM_LOCAL_IMAGE_STORE,
+    }
+    if not key:
+        steps["error"] = "GLM_API_KEY 未设置（运行 Flask 的这个进程读不到）。请在启动 app 的同一个 shell 里 set/export GLM_API_KEY 后重启。"
+        return jsonify({"ok": False, **steps}), 200
+
+    full_prompt = " ".join(core.split()) + _IMAGE_STYLE_SUFFIX_ZHIPU
+    steps["full_prompt"] = full_prompt
+
+    tmp_url = _zhipu_raw_image_temp_url(full_prompt)
+    steps["zhipu_returned_url"] = bool(tmp_url)
+    if tmp_url:
+        steps["zhipu_temp_url_head"] = tmp_url[:120]
+    if not tmp_url:
+        steps["error"] = "智谱未返回图片 URL：多半是 Key 无效/欠费/被限流，或网络到 open.bigmodel.cn 不通。看 Flask 控制台里 'zhipu image ...' 的报错行。"
+        return jsonify({"ok": False, **steps}), 200
+
+    raw = _http_download_bytes(tmp_url)
+    steps["downloaded_bytes"] = len(raw) if raw else 0
+    if not raw:
+        steps["error"] = "拿到智谱临时 URL 但下载图片失败（临时 URL 可能过期或网络不通）。"
+        return jsonify({"ok": False, **steps}), 200
+
+    png = _png_bytes_240_square(raw)
+    steps["png_240_bytes"] = len(png) if png else 0
+    if not png:
+        steps["error"] = "240×240 裁切失败：检查 Pillow 是否已安装（pip install Pillow）。"
+        return jsonify({"ok": False, **steps}), 200
+
+    public_url = _autism_square_image_url_cached(label, core)
+    steps["public_url"] = public_url
+    steps["cached_and_backed_up"] = bool(public_url)
+    return jsonify({"ok": bool(public_url), **steps}), 200
 
 
 def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:
