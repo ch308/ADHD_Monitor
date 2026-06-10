@@ -127,7 +127,13 @@ private:
 
         boot_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
-            // Long-press enters/leaves the action-cards slideshow.
+            // 无网的 starting 状态下，长按 BOOT 直接进入配网（避免行动卡片占用单击）。
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting) {
+                EnterWifiConfigMode();
+                return;
+            }
+            // 其余状态维持原行为：长按进入/退出行动卡片。
             ActionCards::GetInstance().Toggle();
         });
 
@@ -486,6 +492,12 @@ public:
             board->ShowMpu6050ValidationResult();
             vTaskDelete(nullptr);
         }, "mpu6050_report", 3072, this, 2, nullptr);
+        xTaskCreate([](void* arg) {
+            auto* board = static_cast<XINGZHI_CUBE_1_54TFT_WIFI*>(arg);
+            vTaskDelay(pdMS_TO_TICKS(1300));
+            board->GetDisplay()->ShowNotification("长按BOOT进入配网", 2200);
+            vTaskDelete(nullptr);
+        }, "wifi_hint", 3072, this, 2, nullptr);
         StartMpu6050Task();
     }
 

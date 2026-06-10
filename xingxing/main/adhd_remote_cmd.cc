@@ -61,6 +61,22 @@ static std::string PathADeviceIdUpper() {
     snprintf(buf, sizeof(buf), "%02X%02X%02X%02X", mac[2], mac[3], mac[4], mac[5]);
     return std::string(buf);
 }
+
+static void LogPathAIdentity() {
+    uint8_t mac[6] = {0};
+    esp_err_t e = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (e != ESP_OK) {
+        ESP_LOGW(TAG, "identity: failed to read STA MAC: %s", esp_err_to_name(e));
+        return;
+    }
+    char mac_full[20] = {0};
+    snprintf(mac_full, sizeof(mac_full), "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    char device_id[16] = {0};
+    snprintf(device_id, sizeof(device_id), "%02X%02X%02X%02X",
+             mac[2], mac[3], mac[4], mac[5]);
+    ESP_LOGI(TAG, "identity: sta_mac=%s device_id=%s", mac_full, device_id);
+}
 #endif
 
 #if CONFIG_ADHD_MONITOR_BYPASS_OTA
@@ -129,6 +145,7 @@ void adhd_remote_cmd_announce_sync_once(void) {
         ESP_LOGW(TAG, "announce_sync: ADHD_MONITOR_CMD_HOST empty, skip");
         return;
     }
+    LogPathAIdentity();
     DoAnnounceOnce();
 }
 
