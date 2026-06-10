@@ -8,6 +8,7 @@ import '../models/autism_training_session.dart';
 import '../models/child_condition.dart';
 import '../models/parent_child_profile.dart';
 import '../services/cloud_service.dart';
+import '../services/parent_child_profile_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/parent_child_profile_dialog.dart';
 import 'child_skill_page.dart';
@@ -289,21 +290,21 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   Future<void> _showParentProfile() async {
     final existing = await _cloud.fetchChildProfile(widget.activeChildId);
     if (!mounted) return;
-    final saved = await showParentChildProfileDialog(
+    final result = await showParentChildProfileDialog(
       context: context,
-      profile: existing ??
-          ParentChildProfile(
-            childId: widget.activeChildId,
-            nickname: '',
-            gender: '男',
-            birthDate: '',
-            category: ChildCondition.adhd.storageLabel,
-          ),
-      onSubmit: (p) => _cloud.saveChildProfile(p),
+      childId: widget.activeChildId,
+      profile: existing,
     );
-    if (saved != null) {
-      widget.onChildCategoryChanged?.call(saved.childCondition);
-    }
+    if (result == null || !mounted) return;
+    final saved = await ParentChildProfileStore.saveProfile(
+      result,
+      cloudService: _cloud,
+    );
+    if (!mounted) return;
+    widget.onChildCategoryChanged?.call(saved.childCondition);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('已保存孩子资料')),
+    );
   }
 
   Future<void> _openChildSkill() async {

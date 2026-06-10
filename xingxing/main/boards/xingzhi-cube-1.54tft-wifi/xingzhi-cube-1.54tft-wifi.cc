@@ -32,10 +32,11 @@
 #define MPU6050_REG_PWR_MGMT_1 0x6B
 #define MPU6050_REG_WHO_AM_I 0x75
 // 50ms 相邻采样 |Δax|+|Δay|+|Δaz| 之和超过该阈值视为一次「摇晃」，用于下一张卡片。
-// 原 24000 + 双段摇晃几乎难以触发；改为单次过阈值 + 冷却防抖。
-#define MPU6050_SHAKE_SWITCH_THRESHOLD 7200
+// 实测：轻拿起 / 倾斜约 8000~19000；用力摇晃 27000+。阈值取 23000 才能把
+// 「拿起来看一眼」与「真的摇一摇」区分开（之前 7200 太敏感，一拿起就翻页）。
+#define MPU6050_SHAKE_SWITCH_THRESHOLD 23000
 // 两次换图之间的最短间隔（微秒），防止一次晃动触发多次 Next。
-#define MPU6050_SHAKE_COOLDOWN_US 420000
+#define MPU6050_SHAKE_COOLDOWN_US 700000
 
 class XINGZHI_CUBE_1_54TFT_WIFI : public WifiBoard {
 private:
@@ -110,10 +111,10 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
-            // While the action-cards slideshow is running, a click steps to the
-            // next picture instead of toggling the chat.
+            // 本板无触摸屏：行动卡片模式下，BOOT 单击 = 确认并播报当前卡片
+            //（切换下一张由摇晃完成）。LVGL 的触摸点击在此硬件上不会触发。
             if (ActionCards::GetInstance().IsActive()) {
-                ActionCards::GetInstance().Next();
+                ActionCards::GetInstance().ConfirmSelection();
                 return;
             }
             auto& app = Application::GetInstance();
@@ -357,7 +358,7 @@ private:
     void ShowMpu6050ValidationResult() {
         char message[96];
         if (mpu6050_ready_) {
-            snprintf(message, sizeof(message), "MPU6050 OK\naddr=0x%02X WHO=0x%02X\n摇晃换图 点屏确认",
+            snprintf(message, sizeof(message), "MPU6050 OK\naddr=0x%02X WHO=0x%02X\n摇晃换图 按键确认",
                      mpu6050_addr_, mpu6050_who_am_i_);
         } else {
             snprintf(message, sizeof(message), "MPU6050 FAIL\nSDA=12 SCL=11\ncheck wiring: %s",

@@ -62,7 +62,7 @@ void ActionCards::ShowCurrent() {
         display->ShowFullscreenImage(card.image);
         display->SetActionCardConfirmCallback(&ActionCards::ConfirmCallbackThunk, nullptr);
     }
-    ESP_LOGI(TAG, "Showing card %d/%d: %s (点屏幕确认，摇晃换图)",
+    ESP_LOGI(TAG, "Showing card %d/%d: %s (BOOT 键确认，摇晃换图)",
              index_ + 1, static_cast<int>(kActionCards.size()), card.name);
 }
 
