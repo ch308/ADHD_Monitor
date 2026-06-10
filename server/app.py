@@ -888,6 +888,169 @@ def _read_child_profile_row(cursor, child_id):
     }
 
 
+def _skill_list_append_unique(items, value, limit=12):
+    if not isinstance(items, list):
+        items = []
+    text = _compact_text(value, 60)
+    if not text:
+        return items[-limit:]
+    existing = []
+    for item in items:
+        if isinstance(item, dict):
+            existing.append(_compact_text(item.get("label") or item.get("text"), 60))
+        else:
+            existing.append(_compact_text(item, 60))
+    if text not in existing:
+        items.append(text)
+    return items[-limit:]
+
+
+def _skill_fact_append_unique(items, fact, limit=30):
+    if not isinstance(items, list):
+        items = []
+    label = _compact_text((fact or {}).get("label"), 60)
+    kind = _compact_text((fact or {}).get("kind"), 40)
+    source = _compact_text((fact or {}).get("source"), 40)
+    if not label:
+        return items[-limit:]
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if (
+            _compact_text(item.get("label"), 60) == label
+            and _compact_text(item.get("kind"), 40) == kind
+            and _compact_text(item.get("source"), 40) == source
+        ):
+            item["count"] = int(item.get("count") or 1) + 1
+            item["lastSeenAt"] = fact.get("lastSeenAt")
+            return items[-limit:]
+    items.append(fact)
+    return items[-limit:]
+
+
+def _refresh_skill_text_from_learned_facts(skill):
+    base = skill.get("baseSummary")
+    if not base:
+        base = skill.get("summary") or skill.get("selfIntroduction") or ""
+        skill["baseSummary"] = base
+    base_intro = skill.get("baseSelfIntroduction")
+    if not base_intro:
+        base_intro = skill.get("selfIntroduction") or base
+        skill["baseSelfIntroduction"] = base_intro
+
+    needs = skill.get("childInitiatedNeeds") if isinstance(skill.get("childInitiatedNeeds"), list) else []
+    prefs = skill.get("observedPreferences") if isinstance(skill.get("observedPreferences"), list) else []
+    daily = skill.get("dailyPlanPreferences") if isinstance(skill.get("dailyPlanPreferences"), list) else []
+    training = skill.get("trainingInsights") if isinstance(skill.get("trainingInsights"), list) else []
+
+    learned_parts = []
+    if needs:
+        learned_parts.append("孩子曾主动表达：" + "、".join(str(x) for x in needs[-5:]) + "。")
+    if prefs:
+        learned_parts.append("近期观察到的偏好/选择：" + "、".join(str(x) for x in prefs[-8:]) + "。")
+    if daily:
+        learned_parts.append("日常计划中常见选择：" + "、".join(str(x) for x in daily[-6:]) + "。")
+    if training:
+        learned_parts.append("训练中出现过的选择：" + "、".join(str(x) for x in training[-6:]) + "。")
+
+    learned = " ".join(learned_parts)
+    skill["learnedSummary"] = learned
+    skill["summary"] = (base + (" " + learned if learned else "")).strip()
+    skill["selfIntroduction"] = (base_intro + (" " + learned if learned else "")).strip()
+
+    support_hints = skill.get("supportHints") if isinstance(skill.get("supportHints"), list) else []
+    if prefs:
+        hint = "沟通或设计选择时，可优先参考已观察到的偏好：" + "、".join(str(x) for x in prefs[-5:]) + "。"
+        support_hints = _skill_list_append_unique(support_hints, hint, limit=10)
+    if needs:
+        hint = "孩子已经能通过星星主动表达部分需求，家长可及时回应并复述需求词。"
+        support_hints = _skill_list_append_unique(support_hints, hint, limit=10)
+    skill["supportHints"] = support_hints
+
+    qq = skill.get("quickQuestions") if isinstance(skill.get("quickQuestions"), list) else []
+    qq = _skill_list_append_unique(qq, "最近孩子更常选择什么？", limit=4)
+    skill["quickQuestions"] = qq[:4]
+
+
+def _enrich_child_skill_from_autism_event(cursor, child_id, *, kind, label, source="", scene="", ts=None, payload=None):
+    label = _compact_text(label, 60)
+    if not label:
+        return
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ts = ts or now
+    row = _read_child_profile_row(cursor, child_id)
+    if row:
+        profile = row["profile"]
+        skill = row["skill"] or _build_child_skill(row["profile"], now)
+        updated_by = row.get("updated_by_user_id")
+    else:
+        profile, skill = _child_profile_default(child_id, "孩子")
+        updated_by = None
+
+    kind = _compact_text(kind, 40) or "autism_event"
+    source = _compact_text(source, 40)
+    scene = _compact_text(scene, 60)
+    fact = {
+        "kind": kind,
+        "label": label,
+        "source": source,
+        "scene": scene,
+        "lastSeenAt": ts,
+        "count": 1,
+    }
+    if isinstance(payload, dict):
+        slot_time = _compact_text(payload.get("slot_time"), 20)
+        if slot_time:
+            fact["slotTime"] = slot_time
+
+    skill["eventFacts"] = _skill_fact_append_unique(skill.get("eventFacts"), fact, limit=40)
+
+    if kind == "child_initiated_need":
+        skill["childInitiatedNeeds"] = _skill_list_append_unique(
+            skill.get("childInitiatedNeeds"), label, limit=12
+        )
+    elif source == "daily_plan" or scene == "daily_plan":
+        skill["dailyPlanPreferences"] = _skill_list_append_unique(
+            skill.get("dailyPlanPreferences"), label, limit=12
+        )
+        skill["observedPreferences"] = _skill_list_append_unique(
+            skill.get("observedPreferences"), label, limit=16
+        )
+    else:
+        skill["trainingInsights"] = _skill_list_append_unique(
+            skill.get("trainingInsights"), label, limit=12
+        )
+        skill["observedPreferences"] = _skill_list_append_unique(
+            skill.get("observedPreferences"), label, limit=16
+        )
+
+    skill["lastAutismEventAt"] = ts
+    skill["updatedAt"] = now
+    _refresh_skill_text_from_learned_facts(skill)
+
+    profile["childId"] = child_id
+    profile.setdefault("updatedAt", now)
+    cursor.execute(
+        """
+        INSERT INTO child_profiles
+        (child_id, profile_json, skill_json, updated_at, updated_by_user_id)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(child_id) DO UPDATE SET
+            profile_json = excluded.profile_json,
+            skill_json = excluded.skill_json,
+            updated_at = excluded.updated_at,
+            updated_by_user_id = child_profiles.updated_by_user_id
+        """,
+        (
+            child_id,
+            json.dumps(profile, ensure_ascii=False),
+            json.dumps(skill, ensure_ascii=False),
+            now,
+            updated_by,
+        ),
+    )
+
+
 def _recent_child_skill_context(cursor, child_id):
     cursor.execute(
         """
@@ -931,8 +1094,14 @@ def _fixed_child_skill_answer(question, profile, skill, context):
     interests = _compact_text(profile.get("interests"), 80)
     personality = _compact_text(profile.get("personality"), 80)
     support_hints = skill.get("supportHints") if isinstance(skill.get("supportHints"), list) else []
+    observed_preferences = skill.get("observedPreferences") if isinstance(skill.get("observedPreferences"), list) else []
+    child_needs = skill.get("childInitiatedNeeds") if isinstance(skill.get("childInitiatedNeeds"), list) else []
     latest_hr = (context.get("latestHeartRate") or {}).get("bpm")
     latest_obs = _compact_text((context.get("latestObservation") or {}).get("observation"), 80)
+    if any(key in q for key in ("喜欢", "偏好", "选择", "爱吃", "爱玩")) and observed_preferences:
+        return f"最近我常选择：{'、'.join(str(x) for x in observed_preferences[-8:])}。这些可以先当作线索，继续观察我是不是稳定喜欢。"
+    if any(key in q for key in ("需要", "需求", "主动", "想要")) and child_needs:
+        return f"我已经通过星星主动表达过：{'、'.join(str(x) for x in child_needs[-6:])}。家长可以及时回应，并帮我复述出来。"
     if any(key in q for key in ("介绍", "自己", "你是谁", "自我")):
         return skill.get("selfIntroduction") or _build_child_skill(profile).get("selfIntroduction")
     if any(key in q for key in ("感觉", "最近", "今天", "心情")):
@@ -979,6 +1148,12 @@ def fetch_kimi_child_skill_answer(question, profile, skill, context):
         {
             "conversationStyle": skill.get("conversationStyle"),
             "supportHints": skill.get("supportHints"),
+            "observedPreferences": skill.get("observedPreferences"),
+            "childInitiatedNeeds": skill.get("childInitiatedNeeds"),
+            "trainingInsights": skill.get("trainingInsights"),
+            "dailyPlanPreferences": skill.get("dailyPlanPreferences"),
+            "learnedSummary": skill.get("learnedSummary"),
+            "eventFacts": skill.get("eventFacts"),
             "optimizedFromProfileAt": skill.get("optimizedFromProfileAt"),
         },
         ensure_ascii=False,
@@ -1693,6 +1868,57 @@ def footprint_today():
                 }
             )
 
+        cursor.execute(
+            """
+            SELECT id, device_id, scene, phase, payload_json, ts, created_at
+            FROM autism_training_events
+            WHERE child_id = ? AND ts LIKE ?
+            ORDER BY id ASC
+            """,
+            (cid, prefix),
+        )
+        autism_events = []
+        for eid, device_id, scene, phase, payload_json, ts, created_at in cursor.fetchall():
+            try:
+                payload = json.loads(payload_json or "{}")
+            except Exception:
+                payload = {}
+            autism_events.append(
+                {
+                    "id": eid,
+                    "device_id": device_id,
+                    "scene": scene,
+                    "phase": phase,
+                    "payload": payload,
+                    "ts": ts,
+                    "created_at": created_at,
+                }
+            )
+
+        cursor.execute(
+            """
+            SELECT id, device_id, card_slug, label, voice_text, created_at, status, parent_confirmed_at
+            FROM autism_child_needs
+            WHERE child_id = ? AND created_at LIKE ?
+            ORDER BY id ASC
+            """,
+            (cid, prefix),
+        )
+        child_initiated_needs = []
+        for nid, device_id, card_slug, label, voice_text, created_at, status, parent_confirmed_at in cursor.fetchall():
+            child_initiated_needs.append(
+                {
+                    "id": nid,
+                    "device_id": device_id,
+                    "card_slug": card_slug,
+                    "label": label,
+                    "voice_text": voice_text,
+                    "created_at": created_at,
+                    "status": status,
+                    "parent_confirmed_at": parent_confirmed_at,
+                }
+            )
+
         conn.close()
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -1704,6 +1930,8 @@ def footprint_today():
             "log_count": len(logs_out),
             "trend_summary": summary,
             "logs": logs_out,
+            "autism_training_events": autism_events,
+            "child_initiated_needs": child_initiated_needs,
         }
     ), 200
 
@@ -1880,6 +2108,56 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
             }
         )
 
+    cursor.execute(
+        """
+        SELECT ts, scene, phase, payload_json
+        FROM autism_training_events
+        WHERE child_id = ? AND ts >= ? AND ts <= ?
+        ORDER BY ts ASC
+        LIMIT 80
+        """,
+        (child_id, t_lo, t_hi),
+    )
+    autism_events = []
+    for ts, scene, phase, payload_json in cursor.fetchall():
+        try:
+            payload = json.loads(payload_json or "{}")
+        except Exception:
+            payload = {}
+        autism_events.append(
+            {
+                "timestamp": ts,
+                "scene": scene,
+                "phase": phase,
+                "label": payload.get("label"),
+                "source": payload.get("source"),
+                "slot_time": payload.get("slot_time"),
+            }
+        )
+
+    cursor.execute(
+        """
+        SELECT created_at, card_slug, label, voice_text, status, parent_confirmed_at
+        FROM autism_child_needs
+        WHERE child_id = ? AND created_at >= ? AND created_at <= ?
+        ORDER BY created_at ASC
+        LIMIT 80
+        """,
+        (child_id, t_lo, t_hi),
+    )
+    child_initiated_needs = []
+    for created_at, card_slug, label, voice_text, status, parent_confirmed_at in cursor.fetchall():
+        child_initiated_needs.append(
+            {
+                "timestamp": created_at,
+                "card_slug": card_slug,
+                "label": label,
+                "voice_text": voice_text,
+                "status": status,
+                "parent_confirmed_at": parent_confirmed_at,
+            }
+        )
+
     return {
         "heart_sample_count": heart_n,
         "heart_avg_bpm": round(heart_avg, 1) if heart_avg is not None else None,
@@ -1889,6 +2167,8 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
         "hourly_stress_ranked": hourly_stress,
         "daily_heart": daily,
         "parent_logs": logs,
+        "autism_training_events": autism_events,
+        "child_initiated_needs": child_initiated_needs,
     }
 
 
@@ -1931,6 +2211,26 @@ def _build_weekly_kimi_user_prompt(child_name: str, week_start: str, week_end: s
     if len(digest.get("parent_logs") or []) >= 40:
         lines.append("")
         lines.append("（本周家长记录较多，上文仅纳入最近 40 条；统计仍以全量数据在库为准。）")
+
+    needs = digest.get("child_initiated_needs") or []
+    lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
+    for n in needs:
+        lines.append(
+            f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
+        )
+    if not needs:
+        lines.append("- （该周暂无孩子主动发起需求记录）")
+
+    events = digest.get("autism_training_events") or []
+    lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
+    for e in events:
+        label = e.get("label") or "未记录选项"
+        slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
+        lines.append(
+            f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择：{label}"
+        )
+    if not events:
+        lines.append("- （该周暂无训练或日常计划选择事件）")
 
     lines += [
         "",
@@ -2000,6 +2300,26 @@ def _build_period_kimi_user_prompt(
             f"- {p['timestamp']} [{p['condition_label']}] 心率{p['bpm']} 观察：{p['observation']}"
         )
         lines.append(f"  当时 AI 建议摘要：{p['ai_advice_snippet']}")
+
+    needs = digest.get("child_initiated_needs") or []
+    lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
+    for n in needs:
+        lines.append(
+            f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
+        )
+    if not needs:
+        lines.append("- （该周期暂无孩子主动发起需求记录）")
+
+    events = digest.get("autism_training_events") or []
+    lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
+    for e in events:
+        label = e.get("label") or "未记录选项"
+        slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
+        lines.append(
+            f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择：{label}"
+        )
+    if not events:
+        lines.append("- （该周期暂无训练或日常计划选择事件）")
 
     lines += [
         "",
@@ -2785,6 +3105,23 @@ def my_child_profile_put(child_id):
     if not cursor.fetchone():
         conn.close()
         return jsonify({"status": "error", "message": "child not found"}), 404
+    existing_row = _read_child_profile_row(cursor, child_id)
+    if existing_row and isinstance(existing_row.get("skill"), dict):
+        old_skill = existing_row["skill"]
+        for key in (
+            "observedPreferences",
+            "childInitiatedNeeds",
+            "trainingInsights",
+            "dailyPlanPreferences",
+            "eventFacts",
+            "learnedSummary",
+            "lastAutismEventAt",
+        ):
+            if key in old_skill:
+                skill[key] = old_skill[key]
+        if skill.get("eventFacts"):
+            _refresh_skill_text_from_learned_facts(skill)
+            skill["updatedAt"] = now
     if nickname:
         cursor.execute("UPDATE children SET nickname = ? WHERE id = ?", (nickname, child_id))
     cursor.execute(
@@ -2893,12 +3230,18 @@ def autism_training_start(child_id):
     if not _user_can_access_child(cursor, user["id"], child_id):
         conn.close()
         return jsonify({"status": "error", "message": "forbidden"}), 403
+    provided_images = data.get("images") if isinstance(data.get("images"), dict) else {}
     images: dict[str, str | None] = {}
     for i, opt in enumerate(options):
-        images[f"o{i}"] = _autism_square_image_url_cached(
-            chinese_label=opt,
-            prompt_core_zh=f"儿童训练选项图标，{opt}，正方形构图，无文字",
-        )
+        key = f"o{i}"
+        u = provided_images.get(key)
+        if isinstance(u, str) and u.startswith("http"):
+            images[key] = u
+        else:
+            images[key] = _autism_square_image_url_cached(
+                chinese_label=opt,
+                prompt_core_zh=f"儿童训练选项图标，{opt}，正方形构图，无文字",
+            )
     payload = {
         "kind": "training_start",
         "scene_id": scene_id,
@@ -2933,6 +3276,48 @@ def autism_training_start(child_id):
     conn2.commit()
     conn2.close()
     return jsonify({"status": "ok", "session_id": sid, "queued_devices": queued}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/training/assets", methods=["POST"])
+def autism_training_assets(child_id):
+    """预生成孩子训练场景所需图片，只写缓存/存储，不下发设备。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    scenes = data.get("scenes") or []
+    if not isinstance(scenes, list) or not scenes:
+        return jsonify({"status": "error", "message": "scenes required"}), 400
+
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    conn.close()
+
+    prepared: dict[str, dict[str, str | None]] = {}
+    total = 0
+    for raw in scenes[:5]:
+        if not isinstance(raw, dict):
+            continue
+        scene_id = (raw.get("scene_id") or "").strip() or "preference_choice"
+        tts_intro = (raw.get("tts_intro") or "").strip()
+        options = raw.get("options") or []
+        if not isinstance(options, list):
+            options = []
+        clean_options = [str(x).strip() for x in options if str(x).strip()]
+        scene_images: dict[str, str | None] = {}
+        for i, opt in enumerate(clean_options[:4]):
+            key = f"o{i}"
+            scene_images[key] = _autism_square_image_url_cached(
+                chinese_label=opt,
+                prompt_core_zh=f"儿童训练场景图片，场景：{scene_id}，引导语：{tts_intro}，选项：{opt}，正方形构图，无文字",
+            )
+            total += 1
+        prepared[scene_id] = scene_images
+
+    return jsonify({"status": "ok", "images": prepared, "image_count": total}), 200
 
 
 @app.route("/my/children/<int:child_id>/autism/training/status", methods=["GET"])
@@ -2980,7 +3365,7 @@ def autism_daily_plan(child_id):
     if not user:
         return jsonify({"status": "error", "message": "unauthorized"}), 401
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    slots = [
+    default_slots = [
         {
             "time": "07:00",
             "tts": "早上7点，起床啦，你喜欢穿什么颜色的鞋子？",
@@ -3007,21 +3392,45 @@ def autism_daily_plan(child_id):
             "options": ["青菜", "胡萝卜", "肉"],
         },
     ]
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+
+    data = request.json or {}
+    raw_slots = data.get("slots")
+    slots = []
+    if isinstance(raw_slots, list):
+        for i, raw in enumerate(raw_slots[:5]):
+            if not isinstance(raw, dict):
+                continue
+            fallback = default_slots[i] if i < len(default_slots) else default_slots[-1]
+            time_text = str(raw.get("time") or fallback["time"]).strip()[:8]
+            tts = str(raw.get("tts") or fallback["tts"]).strip()[:300]
+            raw_options = raw.get("options")
+            options = []
+            if isinstance(raw_options, list):
+                for opt in raw_options[:4]:
+                    s = str(opt or "").strip()
+                    if s:
+                        options.append(s[:40])
+            if not options:
+                options = list(fallback["options"])
+            slots.append({"time": time_text, "tts": tts, "options": options})
+    if len(slots) != 5:
+        slots = default_slots
+
     images: dict[str, str | None] = {}
     for i, slot in enumerate(slots):
         for j, opt in enumerate(slot["options"]):
             key = f"s{i}_o{j}"
             url = _autism_square_image_url_cached(
                 chinese_label=opt,
-                prompt_core_zh=f"儿童插画风格，简洁明快，{opt}，正方形构图，无文字",
+                prompt_core_zh=f"儿童日常计划选择图片，{slot['tts']}，选项：{opt}，正方形构图，无文字",
             )
             images[key] = url
     plan_obj = {"kind": "daily_plan", "slots": slots, "images": images}
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
     cursor.execute(
         """
         INSERT INTO autism_daily_plans (child_id, plan_json, images_json, created_at)
@@ -3094,6 +3503,16 @@ def device_autism_need_event(device_id):
         (child_id, device_id, slug or None, label, voice, now),
     )
     nid = cursor.lastrowid
+    _enrich_child_skill_from_autism_event(
+        cursor,
+        child_id,
+        kind="child_initiated_need",
+        label=label,
+        source="child_initiated",
+        scene=slug or "need",
+        ts=now,
+        payload={"voice_text": voice},
+    )
     conn.commit()
     conn.close()
     return jsonify({"status": "ok", "need_id": nid, "child_id": child_id}), 200
@@ -3126,6 +3545,17 @@ def autism_events_training(child_id):
         (child_id, scene, phase, pj, ts, now),
     )
     eid = cursor.lastrowid
+    if phase == "image_confirmed" and isinstance(payload, dict):
+        _enrich_child_skill_from_autism_event(
+            cursor,
+            child_id,
+            kind="training_choice",
+            label=payload.get("label"),
+            source=payload.get("source") or "parent_training_event",
+            scene=scene,
+            ts=ts,
+            payload=payload,
+        )
     sid_i = _session_id_from_json(data.get("session_id"))
     if sid_i is not None:
         cursor.execute(
@@ -3138,6 +3568,51 @@ def autism_events_training(child_id):
     conn.commit()
     conn.close()
     return jsonify({"status": "ok", "event_id": eid}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/events/training", methods=["GET"])
+def autism_events_training_list(child_id):
+    """家长端增量拉取训练/日常计划事件，用于手机震动提示与报告数据展示。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    after_id = request.args.get("after_id", default=0, type=int) or 0
+    limit = min(max(request.args.get("limit", default=30, type=int) or 30, 1), 100)
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    cursor.execute(
+        """
+        SELECT id, device_id, scene, phase, payload_json, ts, created_at
+        FROM autism_training_events
+        WHERE child_id = ? AND id > ?
+        ORDER BY id ASC
+        LIMIT ?
+        """,
+        (child_id, after_id, limit),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    items = []
+    for eid, device_id, scene, phase, payload_json, ts, created_at in rows:
+        try:
+            payload = json.loads(payload_json or "{}")
+        except Exception:
+            payload = {}
+        items.append(
+            {
+                "id": eid,
+                "device_id": device_id,
+                "scene": scene,
+                "phase": phase,
+                "payload": payload,
+                "ts": ts,
+                "created_at": created_at,
+            }
+        )
+    return jsonify({"status": "ok", "items": items}), 200
 
 
 @app.route("/device/<device_id>/autism/training-event", methods=["POST"])
@@ -3168,6 +3643,17 @@ def device_autism_training_event(device_id):
         (child_id, device_id, scene, phase, pj, ts, now),
     )
     eid = cursor.lastrowid
+    if phase == "image_confirmed" and isinstance(payload, dict):
+        _enrich_child_skill_from_autism_event(
+            cursor,
+            child_id,
+            kind="training_choice",
+            label=payload.get("label"),
+            source=payload.get("source") or "device_training_event",
+            scene=scene,
+            ts=ts,
+            payload=payload,
+        )
     sid_i = _session_id_from_json(data.get("session_id"))
     if sid_i is not None:
         cursor.execute(

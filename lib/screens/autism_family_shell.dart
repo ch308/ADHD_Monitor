@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/autism_training_session.dart';
@@ -16,6 +17,229 @@ import 'esp_provision_page.dart';
 import 'footprint_page.dart';
 import 'weekly_report_page.dart';
 import '../services/esp_provision_service.dart' show EspProvKind;
+
+class _TrainingScenePreset {
+  const _TrainingScenePreset({
+    required this.sceneId,
+    required this.title,
+    required this.subtitle,
+    required this.goal,
+    required this.startButton,
+    required this.ttsIntro,
+    required this.options,
+    required this.flow,
+    this.parameters = const [],
+  });
+
+  final String sceneId;
+  final String title;
+  final String subtitle;
+  final String goal;
+  final String startButton;
+  final String ttsIntro;
+  final List<String> options;
+  final List<String> flow;
+  final List<String> parameters;
+}
+
+const List<_TrainingScenePreset> _trainingScenePresets = [
+  _TrainingScenePreset(
+    sceneId: AutismTrainingSceneIds.emotionExpression,
+    title: '表达情绪',
+    subtitle: '识别并表达当前情绪',
+    goal: '让孩子通过图片说出自己现在的感受，并获得即时正向反馈。',
+    startButton: '开始情绪训练',
+    ttsIntro: '你现在感觉怎么样？',
+    options: ['开心', '难过', '生气', '害怕'],
+    flow: [
+      '机器人询问“你现在感觉怎么样？”并显示情绪图片。',
+      '孩子摇晃切换、拍打选择一个情绪。',
+      '机器人复述选择并表扬，毛绒球用绿色呼吸光强化。',
+      '家长手机记录本次情绪识别结果。',
+    ],
+  ),
+  _TrainingScenePreset(
+    sceneId: AutismTrainingSceneIds.needExpression,
+    title: '表达需求',
+    subtitle: '用图片表达生理需求',
+    goal: '让孩子能通过机器人清楚表达喝水、吃饭、上厕所等基本需求。',
+    startButton: '开始需求训练',
+    ttsIntro: '你需要什么？',
+    options: ['喝水', '吃东西', '上厕所', '休息'],
+    flow: [
+      '机器人说“你需要什么？”并显示需求图片，毛绒球蓝色慢闪。',
+      '孩子摇晃切换、拍打确认需求。',
+      '机器人说“你想……，好的，我告诉妈妈”，屏幕显示已发送。',
+      '手机震动并弹出孩子需求，随后机器人播放表扬语。',
+    ],
+    parameters: ['进阶：家长可根据实际执行情况再做确认记录。'],
+  ),
+  _TrainingScenePreset(
+    sceneId: AutismTrainingSceneIds.socialResponse,
+    title: '社交回应',
+    subtitle: '练习问候和简单对话',
+    goal: '训练孩子回应他人的问候和基本社交问题，为真人互动打基础。',
+    startButton: '开始社交回应训练',
+    ttsIntro: '你好！我是你的朋友。今天过得怎么样？',
+    options: ['很好', '不太好', '开心', '不知道'],
+    flow: [
+      '机器人发起问候，毛绒球黄色呼吸光。',
+      '孩子选择回应，例如“很好”。',
+      '机器人确认并继续追问“你做了什么事情让你开心呀？”',
+      '孩子再次选择后，机器人总结并感谢孩子表达。',
+    ],
+    parameters: ['简单：二选一', '中等：四选一情绪图片', '困难：开放式回答'],
+  ),
+  _TrainingScenePreset(
+    sceneId: AutismTrainingSceneIds.preferenceChoice,
+    title: '偏好选择',
+    subtitle: '在多个选项中做选择',
+    goal: '帮助孩子在日常情境中做出选择并表达自己的偏好。',
+    startButton: '开始选择训练',
+    ttsIntro: '我们来选一个活动吧！你想选哪一个？',
+    options: ['积木', '画画', '饼干', '苹果'],
+    flow: [
+      '家长预设 2 到 4 个选项并下发。',
+      '机器人语音引导并显示选项图片，毛绒球蓝色慢闪。',
+      '孩子摇晃切换高亮、拍打选择。',
+      '机器人确认选择并鼓励孩子执行。',
+    ],
+    parameters: ['选项数量：2 / 3 / 4 个', '选项内容：家长可自定义', '可扩展：是否追问“为什么选这个？”'],
+  ),
+  _TrainingScenePreset(
+    sceneId: AutismTrainingSceneIds.helpRequest,
+    title: '寻求帮助',
+    subtitle: '遇到困难时主动求助',
+    goal: '让孩子在够不到、打不开、不会做等情境中通过机器人寻求帮助。',
+    startButton: '开始求助训练',
+    ttsIntro: '你需要帮忙吗？',
+    options: ['需要帮忙', '不需要', '打开盒子', '拿高处的东西'],
+    flow: [
+      '家长创建模拟困境，例如把零食放在稍高处。',
+      '机器人询问是否需要帮忙，屏幕显示“需要 / 不需要”。',
+      '孩子选择“需要”后，机器人告诉妈妈。',
+      '家长帮助完成后，机器人表扬孩子主动求助。',
+    ],
+    parameters: ['高级：等待孩子主动摇晃触发', '追问：打开盒子 / 拿高处的东西 / 系鞋带 / 其他'],
+  ),
+];
+
+class _TrainingSceneDraft {
+  _TrainingSceneDraft(_TrainingScenePreset preset)
+      : sceneId = preset.sceneId,
+        title = preset.title,
+        ttsIntro = preset.ttsIntro,
+        options = List<String>.from(preset.options);
+
+  final String sceneId;
+  final String title;
+  String ttsIntro;
+  List<String> options;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'scene_id': sceneId,
+      'title': title,
+      'tts_intro': ttsIntro.trim(),
+      'options': options.where((s) => s.trim().isNotEmpty).toList(),
+    };
+  }
+}
+
+class _DailyPlanPreset {
+  const _DailyPlanPreset({
+    required this.time,
+    required this.tts,
+    required this.options,
+  });
+
+  final String time;
+  final String tts;
+  final List<String> options;
+}
+
+const List<_DailyPlanPreset> _dailyPlanPresets = [
+  _DailyPlanPreset(
+    time: '07:00',
+    tts: '早上7点，起床啦，你喜欢穿什么颜色的鞋子？',
+    options: ['红色鞋子', '蓝色鞋子'],
+  ),
+  _DailyPlanPreset(
+    time: '11:00',
+    tts: '中午11点，该吃中饭啦，你想吃什么？',
+    options: ['米饭', '面条', '饺子'],
+  ),
+  _DailyPlanPreset(
+    time: '13:00',
+    tts: '下午1点，该午睡咯',
+    options: ['好的', '不好'],
+  ),
+  _DailyPlanPreset(
+    time: '14:00',
+    tts: '下午2点，该起床咯，起床后你想玩什么',
+    options: ['搭积木', '滑梯', '拍皮球'],
+  ),
+  _DailyPlanPreset(
+    time: '18:00',
+    tts: '晚上6点，到了吃晚饭的时候啦，你喜欢吃什么菜',
+    options: ['青菜', '胡萝卜', '肉'],
+  ),
+];
+
+const List<String> _dailyPlanTimeChoices = [
+  '06:00',
+  '06:30',
+  '07:00',
+  '07:30',
+  '08:00',
+  '10:30',
+  '11:00',
+  '11:30',
+  '12:00',
+  '13:00',
+  '13:30',
+  '14:00',
+  '14:30',
+  '17:30',
+  '18:00',
+  '18:30',
+  '19:00',
+  '20:00',
+];
+
+class _DailyPlanRowEdit {
+  _DailyPlanRowEdit(_DailyPlanPreset preset)
+      : time = preset.time,
+        ttsCtrl = TextEditingController(text: preset.tts),
+        optionCtrls = List.generate(
+          3,
+          (i) => TextEditingController(
+            text: i < preset.options.length ? preset.options[i] : '',
+          ),
+        );
+
+  String time;
+  final TextEditingController ttsCtrl;
+  final List<TextEditingController> optionCtrls;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'time': time,
+      'tts': ttsCtrl.text.trim(),
+      'options': optionCtrls
+          .map((c) => c.text.trim())
+          .where((s) => s.isNotEmpty)
+          .toList(),
+    };
+  }
+
+  void dispose() {
+    ttsCtrl.dispose();
+    for (final c in optionCtrls) {
+      c.dispose();
+    }
+  }
+}
 
 /// 孤独症模式家长壳：裁剪顶栏与菜单，三块主入口 + 足迹 / AI 报告。
 class AutismFamilyShell extends StatefulWidget {
@@ -47,32 +271,57 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   int _section = 0;
   List<Map<String, dynamic>> _pendingNeeds = const [];
   bool _loadingNeeds = false;
+  Timer? _needsPollTimer;
+  final Set<int> _lastPolledNeedIds = {};
+  bool _needsPollPrimed = false;
+  String? _childJustChoseBanner;
+  DateTime? _needsLastSyncedAt;
+  bool _needsPollInFlight = false;
+  Timer? _trainingEventsPollTimer;
+  int _lastTrainingEventId = 0;
+  bool _trainingEventsPrimed = false;
+  bool _trainingEventsInFlight = false;
+  String? _trainingEventBanner;
 
   int? _trainingSessionId;
   AutismTrainingPhase _trainingPhase = AutismTrainingPhase.parentSetup;
   Timer? _pollTimer;
   String _lastSessionState = '';
+  int _trainingSceneIndex = 0;
+  bool _loadingTrainingDraft = false;
+  bool _trainingPreparingImages = false;
+  bool _trainingImagesReady = false;
+  String _trainingImageStatus = '请先点击“应用”生成 5 个场景的 AI 图片。';
+  Map<String, Map<String, String?>> _preparedTrainingImages = const {};
+  final List<_TrainingSceneDraft> _trainingDrafts = _trainingScenePresets
+      .map(_TrainingSceneDraft.new)
+      .toList();
   final List<TextEditingController> _optionCtrls = List.generate(
-    3,
+    4,
     (_) => TextEditingController(),
   );
-  final TextEditingController _ttsIntroCtrl = TextEditingController(
-    text: '我们来选一个你更喜欢的东西吧。',
-  );
+  final TextEditingController _ttsIntroCtrl = TextEditingController();
+  final List<_DailyPlanRowEdit> _dailyPlanRows = _dailyPlanPresets
+      .map(_DailyPlanRowEdit.new)
+      .toList();
 
   String? _boundXiaozhiDeviceId;
 
   @override
   void initState() {
     super.initState();
-    _optionCtrls[0].text = '苹果';
-    _optionCtrls[1].text = '香蕉';
-    _optionCtrls[2].text = '橙子';
+    _loadTrainingDraft(_trainingSceneIndex);
+    _ttsIntroCtrl.addListener(_markTrainingDraftDirty);
+    for (final c in _optionCtrls) {
+      c.addListener(_markTrainingDraftDirty);
+    }
     _cloud = CloudService(serverHost: widget.serverIp)
       ..authToken = widget.authToken
       ..childId = widget.activeChildId;
     _refreshEspBindings();
-    _loadNeeds();
+    _pollNeedsOnce(showLoadingSpinner: true);
+    _startNeedsPolling();
+    _startTrainingEventsPolling();
   }
 
   @override
@@ -86,26 +335,238 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
         ..authToken = widget.authToken
         ..childId = widget.activeChildId;
       _stopPoll();
+      _stopNeedsPolling();
       _trainingSessionId = null;
       _trainingPhase = AutismTrainingPhase.parentSetup;
+      _needsPollPrimed = false;
+      _trainingEventsPrimed = false;
+      _lastTrainingEventId = 0;
+      _lastPolledNeedIds.clear();
+      _childJustChoseBanner = null;
+      _trainingEventBanner = null;
       _refreshEspBindings();
-      _loadNeeds();
+      _pollNeedsOnce(showLoadingSpinner: true);
+      _pollTrainingEventsOnce();
+      if (_section == 0) {
+        _startNeedsPolling();
+      }
     }
   }
 
   @override
   void dispose() {
     _stopPoll();
+    _stopNeedsPolling();
+    _stopTrainingEventsPolling();
     for (final c in _optionCtrls) {
       c.dispose();
     }
     _ttsIntroCtrl.dispose();
+    for (final row in _dailyPlanRows) {
+      row.dispose();
+    }
     super.dispose();
+  }
+
+  _TrainingScenePreset get _trainingPreset => _trainingScenePresets[_trainingSceneIndex];
+
+  void _saveCurrentTrainingDraft() {
+    final draft = _trainingDrafts[_trainingSceneIndex];
+    draft.ttsIntro = _ttsIntroCtrl.text.trim();
+    draft.options = _optionCtrls
+        .map((c) => c.text.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  void _loadTrainingDraft(int index) {
+    final draft = _trainingDrafts[index];
+    _loadingTrainingDraft = true;
+    _ttsIntroCtrl.text = draft.ttsIntro;
+    for (var i = 0; i < _optionCtrls.length; i++) {
+      _optionCtrls[i].text = i < draft.options.length ? draft.options[i] : '';
+    }
+    _loadingTrainingDraft = false;
+  }
+
+  void _markTrainingDraftDirty() {
+    if (_loadingTrainingDraft) return;
+    _saveCurrentTrainingDraft();
+    if (_trainingPreparingImages || !_trainingImagesReady) return;
+    setState(() {
+      _trainingImagesReady = false;
+      _preparedTrainingImages = const {};
+      _trainingImageStatus = '训练内容已修改，请重新点击“应用”生成 AI 图片。';
+    });
+  }
+
+  void _applyTrainingScenePreset(int index) {
+    final preset = _trainingScenePresets[index];
+    final draft = _trainingDrafts[index];
+    draft.ttsIntro = preset.ttsIntro;
+    draft.options = List<String>.from(preset.options);
+    _trainingImagesReady = false;
+    _preparedTrainingImages = const {};
+    _trainingImageStatus = '已恢复当前场景预设，请重新点击“应用”生成 AI 图片。';
+    _loadingTrainingDraft = true;
+    _ttsIntroCtrl.text = preset.ttsIntro;
+    for (var i = 0; i < _optionCtrls.length; i++) {
+      _optionCtrls[i].text = i < preset.options.length ? preset.options[i] : '';
+    }
+    _loadingTrainingDraft = false;
+  }
+
+  void _selectTrainingScene(int index) {
+    if (index == _trainingSceneIndex) return;
+    _saveCurrentTrainingDraft();
+    _stopPoll();
+    setState(() {
+      _trainingSceneIndex = index;
+      _trainingSessionId = null;
+      _trainingPhase = AutismTrainingPhase.parentSetup;
+      _lastSessionState = '';
+      _loadTrainingDraft(index);
+    });
   }
 
   void _stopPoll() {
     _pollTimer?.cancel();
     _pollTimer = null;
+  }
+
+  void _stopNeedsPolling() {
+    _needsPollTimer?.cancel();
+    _needsPollTimer = null;
+  }
+
+  void _stopTrainingEventsPolling() {
+    _trainingEventsPollTimer?.cancel();
+    _trainingEventsPollTimer = null;
+  }
+
+  void _startNeedsPolling() {
+    _stopNeedsPolling();
+    _needsPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollNeedsOnce(showLoadingSpinner: false);
+    });
+  }
+
+  void _startTrainingEventsPolling() {
+    _stopTrainingEventsPolling();
+    _trainingEventsPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollTrainingEventsOnce();
+    });
+    _pollTrainingEventsOnce();
+  }
+
+  static String _joinChildChoiceLabels(
+    List<Map<String, dynamic>> list,
+    Set<int> newIds,
+  ) {
+    final parts = <String>[];
+    for (final n in list) {
+      final id = (n['id'] as num).toInt();
+      if (!newIds.contains(id)) continue;
+      final lab = n['label']?.toString().trim() ?? '';
+      if (lab.isNotEmpty) {
+        parts.add(lab);
+      }
+    }
+    return parts.join('、');
+  }
+
+  /// 拉取待确认需求；在「孩子发起」页由定时器自动调用。检测到新条目时震动并更新横幅。
+  Future<void> _pollNeedsOnce({required bool showLoadingSpinner}) async {
+    if (!mounted) return;
+    if (_needsPollInFlight) {
+      return;
+    }
+    _needsPollInFlight = true;
+    if (showLoadingSpinner) {
+      setState(() => _loadingNeeds = true);
+    }
+    try {
+      final list = await _cloud.fetchAutismPendingNeeds(widget.activeChildId);
+      if (!mounted) return;
+
+      final ids = list.map((n) => (n['id'] as num).toInt()).toSet();
+      String? newBanner = _childJustChoseBanner;
+      bool vibrate = false;
+
+      if (_needsPollPrimed) {
+        final newIds = ids.difference(_lastPolledNeedIds);
+        if (newIds.isNotEmpty) {
+          vibrate = true;
+          final joined = _joinChildChoiceLabels(list, newIds);
+          newBanner = joined.isNotEmpty ? joined : '孩子有新的需求';
+        }
+      } else {
+        _needsPollPrimed = true;
+      }
+
+      _lastPolledNeedIds
+        ..clear()
+        ..addAll(ids);
+
+      if (vibrate) {
+        HapticFeedback.heavyImpact();
+      }
+
+      setState(() {
+        _pendingNeeds = list;
+        _loadingNeeds = false;
+        _needsLastSyncedAt = DateTime.now();
+        if (vibrate) {
+          _childJustChoseBanner = newBanner;
+        }
+      });
+    } finally {
+      _needsPollInFlight = false;
+    }
+  }
+
+  Future<void> _pollTrainingEventsOnce() async {
+    if (!mounted || _trainingEventsInFlight) return;
+    _trainingEventsInFlight = true;
+    try {
+      final list = await _cloud.fetchAutismTrainingEvents(
+        childIdToFetch: widget.activeChildId,
+        afterId: _lastTrainingEventId,
+      );
+      if (!mounted) return;
+      if (list.isEmpty) {
+        _trainingEventsPrimed = true;
+        return;
+      }
+      for (final e in list) {
+        final id = (e['id'] as num?)?.toInt() ?? 0;
+        if (id > _lastTrainingEventId) {
+          _lastTrainingEventId = id;
+        }
+      }
+      if (!_trainingEventsPrimed) {
+        _trainingEventsPrimed = true;
+        return;
+      }
+
+      final confirmed = list.where((e) => (e['phase'] ?? '').toString() == 'image_confirmed').toList();
+      if (confirmed.isEmpty) return;
+      final latest = confirmed.last;
+      final payload = Map<String, dynamic>.from((latest['payload'] as Map?) ?? const {});
+      final label = (payload['label'] ?? '').toString().trim();
+      final scene = (latest['scene'] ?? '').toString();
+      final slotTime = (payload['slot_time'] ?? '').toString().trim();
+      HapticFeedback.heavyImpact();
+      setState(() {
+        _trainingEventBanner = [
+          if (slotTime.isNotEmpty) slotTime,
+          scene == 'daily_plan' ? '日常计划' : '孩子训练',
+          label.isNotEmpty ? '孩子选择了：$label' : '孩子完成了一次图片确认',
+        ].join(' · ');
+      });
+    } finally {
+      _trainingEventsInFlight = false;
+    }
   }
 
   Future<void> _refreshEspBindings() async {
@@ -135,23 +596,16 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     return h;
   }
 
-  Future<void> _loadNeeds() async {
-    setState(() => _loadingNeeds = true);
-    final list = await _cloud.fetchAutismPendingNeeds(widget.activeChildId);
-    if (!mounted) return;
-    setState(() {
-      _pendingNeeds = list;
-      _loadingNeeds = false;
-    });
-  }
-
   Future<void> _confirmNeed(int id) async {
     final ok = await _cloud.confirmAutismNeed(widget.activeChildId, id);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(ok ? '已确认' : '确认失败，请稍后再试')),
     );
-    await _loadNeeds();
+    if (ok) {
+      setState(() => _childJustChoseBanner = null);
+    }
+    await _pollNeedsOnce(showLoadingSpinner: false);
   }
 
   void _startPollingIfNeeded(int sessionId) {
@@ -183,7 +637,71 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     }
   }
 
+  Future<void> _applyTrainingAssets() async {
+    _saveCurrentTrainingDraft();
+    final scenes = _trainingDrafts.map((d) => d.toJson()).toList();
+    final invalid = scenes.indexWhere((scene) {
+      final options = (scene['options'] as List?) ?? const [];
+      return options.isEmpty;
+    });
+    if (invalid >= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('请先填写“${_trainingDrafts[invalid].title}”的至少一个选项')),
+      );
+      return;
+    }
+
+    setState(() {
+      _trainingPreparingImages = true;
+      _trainingImagesReady = false;
+      _preparedTrainingImages = const {};
+      _trainingImageStatus = 'AI 图片生成中，请稍候…';
+    });
+
+    final res = await _cloud.prepareAutismTrainingAssets(
+      childIdToFetch: widget.activeChildId,
+      scenes: scenes,
+    );
+    if (!mounted) return;
+    if (res == null || res['status'] != 'ok') {
+      setState(() {
+        _trainingPreparingImages = false;
+        _trainingImagesReady = false;
+        _trainingImageStatus = 'AI 图片生成失败，请检查 GLM_API_KEY、网络或服务端日志后重试。';
+      });
+      return;
+    }
+
+    final rawImages = (res['images'] as Map?) ?? const {};
+    final parsed = <String, Map<String, String?>>{};
+    for (final entry in rawImages.entries) {
+      final sceneId = entry.key.toString();
+      final value = entry.value;
+      if (value is Map) {
+        parsed[sceneId] = value.map(
+          (k, v) => MapEntry(k.toString(), v?.toString()),
+        );
+      }
+    }
+    final count = (res['image_count'] as num?)?.toInt() ?? 0;
+    setState(() {
+      _preparedTrainingImages = parsed;
+      _trainingPreparingImages = false;
+      _trainingImagesReady = parsed.length == _trainingDrafts.length;
+      _trainingImageStatus = _trainingImagesReady
+          ? 'AI 图片已生成并存储，可下发到星星机器人。共 $count 张。'
+          : 'AI 图片生成不完整，请重试。';
+    });
+  }
+
   Future<void> _startTraining() async {
+    _saveCurrentTrainingDraft();
+    if (_trainingPreparingImages || !_trainingImagesReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先点击“应用”，等待 AI 图片全部生成完成')),
+      );
+      return;
+    }
     final options = _optionCtrls
         .map((c) => c.text.trim())
         .where((s) => s.isNotEmpty)
@@ -196,8 +714,9 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     }
     final res = await _cloud.startAutismTraining(
       childIdToFetch: widget.activeChildId,
-      sceneId: AutismTrainingSceneIds.preferenceChoice,
+      sceneId: _trainingPreset.sceneId,
       options: options,
+      images: _preparedTrainingImages[_trainingPreset.sceneId],
       followUp: false,
       ttsIntro: _ttsIntroCtrl.text.trim(),
     );
@@ -215,17 +734,32 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          '已排队下发（设备数：${(res['queued_devices'] as List?)?.length ?? 0}）',
+          '${_trainingPreset.title}已排队下发（设备数：${(res['queued_devices'] as List?)?.length ?? 0}）',
         ),
       ),
     );
   }
 
   Future<void> _postDailyPlan() async {
+    final slots = _dailyPlanRows.map((row) => row.toJson()).toList();
+    final invalidIndex = slots.indexWhere((slot) {
+      final tts = (slot['tts'] ?? '').toString();
+      final options = (slot['options'] as List?) ?? const [];
+      return tts.isEmpty || options.isEmpty;
+    });
+    if (invalidIndex >= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('第 ${invalidIndex + 1} 行需要填写话术和至少一个选项')),
+      );
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('正在生成图片并同步，可能需要一两分钟…')),
     );
-    final res = await _cloud.postAutismDailyPlan(widget.activeChildId);
+    final res = await _cloud.postAutismDailyPlan(
+      widget.activeChildId,
+      slots: slots,
+    );
     if (!mounted) return;
     if (res == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -485,13 +1019,51 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
           SegmentedButton<int>(
             segments: const [
               ButtonSegment(value: 0, label: Text('孩子发起'), icon: Icon(Icons.front_hand_outlined)),
-              ButtonSegment(value: 1, label: Text('训练'), icon: Icon(Icons.psychology_outlined)),
+              ButtonSegment(value: 1, label: Text('孩子训练'), icon: Icon(Icons.psychology_outlined)),
               ButtonSegment(value: 2, label: Text('日常计划'), icon: Icon(Icons.calendar_today_outlined)),
             ],
             selected: {_section},
-            onSelectionChanged: (s) => setState(() => _section = s.first),
+            onSelectionChanged: (s) {
+              final v = s.first;
+              setState(() => _section = v);
+              if (v == 0) {
+                _startNeedsPolling();
+                _pollNeedsOnce(showLoadingSpinner: _pendingNeeds.isEmpty);
+              } else {
+                _stopNeedsPolling();
+              }
+            },
           ),
           const SizedBox(height: 16),
+          if (_trainingEventBanner != null && _trainingEventBanner!.isNotEmpty) ...[
+            Material(
+              color: AppColors.coral.withValues(alpha: 0.13),
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.vibration_rounded, color: AppColors.coral),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _trainingEventBanner!,
+                        style: const TextStyle(fontWeight: FontWeight.w700, height: 1.35),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '关闭提示',
+                      onPressed: () => setState(() => _trainingEventBanner = null),
+                      icon: const Icon(Icons.close_rounded, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
           if (_section == 0) _buildChildInitiated(),
           if (_section == 1) _buildTraining(),
           if (_section == 2) _buildDailyPlan(),
@@ -511,26 +1083,60 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
             const SizedBox(height: 8),
             Text(
               _boundXiaozhiDeviceId != null
-                  ? '星星已绑定（$_boundXiaozhiDeviceId）。孩子在设备上摇晃并双击确认需求后，会在此列出待确认项。'
+                  ? '星星已绑定（$_boundXiaozhiDeviceId）。孩子在设备上选择并确认需求后，本页会自动更新，无需手动刷新。'
                   : '尚未检测到已绑定的星星机器人，请先在菜单中配网并绑定。',
               style: const TextStyle(height: 1.45, color: AppColors.muted),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Row(
               children: [
-                FilledButton.icon(
-                  onPressed: _loadingNeeds ? null : _loadNeeds,
-                  icon: _loadingNeeds
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('刷新待确认'),
+                Icon(Icons.sensors_rounded, size: 18, color: AppColors.sage.withValues(alpha: 0.9)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    _loadingNeeds
+                        ? '正在同步待确认需求…'
+                        : '自动监听中（约每 2 秒）${_needsLastSyncedAt != null ? ' · 上次 ${_needsLastSyncedAt!.hour.toString().padLeft(2, '0')}:${_needsLastSyncedAt!.minute.toString().padLeft(2, '0')}:${_needsLastSyncedAt!.second.toString().padLeft(2, '0')}' : ''}',
+                    style: TextStyle(fontSize: 12, color: AppColors.muted.withValues(alpha: 0.95)),
+                  ),
                 ),
+                if (_loadingNeeds)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
               ],
             ),
+            if (_childJustChoseBanner != null && _childJustChoseBanner!.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Material(
+                color: AppColors.sage.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.notifications_active_rounded, color: AppColors.sage.withValues(alpha: 0.95)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          '孩子选择了：$_childJustChoseBanner',
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, height: 1.35),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: '关闭提示',
+                        onPressed: () => setState(() => _childJustChoseBanner = null),
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             if (_pendingNeeds.isEmpty)
               const Text('暂无待确认需求', style: TextStyle(color: AppColors.muted))
@@ -556,32 +1162,158 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   }
 
   Widget _buildTraining() {
+    final preset = _trainingPreset;
+    final canStartTraining = _trainingImagesReady && !_trainingPreparingImages;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('家长开启训练', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            const Text('孩子训练', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const SizedBox(height: 8),
             const Text(
-              '首场景：偏好选择。填写选项后下发，星星会通过语音引导孩子；可在下方查看会话状态。',
+              '选择一个预设场景，家长可调整开场白和图片选项，然后下发到星星机器人。',
               style: TextStyle(height: 1.45, color: AppColors.muted),
             ),
             const SizedBox(height: 12),
-            const Text('开场白（可选）', style: TextStyle(fontWeight: FontWeight.w600)),
-            TextField(controller: _ttsIntroCtrl, maxLines: 2),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (var i = 0; i < _trainingScenePresets.length; i++) ...[
+                    ChoiceChip(
+                      label: Text(_trainingScenePresets[i].title),
+                      selected: _trainingSceneIndex == i,
+                      onSelected: (_) => _selectTrainingScene(i),
+                    ),
+                    if (i != _trainingScenePresets.length - 1) const SizedBox(width: 8),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Material(
+              color: AppColors.sage.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(14),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${preset.title}训练',
+                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(preset.subtitle, style: const TextStyle(color: AppColors.muted)),
+                    const SizedBox(height: 10),
+                    Text('目标：${preset.goal}', style: const TextStyle(height: 1.45)),
+                    const SizedBox(height: 10),
+                    const Text('预设流程', style: TextStyle(fontWeight: FontWeight.w700)),
+                    const SizedBox(height: 4),
+                    ...preset.flow.asMap().entries.map(
+                          (e) => Padding(
+                            padding: const EdgeInsets.only(bottom: 4),
+                            child: Text('${e.key + 1}. ${e.value}', style: const TextStyle(height: 1.35)),
+                          ),
+                        ),
+                    if (preset.parameters.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      const Text('可变参数', style: TextStyle(fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 4),
+                      ...preset.parameters.map(
+                        (p) => Text('• $p', style: const TextStyle(height: 1.35, color: AppColors.muted)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
             const SizedBox(height: 12),
-            const Text('选项（至少一项）', style: TextStyle(fontWeight: FontWeight.w600)),
-            ..._optionCtrls.map((c) => Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: TextField(controller: c, decoration: const InputDecoration(isDense: true)),
-                )),
+            const Text('开场白（可选）', style: TextStyle(fontWeight: FontWeight.w600)),
+            TextField(
+              controller: _ttsIntroCtrl,
+              enabled: !_trainingPreparingImages,
+              maxLines: 2,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Expanded(
+                  child: Text('图片选项（至少一项）', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                TextButton.icon(
+                  onPressed: _trainingPreparingImages
+                      ? null
+                      : () => setState(() => _applyTrainingScenePreset(_trainingSceneIndex)),
+                  icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                  label: const Text('恢复预设'),
+                ),
+              ],
+            ),
+            ..._optionCtrls.asMap().entries.map((e) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: TextField(
+                  controller: e.value,
+                  enabled: !_trainingPreparingImages,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    labelText: '选项 ${e.key + 1}',
+                    hintText: e.key < preset.options.length ? preset.options[e.key] : '可留空',
+                  ),
+                ),
+              );
+            }),
             const SizedBox(height: 8),
-            FilledButton(onPressed: _startTraining, child: const Text('下发到星星机器人')),
+            Material(
+              color: _trainingImagesReady
+                  ? AppColors.sage.withValues(alpha: 0.12)
+                  : AppColors.warning.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    if (_trainingPreparingImages)
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      Icon(
+                        _trainingImagesReady ? Icons.check_circle_rounded : Icons.auto_awesome_rounded,
+                        color: _trainingImagesReady ? AppColors.sage : AppColors.warning,
+                        size: 20,
+                      ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _trainingImageStatus,
+                        style: const TextStyle(height: 1.35),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _trainingPreparingImages ? null : _applyTrainingAssets,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: const Text('应用：先生成并存储 5 个场景图片'),
+            ),
+            const SizedBox(height: 8),
+            FilledButton.icon(
+              onPressed: canStartTraining ? _startTraining : null,
+              icon: const Icon(Icons.send_rounded),
+              label: Text('${preset.startButton}并下发到星星机器人'),
+            ),
             if (_trainingSessionId != null) ...[
               const SizedBox(height: 16),
-              Text('会话 #$_trainingSessionId · ${_trainingPhase.name} · $_lastSessionState'),
+              Text('${preset.title}会话 #$_trainingSessionId · ${_trainingPhase.name} · $_lastSessionState'),
               OutlinedButton(
                 onPressed: () {
                   _stopPoll();
@@ -607,14 +1339,91 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('日常计划（五条）', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            const Text('日常计划（五行可编辑）', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const SizedBox(height: 8),
             const Text(
-              '07:00 起床穿鞋 · 11:00 午饭选择 · 13:00 午睡 · 14:00 起床玩耍 · 18:00 晚饭菜品。\n'
-              '云端会为各选项调用智谱生图，并把完整计划 JSON 推入星星队列。',
+              '每一行可编辑时间、机器人要说的话和孩子可选择的图片选项。同步后云端会为每个选项生成 240×240 图片并下发星星机器人。',
               style: TextStyle(height: 1.45, color: AppColors.muted),
             ),
             const SizedBox(height: 16),
+            ..._dailyPlanRows.asMap().entries.map((entry) {
+              final index = entry.key;
+              final row = entry.value;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 14),
+                child: Material(
+                  color: AppColors.sage.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              '第 ${index + 1} 行',
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            const SizedBox(width: 12),
+                            SizedBox(
+                              width: 118,
+                              child: DropdownButtonFormField<String>(
+                                value: row.time,
+                                decoration: const InputDecoration(
+                                  isDense: true,
+                                  labelText: '时间',
+                                ),
+                                items: _dailyPlanTimeChoices
+                                    .map(
+                                      (t) => DropdownMenuItem<String>(
+                                        value: t,
+                                        child: Text(t),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (v) {
+                                  if (v == null) return;
+                                  setState(() => row.time = v);
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: row.ttsCtrl,
+                          maxLines: 2,
+                          decoration: const InputDecoration(
+                            isDense: true,
+                            labelText: '机器人话术',
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        const Text(
+                          '图片选项',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 6),
+                        ...row.optionCtrls.asMap().entries.map((optEntry) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: TextField(
+                              controller: optEntry.value,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                labelText: '选项 ${optEntry.key + 1}',
+                                hintText: optEntry.key == 2 ? '可留空' : null,
+                              ),
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
             FilledButton(
               onPressed: _postDailyPlan,
               child: const Text('同步到机器人'),

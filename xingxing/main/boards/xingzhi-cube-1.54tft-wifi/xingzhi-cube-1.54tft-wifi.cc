@@ -10,6 +10,7 @@
 #include "assets/lang_config.h"
 #include "power_manager.h"
 #include "action_cards.h"
+#include "adhd_remote_cmd.h"
 
 #include <esp_log.h>
 #include <esp_err.h>
@@ -111,6 +112,10 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
+            // 动态训练 / 日常计划图片显示时，BOOT 单击 = 确认当前图片并上报云端。
+            if (adhd_confirm_autism_choice()) {
+                return;
+            }
             // 本板无触摸屏：行动卡片模式下，BOOT 单击 = 确认并播报当前卡片
             //（切换下一张由摇晃完成）。LVGL 的触摸点击在此硬件上不会触发。
             if (ActionCards::GetInstance().IsActive()) {

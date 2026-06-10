@@ -21,3 +21,7 @@ void adhd_remote_cmd_start(void);
 
 /// POST /device/<id>/autism/need-event（需 CONFIG_ADHD_MONITOR_REMOTE_CMD 或 BYPASS_OTA）。
 bool adhd_post_autism_need_event(const char* card_slug, const char* label, const char* voice_text);
+
+/// 确认当前训练/日常计划动态图片选择，并上报 /device/<id>/autism/training-event。
+/// 返回 true 表示本次 BOOT/点击已被动态图片选择消费。
+bool adhd_confirm_autism_choice(void);

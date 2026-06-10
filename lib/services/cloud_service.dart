@@ -537,6 +537,7 @@ class CloudService {
     required int childIdToFetch,
     required String sceneId,
     List<String>? options,
+    Map<String, String?>? images,
     bool followUp = false,
     String ttsIntro = '',
   }) async {
@@ -548,6 +549,7 @@ class CloudService {
             body: json.encode({
               'scene_id': sceneId,
               'options': options ?? const <String>[],
+              if (images != null) 'images': images,
               'follow_up': followUp,
               'tts_intro': ttsIntro,
             }),
@@ -560,6 +562,30 @@ class CloudService {
       return json.decode(r.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('CloudService: autism training start error $e');
+      return null;
+    }
+  }
+
+  /// 预生成孩子训练五个场景的 AI 图片，只写云端缓存/存储，不下发机器人。
+  Future<Map<String, dynamic>?> prepareAutismTrainingAssets({
+    required int childIdToFetch,
+    required List<Map<String, dynamic>> scenes,
+  }) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/my/children/$childIdToFetch/autism/training/assets'),
+            headers: _authHeaders(),
+            body: json.encode({'scenes': scenes}),
+          )
+          .timeout(const Duration(seconds: 300));
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: autism training assets ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      return json.decode(r.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('CloudService: autism training assets error $e');
       return null;
     }
   }
@@ -589,13 +615,18 @@ class CloudService {
   }
 
   /// 五条日常计划：服务端智谱生图并入队下发设备。
-  Future<Map<String, dynamic>?> postAutismDailyPlan(int childIdToFetch) async {
+  Future<Map<String, dynamic>?> postAutismDailyPlan(
+    int childIdToFetch, {
+    List<Map<String, dynamic>>? slots,
+  }) async {
     try {
       final r = await http
           .post(
             Uri.parse('${_base()}/my/children/$childIdToFetch/autism/daily-plan'),
             headers: _authHeaders(),
-            body: '{}',
+            body: json.encode({
+              if (slots != null) 'slots': slots,
+            }),
           )
           .timeout(const Duration(seconds: 180));
       if (r.statusCode != 200) {
@@ -657,6 +688,32 @@ class CloudService {
     } catch (e) {
       debugPrint('CloudService: autism training event error $e');
       return false;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> fetchAutismTrainingEvents({
+    required int childIdToFetch,
+    int afterId = 0,
+  }) async {
+    try {
+      final r = await http
+          .get(
+            Uri.parse(
+              '${_base()}/my/children/$childIdToFetch/autism/events/training?after_id=$afterId',
+            ),
+            headers: _authHeaders(jsonBody: false),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: autism training events ${r.statusCode}: ${r.body}');
+        return const [];
+      }
+      final data = json.decode(r.body) as Map<String, dynamic>;
+      final list = (data['items'] as List?) ?? const [];
+      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+    } catch (e) {
+      debugPrint('CloudService: autism training events error $e');
+      return const [];
     }
   }
 }

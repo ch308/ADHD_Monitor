@@ -31,13 +31,16 @@
 #include <esp_http_client.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_mac.h>
+#include <ctime>
 #include <memory>
 #include <vector>
 
 #include "application.h"
 #include "board.h"
+#include "lvgl_display.h"
 #include "display/lvgl_display/lvgl_image.h"
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
 #include "adhd_prov_ble.h"
@@ -46,6 +49,37 @@
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 static const char* TAG = "adhd_cmd";
+
+struct AutismDailyPlanSlot {
+    int minute_of_day = -1;
+    std::string time_text;
+    std::string tts;
+    std::vector<std::string> option_labels;
+    std::vector<std::string> image_urls;
+    int last_fired_yday = -1;
+};
+
+struct AutismChoiceItem {
+    std::string label;
+    std::string image_url;
+};
+
+struct AutismChoiceContext {
+    bool active = false;
+    int current_index = -1;
+    int session_id = 0;
+    std::string scene;
+    std::string kind;
+    std::string source;
+    std::string slot_time;
+    std::vector<AutismChoiceItem> items;
+};
+
+static SemaphoreHandle_t g_daily_plan_mutex = nullptr;
+static TaskHandle_t g_daily_plan_task = nullptr;
+static std::vector<AutismDailyPlanSlot> g_daily_plan_slots;
+static SemaphoreHandle_t g_choice_mutex = nullptr;
+static AutismChoiceContext g_choice_context;
 #endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
@@ -128,6 +162,52 @@ static bool HttpPostJson(const std::string& url, const std::string& body) {
     return err == ESP_OK && status >= 200 && status < 300;
 }
 
+static void EnsureAutismChoiceMutex() {
+    if (g_choice_mutex == nullptr) {
+        g_choice_mutex = xSemaphoreCreateMutex();
+    }
+}
+
+static bool PostAutismTrainingChoiceEvent(const AutismChoiceContext& ctx, int index, const std::string& label) {
+    const std::string id = PathADeviceIdUpper();
+    if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
+        return false;
+    }
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        return false;
+    }
+    cJSON_AddStringToObject(root, "scene", ctx.scene.empty() ? "unknown" : ctx.scene.c_str());
+    cJSON_AddStringToObject(root, "phase", "image_confirmed");
+    if (ctx.session_id > 0) {
+        cJSON_AddNumberToObject(root, "session_id", ctx.session_id);
+    }
+    cJSON* payload = cJSON_CreateObject();
+    if (payload != nullptr) {
+        cJSON_AddStringToObject(payload, "kind", ctx.kind.c_str());
+        cJSON_AddStringToObject(payload, "source", ctx.source.c_str());
+        cJSON_AddStringToObject(payload, "slot_time", ctx.slot_time.c_str());
+        cJSON_AddStringToObject(payload, "label", label.c_str());
+        cJSON_AddNumberToObject(payload, "option_index", index);
+        cJSON_AddItemToObject(root, "payload", payload);
+    }
+    char* out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!out) {
+        return false;
+    }
+    std::string body(out);
+    cJSON_free(out);
+    std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
+                       std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/" + id +
+                       "/autism/training-event";
+    const bool ok = HttpPostJson(url, body);
+    if (!ok) {
+        ESP_LOGW(TAG, "autism training choice event POST failed");
+    }
+    return ok;
+}
+
 static bool DownloadAndShowPreviewImage(const std::string& url) {
     if (url.empty()) {
         return false;
@@ -175,9 +255,15 @@ static bool DownloadAndShowPreviewImage(const std::string& url) {
         heap_caps_free(data);
         return false;
     }
+    auto* lvgl = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
+    if (lvgl == nullptr) {
+        ESP_LOGW(TAG, "autism image: display is not LvglDisplay, skip preview");
+        heap_caps_free(data);
+        return false;
+    }
     try {
         auto image = std::make_unique<LvglAllocatedImage>(data, total_read);
-        Board::GetInstance().GetDisplay()->SetPreviewImage(std::move(image));
+        lvgl->SetPreviewImage(std::move(image));
         ESP_LOGI(TAG, "autism image shown bytes=%u", (unsigned)total_read);
         return true;
     } catch (...) {
@@ -185,6 +271,21 @@ static bool DownloadAndShowPreviewImage(const std::string& url) {
         heap_caps_free(data);
         return false;
     }
+}
+
+static int ParseHourMinuteToMinuteOfDay(const char* text) {
+    if (text == nullptr) {
+        return -1;
+    }
+    int hh = -1;
+    int mm = -1;
+    if (sscanf(text, "%d:%d", &hh, &mm) != 2) {
+        return -1;
+    }
+    if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+        return -1;
+    }
+    return hh * 60 + mm;
 }
 
 static void AutismImageSequenceTask(void* arg) {
@@ -199,6 +300,58 @@ static void AutismImageSequenceTask(void* arg) {
     }
     delete urls;
     vTaskDelete(nullptr);
+}
+
+static void AutismChoiceSequenceTask(void* arg) {
+    auto* ctx = static_cast<AutismChoiceContext*>(arg);
+    if (ctx == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    EnsureAutismChoiceMutex();
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        g_choice_context = *ctx;
+        g_choice_context.active = true;
+        g_choice_context.current_index = 0;
+        xSemaphoreGive(g_choice_mutex);
+    }
+    for (size_t i = 0; i < ctx->items.size(); ++i) {
+        if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+            g_choice_context.current_index = static_cast<int>(i);
+            xSemaphoreGive(g_choice_mutex);
+        }
+        DownloadAndShowPreviewImage(ctx->items[i].image_url);
+        vTaskDelay(pdMS_TO_TICKS(4500));
+    }
+    delete ctx;
+    vTaskDelete(nullptr);
+}
+
+static void StartAutismImageSequenceUrls(std::vector<std::string>* urls) {
+    if (urls == nullptr || urls->empty()) {
+        delete urls;
+        return;
+    }
+    ESP_LOGI(TAG, "autism image sequence start count=%u", (unsigned)urls->size());
+    BaseType_t tr = xTaskCreate(AutismImageSequenceTask, "autism_img", 8192, urls, 3, nullptr);
+    if (tr != pdPASS) {
+        ESP_LOGW(TAG, "autism_img task create failed");
+        delete urls;
+    }
+}
+
+static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
+    if (ctx == nullptr || ctx->items.empty()) {
+        delete ctx;
+        return;
+    }
+    ESP_LOGI(TAG, "autism choice sequence start scene=%s count=%u",
+             ctx->scene.c_str(), (unsigned)ctx->items.size());
+    BaseType_t tr = xTaskCreate(AutismChoiceSequenceTask, "autism_choice", 8192, ctx, 3, nullptr);
+    if (tr != pdPASS) {
+        ESP_LOGW(TAG, "autism_choice task create failed");
+        delete ctx;
+    }
 }
 
 static void StartAutismImageSequence(cJSON* images) {
@@ -216,11 +369,124 @@ static void StartAutismImageSequence(cJSON* images) {
         delete urls;
         return;
     }
-    ESP_LOGI(TAG, "autism image sequence start count=%u", (unsigned)urls->size());
-    BaseType_t tr = xTaskCreate(AutismImageSequenceTask, "autism_img", 8192, urls, 3, nullptr);
-    if (tr != pdPASS) {
-        ESP_LOGW(TAG, "autism_img task create failed");
-        delete urls;
+    StartAutismImageSequenceUrls(urls);
+}
+
+static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
+    if (!slot.image_urls.empty()) {
+        auto* ctx = new AutismChoiceContext();
+        ctx->scene = "daily_plan";
+        ctx->kind = "daily_plan";
+        ctx->source = "daily_plan";
+        ctx->slot_time = slot.time_text;
+        for (size_t i = 0; i < slot.image_urls.size(); ++i) {
+            AutismChoiceItem item;
+            item.image_url = slot.image_urls[i];
+            item.label = i < slot.option_labels.size() ? slot.option_labels[i] : "";
+            ctx->items.push_back(std::move(item));
+        }
+        StartAutismChoiceSequence(ctx);
+    }
+    const std::string line = slot.tts.empty()
+        ? std::string(reinterpret_cast<const char*>(u8"\u65f6\u95f4\u5230\u5566\uff0c\u6211\u4eec\u6765\u9009\u4e00\u9009\u5427"))
+        : slot.tts;
+    ESP_LOGI(TAG, "daily_plan fire %s images=%u", slot.time_text.c_str(), (unsigned)slot.image_urls.size());
+    Application::GetInstance().Schedule([line]() {
+        Application::GetInstance().WakeWordInvoke(line);
+    });
+}
+
+static void DailyPlanSchedulerTask(void*) {
+    while (true) {
+        time_t now = time(nullptr);
+        struct tm* tm_now = localtime(&now);
+        if (tm_now != nullptr && tm_now->tm_year >= 120) {
+            const int minute_now = tm_now->tm_hour * 60 + tm_now->tm_min;
+            std::vector<AutismDailyPlanSlot> to_fire;
+            if (g_daily_plan_mutex != nullptr && xSemaphoreTake(g_daily_plan_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+                for (auto& slot : g_daily_plan_slots) {
+                    if (slot.minute_of_day == minute_now && slot.last_fired_yday != tm_now->tm_yday) {
+                        slot.last_fired_yday = tm_now->tm_yday;
+                        to_fire.push_back(slot);
+                    }
+                }
+                xSemaphoreGive(g_daily_plan_mutex);
+            }
+            for (const auto& slot : to_fire) {
+                FireAutismDailyPlanSlot(slot);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(15000));
+    }
+}
+
+static void EnsureDailyPlanSchedulerStarted() {
+    if (g_daily_plan_mutex == nullptr) {
+        g_daily_plan_mutex = xSemaphoreCreateMutex();
+    }
+    if (g_daily_plan_task == nullptr) {
+        BaseType_t tr = xTaskCreate(DailyPlanSchedulerTask, "daily_plan", 8192, nullptr, 3, &g_daily_plan_task);
+        if (tr != pdPASS) {
+            ESP_LOGW(TAG, "daily_plan scheduler task create failed");
+            g_daily_plan_task = nullptr;
+        }
+    }
+}
+
+static void StoreAutismDailyPlan(cJSON* session) {
+    cJSON* slots = cJSON_GetObjectItem(session, "slots");
+    cJSON* images = cJSON_GetObjectItem(session, "images");
+    if (!cJSON_IsArray(slots)) {
+        ESP_LOGW(TAG, "daily_plan missing slots");
+        return;
+    }
+    std::vector<AutismDailyPlanSlot> parsed;
+    const int count = cJSON_GetArraySize(slots);
+    for (int i = 0; i < count; ++i) {
+        cJSON* item = cJSON_GetArrayItem(slots, i);
+        if (!cJSON_IsObject(item)) {
+            continue;
+        }
+        cJSON* time = cJSON_GetObjectItem(item, "time");
+        cJSON* tts = cJSON_GetObjectItem(item, "tts");
+        const char* time_text = cJSON_IsString(time) ? time->valuestring : "";
+        const int minute = ParseHourMinuteToMinuteOfDay(time_text);
+        if (minute < 0) {
+            ESP_LOGW(TAG, "daily_plan skip invalid time: %s", time_text ? time_text : "(null)");
+            continue;
+        }
+        AutismDailyPlanSlot slot;
+        slot.minute_of_day = minute;
+        slot.time_text = time_text ? time_text : "";
+        if (cJSON_IsString(tts) && tts->valuestring) {
+            slot.tts = tts->valuestring;
+        }
+        cJSON* options = cJSON_GetObjectItem(item, "options");
+        const int opt_count = cJSON_IsArray(options) ? cJSON_GetArraySize(options) : 4;
+        for (int j = 0; j < opt_count; ++j) {
+            char key[16];
+            snprintf(key, sizeof(key), "s%d_o%d", i, j);
+            cJSON* url = cJSON_IsObject(images) ? cJSON_GetObjectItem(images, key) : nullptr;
+            if (cJSON_IsString(url) && url->valuestring && strlen(url->valuestring) > 0) {
+                cJSON* opt = cJSON_IsArray(options) ? cJSON_GetArrayItem(options, j) : nullptr;
+                slot.option_labels.push_back(cJSON_IsString(opt) && opt->valuestring ? opt->valuestring : "");
+                slot.image_urls.push_back(url->valuestring);
+            }
+        }
+        parsed.push_back(std::move(slot));
+    }
+    if (parsed.empty()) {
+        ESP_LOGW(TAG, "daily_plan parsed no valid slots");
+        return;
+    }
+
+    EnsureDailyPlanSchedulerStarted();
+    if (g_daily_plan_mutex != nullptr && xSemaphoreTake(g_daily_plan_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        g_daily_plan_slots = std::move(parsed);
+        xSemaphoreGive(g_daily_plan_mutex);
+        ESP_LOGI(TAG, "daily_plan stored slots=%u; waiting for scheduled time", (unsigned)g_daily_plan_slots.size());
+    } else {
+        ESP_LOGW(TAG, "daily_plan store failed: mutex unavailable");
     }
 }
 
@@ -282,6 +548,37 @@ bool adhd_post_autism_need_event(const char* card_slug, const char* label, const
         ESP_LOGW(TAG, "autism need-event POST failed");
     }
     return ok;
+}
+
+bool adhd_confirm_autism_choice(void) {
+    EnsureAutismChoiceMutex();
+    AutismChoiceContext snapshot;
+    int idx = -1;
+    std::string label;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (g_choice_context.active &&
+            g_choice_context.current_index >= 0 &&
+            g_choice_context.current_index < static_cast<int>(g_choice_context.items.size())) {
+            snapshot = g_choice_context;
+            idx = g_choice_context.current_index;
+            label = g_choice_context.items[idx].label;
+            g_choice_context.active = false;
+        }
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (idx < 0) {
+        return false;
+    }
+    ESP_LOGI(TAG, "autism choice confirmed scene=%s idx=%d label=%s",
+             snapshot.scene.c_str(), idx, label.c_str());
+    (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
+    const std::string line = label.empty()
+        ? std::string(reinterpret_cast<const char*>(u8"\u597d\u7684\uff0c\u6211\u8bb0\u4f4f\u4e86"))
+        : std::string(reinterpret_cast<const char*>(u8"\u4f60\u9009\u62e9\u4e86")) + label;
+    Application::GetInstance().Schedule([line]() {
+        Application::GetInstance().WakeWordInvoke(line);
+    });
+    return true;
 }
 
 static void AutismTrainingAckTask(void* arg) {
@@ -364,14 +661,36 @@ static void HandleOneCommand(cJSON* root) {
         cJSON* kind = cJSON_GetObjectItem(session, "kind");
         const char* k = cJSON_IsString(kind) ? kind->valuestring : "";
         if (strcmp(k, "training_start") == 0) {
-            StartAutismImageSequence(cJSON_GetObjectItem(session, "images"));
+            cJSON* sidn = cJSON_GetObjectItem(session, "session_id");
+            const int sid = cJSON_IsNumber(sidn) ? sidn->valueint : 0;
+            cJSON* scene = cJSON_GetObjectItem(session, "scene_id");
+            cJSON* options = cJSON_GetObjectItem(session, "options");
+            cJSON* images = cJSON_GetObjectItem(session, "images");
+            auto* ctx = new AutismChoiceContext();
+            ctx->scene = cJSON_IsString(scene) && scene->valuestring ? scene->valuestring : "training";
+            ctx->kind = "training_start";
+            ctx->source = "child_training";
+            ctx->session_id = sid;
+            const int opt_count = cJSON_IsArray(options) ? cJSON_GetArraySize(options) : 0;
+            for (int i = 0; i < opt_count; ++i) {
+                char key[16];
+                snprintf(key, sizeof(key), "o%d", i);
+                cJSON* url = cJSON_IsObject(images) ? cJSON_GetObjectItem(images, key) : nullptr;
+                if (!cJSON_IsString(url) || !url->valuestring || strlen(url->valuestring) == 0) {
+                    continue;
+                }
+                cJSON* opt = cJSON_GetArrayItem(options, i);
+                AutismChoiceItem item;
+                item.label = cJSON_IsString(opt) && opt->valuestring ? opt->valuestring : "";
+                item.image_url = url->valuestring;
+                ctx->items.push_back(std::move(item));
+            }
+            StartAutismChoiceSequence(ctx);
             cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
             std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
             if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
                 line = tts->valuestring;
             }
-            cJSON* sidn = cJSON_GetObjectItem(session, "session_id");
-            const int sid = cJSON_IsNumber(sidn) ? sidn->valueint : 0;
             Application::GetInstance().Schedule([line]() {
                 Application::GetInstance().WakeWordInvoke(line);
             });
@@ -383,21 +702,7 @@ static void HandleOneCommand(cJSON* root) {
                 }
             }
         } else if (strcmp(k, "daily_plan") == 0) {
-            StartAutismImageSequence(cJSON_GetObjectItem(session, "images"));
-            cJSON* slots = cJSON_GetObjectItem(session, "slots");
-            std::string line(reinterpret_cast<const char*>(
-                u8"\u4eca\u5929\u7684\u5b89\u6392\u5df2\u540c\u6b65\uff0c\u6211\u4eec\u4e00\u8d77\u770b\u770b\u5427"));
-            if (cJSON_IsArray(slots) && cJSON_GetArraySize(slots) > 0) {
-                cJSON* first = cJSON_GetArrayItem(slots, 0);
-                cJSON* tt = cJSON_GetObjectItem(first, "tts");
-                if (cJSON_IsString(tt) && tt->valuestring && strlen(tt->valuestring) > 0) {
-                    line = tt->valuestring;
-                }
-            }
-            ESP_LOGI(TAG, "autism_session daily_plan → WakeWordInvoke len=%u", (unsigned)line.size());
-            Application::GetInstance().Schedule([line]() {
-                Application::GetInstance().WakeWordInvoke(line);
-            });
+            StoreAutismDailyPlan(session);
         } else {
             ESP_LOGW(TAG, "autism_session: unknown kind %s", k);
         }
@@ -519,6 +824,9 @@ void adhd_remote_cmd_start(void) {
 void adhd_remote_cmd_announce_sync_once(void) {}
 void adhd_remote_cmd_start(void) {}
 bool adhd_post_autism_need_event(const char*, const char*, const char*) {
+    return false;
+}
+bool adhd_confirm_autism_choice(void) {
     return false;
 }
 

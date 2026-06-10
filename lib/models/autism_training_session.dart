@@ -15,6 +15,9 @@ enum AutismTrainingPhase {
 
 /// 与 Flask `scene_id` 对齐的场景标识。
 abstract final class AutismTrainingSceneIds {
+  static const emotionExpression = 'emotion_expression';
+  static const needExpression = 'need_expression';
+  static const socialResponse = 'social_response';
   static const preferenceChoice = 'preference_choice';
   static const helpRequest = 'help_request';
 }
