@@ -9,6 +9,7 @@
 #include <font_awesome.h>
 #include <esp_log.h>
 #include <esp_err.h>
+#include <esp_timer.h>
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
 #include <cstring>
@@ -19,6 +20,37 @@
 #include <sdkconfig.h>
 
 #define TAG "LcdDisplay"
+
+namespace {
+
+// Two taps within this window count as "double tap" to confirm an action card.
+constexpr int64_t kActionCardDoubleTapWindowUs = 450000;
+
+}  // namespace
+
+void LcdDisplay::ActionImageTapEvent(lv_event_t* e) {
+    if (lv_event_get_code(e) != LV_EVENT_CLICKED) {
+        return;
+    }
+    auto* self = static_cast<LcdDisplay*>(lv_event_get_user_data(e));
+    if (self == nullptr || self->action_card_confirm_cb_ == nullptr) {
+        return;
+    }
+    const int64_t now = esp_timer_get_time();
+    if (self->last_action_image_tap_us_ != 0 &&
+        (now - self->last_action_image_tap_us_) <= kActionCardDoubleTapWindowUs) {
+        self->last_action_image_tap_us_ = 0;
+        self->action_card_confirm_cb_(self->action_card_confirm_user_);
+    } else {
+        self->last_action_image_tap_us_ = now;
+    }
+}
+
+void LcdDisplay::SetActionCardConfirmCallback(Display::ActionCardConfirmCallback cb, void* user_data) {
+    action_card_confirm_cb_ = cb;
+    action_card_confirm_user_ = user_data;
+    last_action_image_tap_us_ = 0;
+}
 
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
@@ -1379,6 +1411,8 @@ void LcdDisplay::ShowFullscreenImage(const lv_image_dsc_t* image) {
         lv_obj_remove_style_all(action_image_);
         lv_obj_set_size(action_image_, width_, height_);
         lv_obj_align(action_image_, LV_ALIGN_CENTER, 0, 0);
+        lv_obj_add_flag(action_image_, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(action_image_, ActionImageTapEvent, LV_EVENT_CLICKED, this);
     }
     lv_image_set_src(action_image_, image);
     // 256 == 1.0x in LVGL v9. Pictures are already screen-sized, so this is a
@@ -1395,4 +1429,5 @@ void LcdDisplay::HideFullscreenImage() {
     if (action_image_ != nullptr) {
         lv_obj_add_flag(action_image_, LV_OBJ_FLAG_HIDDEN);
     }
+    last_action_image_tap_us_ = 0;
 }

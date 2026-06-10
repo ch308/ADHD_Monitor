@@ -9,6 +9,7 @@
 #include <font_emoji.h>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 
 #define PREVIEW_IMAGE_DURATION_MS 5000
@@ -28,6 +29,10 @@ protected:
     lv_obj_t* bottom_bar_ = nullptr;
     lv_obj_t* preview_image_ = nullptr;
     lv_obj_t* action_image_ = nullptr;
+    Display::ActionCardConfirmCallback action_card_confirm_cb_ = nullptr;
+    void* action_card_confirm_user_ = nullptr;
+    int64_t last_action_image_tap_us_ = 0;
+    static void ActionImageTapEvent(lv_event_t* e);
     lv_obj_t* emoji_label_ = nullptr;
     lv_obj_t* emoji_image_ = nullptr;
     std::unique_ptr<LvglGif> gif_controller_ = nullptr;
@@ -53,6 +58,8 @@ public:
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void ShowFullscreenImage(const lv_image_dsc_t* image) override;
     virtual void HideFullscreenImage() override;
+    void SetActionCardConfirmCallback(Display::ActionCardConfirmCallback cb,
+                                      void* user_data) override;
     virtual void SetupUI() override;
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;

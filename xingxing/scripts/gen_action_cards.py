@@ -2,15 +2,16 @@
 """Generate firmware assets for the "action cards" feature.
 
 The feature shows ten 240x240 pictures (one per daily routine action) embedded
-in the firmware as RGB565 LVGL C arrays. One second after a picture appears the
-device announces its Chinese name with an offline Ogg/Opus clip played through
-the existing AudioService::PlaySound().
+in the firmware as RGB565 LVGL C arrays. After the child double-taps the
+picture to confirm, the device plays an offline Ogg/Opus clip: the spoken
+sentence "妈妈，我要" plus the action label (e.g. 起床), via
+AudioService::PlaySound().
 
 This script produces three kinds of output:
 
   1. RGB565 LVGL C arrays   -> main/action_cards/images/<slug>.c
   2. Ogg/Opus voice clips    -> main/assets/locales/zh-CN/act_<slug>.ogg
-     (so the existing gen_lang.py picks them up as Lang::Sounds::OGG_ACT_<SLUG>)
+     (TTS text: "妈妈，我要" + Chinese label; gen_lang.py -> Lang::Sounds::OGG_ACT_<SLUG>)
   3. A manifest header       -> main/action_cards/action_cards_generated.h
      (the table consumed by action_cards.cc; flips ACTION_CARDS_HAVE_AUDIO to 1
       only once every voice clip exists, so the project always builds)
@@ -166,8 +167,9 @@ def generate_audio():
         for cn_name, slug, _png in ACTIONS:
             mp3_path = os.path.join(tmp_dir, slug + ".mp3")
             ogg_path = os.path.join(AUDIO_OUT_DIR, "act_%s.ogg" % slug)
-            log("TTS '%s' -> %s" % (cn_name, os.path.basename(ogg_path)))
-            asyncio.run(synth(cn_name, mp3_path))
+            spoken = "妈妈，我要%s" % cn_name
+            log("TTS '%s' -> %s" % (spoken, os.path.basename(ogg_path)))
+            asyncio.run(synth(spoken, mp3_path))
             # Match the project's mp3_to_ogg.sh format exactly.
             subprocess.check_call([
                 ffmpeg, "-y", "-i", mp3_path,
@@ -216,7 +218,7 @@ def write_manifest():
     lines.append("    const lv_image_dsc_t* image;  // 240x240 RGB565 picture")
     lines.append("    const char* name;             // Chinese name, no extension")
     lines.append("#if ACTION_CARDS_HAVE_AUDIO")
-    lines.append("    std::string_view sound;       // offline Ogg/Opus name clip")
+    lines.append("    std::string_view sound;       // offline Ogg: 妈妈，我要 + name")
     lines.append("#endif")
     lines.append("};")
     lines.append("")

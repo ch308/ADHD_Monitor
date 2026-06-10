@@ -31,8 +31,21 @@
 #define MPU6050_REG_ACCEL_XOUT_H 0x3B
 #define MPU6050_REG_PWR_MGMT_1 0x6B
 #define MPU6050_REG_WHO_AM_I 0x75
-#define MPU6050_SHAKE_DELTA_THRESHOLD 16000
-#define MPU6050_SHAKE_COOLDOWN_US 800000
+// One motion burst must exceed this (sum of |dax|+|day|+|daz| per 50 ms sample).
+// Raised so small bumps do not count; still need two bursts (see shake_pair_* below).
+#define MPU6050_SHAKE_DELTA_THRESHOLD 24000
+// After a successful switch, ignore starting a new two-shake sequence for this long.
+#define MPU6050_SHAKE_COOLDOWN_US 600000
+// Two-shake: first burst, then a quiet sample, then second burst within this window.
+#define MPU6050_SHAKE_QUIET_THRESHOLD 10000
+#define MPU6050_SHAKE_PAIR_MAX_US 1500000
+// Second burst must be at least this long after we see "quiet" following the first burst.
+#define MPU6050_SHAKE_PAIR_SECOND_MIN_US 120000
+// Double knock: stronger impulse than shake, then quiet, then second impulse (no touch panel).
+#define MPU6050_KNOCK_DELTA_THRESHOLD 28000
+#define MPU6050_KNOCK_QUIET_THRESHOLD 12000
+#define MPU6050_DOUBLE_KNOCK_MIN_US 100000
+#define MPU6050_DOUBLE_KNOCK_MAX_US 550000
 
 class XINGZHI_CUBE_1_54TFT_WIFI : public WifiBoard {
 private:
@@ -56,6 +69,8 @@ private:
     int16_t mpu6050_initial_az_ = 0;
     bool mpu6050_initial_accel_valid_ = false;
     TaskHandle_t mpu6050_task_ = nullptr;
+    int mpu_dk_state_ = 0;
+    int64_t mpu_dk_t0_us_ = 0;
 
     void InitializePowerManager() {
         power_manager_ = new PowerManager(GPIO_NUM_38);
@@ -354,7 +369,7 @@ private:
     void ShowMpu6050ValidationResult() {
         char message[96];
         if (mpu6050_ready_) {
-            snprintf(message, sizeof(message), "MPU6050 OK\naddr=0x%02X WHO=0x%02X\nshake to switch",
+            snprintf(message, sizeof(message), "MPU6050 OK\naddr=0x%02X WHO=0x%02X\n摇两下换图 敲两下确认",
                      mpu6050_addr_, mpu6050_who_am_i_);
         } else {
             snprintf(message, sizeof(message), "MPU6050 FAIL\nSDA=12 SCL=11\ncheck wiring: %s",
@@ -374,6 +389,9 @@ private:
             int16_t last_ay = 0;
             int16_t last_az = 0;
             int64_t last_switch_us = 0;
+            int shake_pair_state = 0;
+            int64_t shake_pair_t0_us = 0;
+            int64_t shake_pair_arm_us = 0;
 
             if (!board->Mpu6050ReadAccel(last_ax, last_ay, last_az)) {
                 board->mpu6050_task_ = nullptr;
@@ -399,22 +417,81 @@ private:
                 last_az = az;
 
                 int64_t now_us = esp_timer_get_time();
-                if (delta < MPU6050_SHAKE_DELTA_THRESHOLD ||
-                    now_us - last_switch_us < MPU6050_SHAKE_COOLDOWN_US) {
+
+                auto& cards = ActionCards::GetInstance();
+
+                // Double knock on the case (MPU6050) to confirm the current card when
+                // action cards are active — works without a touch panel.
+                if (board->mpu6050_ready_ && cards.IsActive()) {
+                    if (board->mpu_dk_state_ == 0) {
+                        if (delta >= MPU6050_KNOCK_DELTA_THRESHOLD) {
+                            board->mpu_dk_state_ = 1;
+                            board->mpu_dk_t0_us_ = now_us;
+                        }
+                    } else if (board->mpu_dk_state_ == 1) {
+                        if (now_us - board->mpu_dk_t0_us_ > MPU6050_DOUBLE_KNOCK_MAX_US) {
+                            board->mpu_dk_state_ = 0;
+                        } else if (delta < MPU6050_KNOCK_QUIET_THRESHOLD) {
+                            board->mpu_dk_state_ = 2;
+                        }
+                    } else {
+                        if (now_us - board->mpu_dk_t0_us_ > MPU6050_DOUBLE_KNOCK_MAX_US) {
+                            board->mpu_dk_state_ = 0;
+                        } else if (delta >= MPU6050_KNOCK_DELTA_THRESHOLD &&
+                                   (now_us - board->mpu_dk_t0_us_) >= MPU6050_DOUBLE_KNOCK_MIN_US) {
+                            board->power_save_timer_->WakeUp();
+                            cards.ConfirmSelection();
+                            board->GetDisplay()->ShowNotification("敲两下 已确认", 900);
+                            ESP_LOGI(TAG, "MPU6050 double knock confirm, delta=%d", delta);
+                            last_switch_us = now_us;
+                            board->mpu_dk_state_ = 0;
+                            continue;
+                        }
+                    }
+                } else {
+                    board->mpu_dk_state_ = 0;
+                }
+
+                if (board->mpu_dk_state_ != 0) {
+                    shake_pair_state = 0;
                     continue;
                 }
 
-                last_switch_us = now_us;
-                board->power_save_timer_->WakeUp();
-                auto& cards = ActionCards::GetInstance();
-                if (cards.IsActive()) {
-                    cards.Next();
-                } else {
-                    cards.Toggle();
+                if (now_us - last_switch_us < MPU6050_SHAKE_COOLDOWN_US) {
+                    continue;
                 }
-                board->GetDisplay()->ShowNotification("MPU6050 SHAKE", 1000);
-                ESP_LOGI(TAG, "MPU6050 shake detected, delta=%d accel=(%d,%d,%d)",
-                         delta, ax, ay, az);
+
+                // Two distinct shake motions (burst -> quiet -> burst) before switching.
+                if (shake_pair_state == 0) {
+                    if (delta >= MPU6050_SHAKE_DELTA_THRESHOLD) {
+                        shake_pair_state = 1;
+                        shake_pair_t0_us = now_us;
+                    }
+                } else if (shake_pair_state == 1) {
+                    if (now_us - shake_pair_t0_us > MPU6050_SHAKE_PAIR_MAX_US) {
+                        shake_pair_state = 0;
+                    } else if (delta < MPU6050_SHAKE_QUIET_THRESHOLD) {
+                        shake_pair_state = 2;
+                        shake_pair_arm_us = now_us;
+                    }
+                } else {
+                    if (now_us - shake_pair_t0_us > MPU6050_SHAKE_PAIR_MAX_US) {
+                        shake_pair_state = 0;
+                    } else if (delta >= MPU6050_SHAKE_DELTA_THRESHOLD &&
+                               (now_us - shake_pair_arm_us) >= MPU6050_SHAKE_PAIR_SECOND_MIN_US) {
+                        last_switch_us = now_us;
+                        shake_pair_state = 0;
+                        board->power_save_timer_->WakeUp();
+                        if (cards.IsActive()) {
+                            cards.Next();
+                        } else {
+                            cards.Toggle();
+                        }
+                        board->GetDisplay()->ShowNotification("MPU6050 摇两下", 1000);
+                        ESP_LOGI(TAG, "MPU6050 double-shake switch, delta=%d accel=(%d,%d,%d)",
+                                 delta, ax, ay, az);
+                    }
+                }
             }
         }, "mpu6050", 4096, this, 4, &mpu6050_task_);
     }

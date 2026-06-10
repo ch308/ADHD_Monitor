@@ -1,12 +1,11 @@
 #ifndef ACTION_CARDS_H
 #define ACTION_CARDS_H
 
-#include <esp_timer.h>
-
 // Daily-routine "action cards": ten fullscreen 240x240 pictures embedded in the
-// firmware as RGB565 C arrays. Each picture is shown, then one second later its
-// Chinese name is announced with an offline Ogg/Opus clip via
-// AudioService::PlaySound(). The user steps to the next picture with a button.
+// firmware as RGB565 C arrays. The user advances with shake or button; confirming
+// the current card (double-tap on touch LCD if present, or MPU6050 double knock)
+// plays an offline Ogg/Opus clip ("妈妈，我要" + the card's Chinese label) via
+// AudioService::PlaySound().
 //
 // Assets are produced by scripts/gen_action_cards.py (pictures + voice clips +
 // the action_cards/action_cards_generated.h table). Until the voice clips are
@@ -21,18 +20,20 @@ public:
     void Next();
     bool IsActive() const { return active_; }
 
+    // Play the confirmation voice for the current card (e.g. MPU6050 double knock).
+    void ConfirmSelection();
+
 private:
     ActionCards() = default;
     ActionCards(const ActionCards&) = delete;
     ActionCards& operator=(const ActionCards&) = delete;
 
-    void EnsureTimer();
+    static void ConfirmCallbackThunk(void* user_data);
     void ShowCurrent();
     void Announce();
 
     bool active_ = false;
     int index_ = 0;
-    esp_timer_handle_t announce_timer_ = nullptr;
 };
 
 #endif // ACTION_CARDS_H
