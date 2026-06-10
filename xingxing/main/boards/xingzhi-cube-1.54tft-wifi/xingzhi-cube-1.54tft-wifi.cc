@@ -464,6 +464,15 @@ public:
                     break;
                 case WifiEvent::Connected:
                     OnNetworkEvent(NetworkEvent::Connected, data);
+                    // 只有网络真正连上后才进入行动卡片；否则保持配网/连接界面。
+                    xTaskCreate([](void*) {
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                        auto& cards = ActionCards::GetInstance();
+                        if (!cards.IsActive()) {
+                            cards.Toggle();
+                        }
+                        vTaskDelete(nullptr);
+                    }, "show_cards", 3072, nullptr, 2, nullptr);
                     break;
                 case WifiEvent::Disconnected:
                     OnNetworkEvent(NetworkEvent::Disconnected);
@@ -477,15 +486,8 @@ public:
             }
         });
 
-        ESP_LOGI(TAG, "Skipping automatic WiFi provisioning; showing action cards by default");
-        xTaskCreate([](void*) {
-            vTaskDelay(pdMS_TO_TICKS(300));
-            auto& cards = ActionCards::GetInstance();
-            if (!cards.IsActive()) {
-                cards.Toggle();
-            }
-            vTaskDelete(nullptr);
-        }, "show_cards", 3072, nullptr, 2, nullptr);
+        ESP_LOGI(TAG, "Starting WiFi first; action cards will show after WiFi connected");
+        TryWifiConnect();
         xTaskCreate([](void* arg) {
             auto* board = static_cast<XINGZHI_CUBE_1_54TFT_WIFI*>(arg);
             vTaskDelay(pdMS_TO_TICKS(800));

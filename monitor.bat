@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
-rem Legacy name: monitor the xiaozhi star robot from the repository root.
+rem Monitor the xingxing star robot from the repository root.
 set "SCRIPT_NAME=monitor"
 set "REPO_ROOT=%~dp0"
 if "%REPO_ROOT:~-1%"=="\" set "REPO_ROOT=%REPO_ROOT:~0,-1%"
-set "PROJECT_DIR=%REPO_ROOT%\xiaozhi-esp32-2.2.4"
+set "PROJECT_DIR=%REPO_ROOT%\xingxing"
 set "DEFAULT_PORT=COM5"
 
 set "HAS_PORT="
