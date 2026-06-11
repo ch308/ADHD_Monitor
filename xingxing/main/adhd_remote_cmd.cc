@@ -41,6 +41,7 @@
 
 #include "application.h"
 #include "board.h"
+#include "action_cards.h"
 #include "lvgl_display.h"
 #include "display/lvgl_display/lvgl_image.h"
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
@@ -166,6 +167,14 @@ static bool HttpPostJson(const std::string& url, const std::string& body) {
 static void EnsureAutismChoiceMutex() {
     if (g_choice_mutex == nullptr) {
         g_choice_mutex = xSemaphoreCreateMutex();
+    }
+}
+
+/** 行动卡片全屏层在 preview_image_ 之上，不退出则训练图永远被挡住。 */
+static void ExitActionCardsIfCoveringPreview() {
+    if (ActionCards::GetInstance().IsActive()) {
+        ESP_LOGI(TAG, "leaving action cards (fullscreen was covering preview)");
+        ActionCards::GetInstance().Toggle();
     }
 }
 
@@ -308,6 +317,7 @@ static bool DownloadAndShowPreviewImage(const std::string& url) {
         ESP_LOGI(TAG, "autism image head %02x%02x%02x%02x (expect 89504e47 for PNG)",
                  u[0], u[1], u[2], u[3]);
     }
+    ExitActionCardsIfCoveringPreview();
     auto* lvgl = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
     if (lvgl == nullptr) {
         ESP_LOGW(TAG, "autism image: display is not LvglDisplay, skip preview");
@@ -409,6 +419,7 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
 
 
 static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
+    ExitActionCardsIfCoveringPreview();
     if (!slot.image_urls.empty()) {
         auto* ctx = new AutismChoiceContext();
         ctx->scene = "daily_plan";
@@ -697,6 +708,7 @@ static void HandleOneCommand(cJSON* root) {
         cJSON* kind = cJSON_GetObjectItem(session, "kind");
         const char* k = cJSON_IsString(kind) ? kind->valuestring : "";
         if (strcmp(k, "training_start") == 0) {
+            ExitActionCardsIfCoveringPreview();
             cJSON* sidn = cJSON_GetObjectItem(session, "session_id");
             const int sid = cJSON_IsNumber(sidn) ? sidn->valueint : 0;
             cJSON* scene = cJSON_GetObjectItem(session, "scene_id");
