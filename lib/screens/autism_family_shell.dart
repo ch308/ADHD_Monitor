@@ -292,7 +292,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   bool _trainingPreparingImages = false;
   bool _trainingImagesReady = false;
   Timer? _trainingAssetCheckTimer;
-  String _trainingImageStatus = '正在检查云端是否已有训练图片…';
+  String _trainingImageStatus = '正在检查云端是否已有当前场景图片…';
   Map<String, Map<String, String?>> _preparedTrainingImages = const {};
   final List<_TrainingSceneDraft> _trainingDrafts = _trainingScenePresets
       .map(_TrainingSceneDraft.new)
@@ -355,7 +355,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       _trainingPreparingImages = false;
       _trainingImagesReady = false;
       _preparedTrainingImages = const {};
-      _trainingImageStatus = '正在检查云端是否已有训练图片…';
+      _trainingImageStatus = '正在检查云端是否已有当前场景图片…';
       _needsPollPrimed = false;
       _trainingEventsPrimed = false;
       _lastTrainingEventId = 0;
@@ -419,10 +419,12 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     if (_loadingTrainingDraft) return;
     _saveCurrentTrainingDraft();
     if (_trainingPreparingImages) return;
+    final nextImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages)
+      ..remove(_trainingPreset.sceneId);
     setState(() {
       _trainingImagesReady = false;
-      _preparedTrainingImages = const {};
-      _trainingImageStatus = '训练内容已修改，正在检查云端是否已有图片…';
+      _preparedTrainingImages = nextImages;
+      _trainingImageStatus = '当前场景内容已修改，正在检查云端是否已有图片…';
     });
     _scheduleTrainingAssetCacheCheck();
   }
@@ -433,7 +435,8 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     draft.ttsIntro = preset.ttsIntro;
     draft.options = List<String>.from(preset.options);
     _trainingImagesReady = false;
-    _preparedTrainingImages = const {};
+    _preparedTrainingImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages)
+      ..remove(preset.sceneId);
     _trainingImageStatus = '已恢复当前场景预设，正在检查云端是否已有图片…';
     _loadingTrainingDraft = true;
     _ttsIntroCtrl.text = preset.ttsIntro;
@@ -455,28 +458,30 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   Future<void> _checkTrainingAssetsCached() async {
     if (!mounted || _trainingPreparingImages) return;
     _saveCurrentTrainingDraft();
-    final scenes = _trainingDrafts.map((d) => d.toJson()).toList();
-    final invalid = scenes.any((scene) => ((scene['options'] as List?) ?? const []).isEmpty);
-    if (invalid) {
+    final scene = _trainingDrafts[_trainingSceneIndex].toJson();
+    final options = (scene['options'] as List?) ?? const [];
+    if (options.isEmpty) {
       if (!mounted) return;
       setState(() {
         _trainingImagesReady = false;
-        _preparedTrainingImages = const {};
-        _trainingImageStatus = '请先填写每个训练场景的至少一个选项。';
+        _preparedTrainingImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages)
+          ..remove(_trainingPreset.sceneId);
+        _trainingImageStatus = '请先填写当前训练场景的至少一个选项。';
       });
       return;
     }
 
     final res = await _cloud.checkAutismTrainingAssets(
       childIdToFetch: widget.activeChildId,
-      scenes: scenes,
+      scenes: [scene],
     );
     if (!mounted || _trainingPreparingImages) return;
     if (res == null || res['status'] != 'ok') {
       setState(() {
         _trainingImagesReady = false;
-        _preparedTrainingImages = const {};
-        _trainingImageStatus = '无法检查云端图片缓存，请点击“应用”生成图片。';
+        _preparedTrainingImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages)
+          ..remove(_trainingPreset.sceneId);
+        _trainingImageStatus = '无法检查当前场景云端图片缓存，请点击“应用”生成图片。';
       });
       return;
     }
@@ -492,12 +497,18 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     final ready = res['all_ready'] == true;
     final readyCount = (res['ready_count'] as num?)?.toInt() ?? 0;
     final expectedCount = (res['expected_count'] as num?)?.toInt() ?? 0;
+    final nextImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages);
+    if (ready) {
+      nextImages.addAll(parsed);
+    } else {
+      nextImages.remove(_trainingPreset.sceneId);
+    }
     setState(() {
       _trainingImagesReady = ready;
-      _preparedTrainingImages = ready ? parsed : const {};
+      _preparedTrainingImages = nextImages;
       _trainingImageStatus = ready
-          ? '已检测到云端已有训练图片，可直接下发。共 $readyCount 张。'
-          : '云端缺少部分训练图片（$readyCount/$expectedCount），请点击“应用”生成。';
+          ? '已检测到云端已有当前场景图片，可直接下发。共 $readyCount 张。'
+          : '云端缺少当前场景图片（$readyCount/$expectedCount），请点击“应用”生成。';
     });
   }
 
@@ -511,7 +522,10 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       _trainingPhase = AutismTrainingPhase.parentSetup;
       _lastSessionState = '';
       _loadTrainingDraft(index);
+      _trainingImagesReady = false;
+      _trainingImageStatus = '正在检查云端是否已有当前场景图片…';
     });
+    _scheduleTrainingAssetCacheCheck(immediate: true);
   }
 
   void _stopPoll() {
@@ -724,14 +738,11 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
 
   Future<void> _applyTrainingAssets() async {
     _saveCurrentTrainingDraft();
-    final scenes = _trainingDrafts.map((d) => d.toJson()).toList();
-    final invalid = scenes.indexWhere((scene) {
-      final options = (scene['options'] as List?) ?? const [];
-      return options.isEmpty;
-    });
-    if (invalid >= 0) {
+    final scene = _trainingDrafts[_trainingSceneIndex].toJson();
+    final options = (scene['options'] as List?) ?? const [];
+    if (options.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('请先填写“${_trainingDrafts[invalid].title}”的至少一个选项')),
+        SnackBar(content: Text('请先填写“${_trainingDrafts[_trainingSceneIndex].title}”的至少一个选项')),
       );
       return;
     }
@@ -739,13 +750,14 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     setState(() {
       _trainingPreparingImages = true;
       _trainingImagesReady = false;
-      _preparedTrainingImages = const {};
-      _trainingImageStatus = 'AI 图片生成中，请稍候…';
+      _preparedTrainingImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages)
+        ..remove(_trainingPreset.sceneId);
+      _trainingImageStatus = '当前场景 AI 图片生成中，请稍候…';
     });
 
     final res = await _cloud.prepareAutismTrainingAssets(
       childIdToFetch: widget.activeChildId,
-      scenes: scenes,
+      scenes: [scene],
     );
     if (!mounted) return;
     if (res == null || res['status'] != 'ok') {
@@ -772,12 +784,18 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     final ready = res['all_ready'] == true;
     final readyCount = (res['ready_count'] as num?)?.toInt() ?? count;
     final expectedCount = (res['expected_count'] as num?)?.toInt() ?? count;
+    final nextImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages);
+    if (ready) {
+      nextImages.addAll(parsed);
+    } else {
+      nextImages.remove(_trainingPreset.sceneId);
+    }
     setState(() {
-      _preparedTrainingImages = parsed;
+      _preparedTrainingImages = nextImages;
       _trainingPreparingImages = false;
       _trainingImagesReady = ready;
       _trainingImageStatus = _trainingImagesReady
-          ? 'AI 图片已生成并存储，可下发到星星机器人。共 $readyCount 张。'
+          ? '当前场景 AI 图片已生成并存储，可下发到星星机器人。共 $readyCount 张。'
           : 'AI 图片生成不完整（$readyCount/$expectedCount），请重试。';
     });
   }
@@ -786,7 +804,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     _saveCurrentTrainingDraft();
     if (_trainingPreparingImages || !_trainingImagesReady) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先点击“应用”，等待 AI 图片全部生成完成')),
+        const SnackBar(content: Text('请先点击“应用”，等待当前场景 AI 图片生成完成')),
       );
       return;
     }
@@ -1521,7 +1539,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
             FilledButton.icon(
               onPressed: _trainingPreparingImages ? null : _applyTrainingAssets,
               icon: const Icon(Icons.cloud_upload_outlined),
-              label: const Text('应用：先生成并存储 5 个场景图片'),
+              label: const Text('应用：先生成并存储当前场景图片'),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(

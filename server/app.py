@@ -10,7 +10,7 @@ import hmac
 import secrets
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify, Response, send_file, abort
+from flask import Flask, request, jsonify, Response, send_file, abort, has_request_context
 from flask_cors import CORS
 from openai import OpenAI
 
@@ -4277,11 +4277,13 @@ def _autism_option_icon_prompt(label: str, context: str = "") -> str:
 
 def _autism_public_base_url() -> str:
     """星星拉图的绝对 URL 前缀（设备侧需可访问）。未设置时默认本机端口。"""
-    return (
-        os.getenv("FLASK_PUBLIC_BASE_URL")
-        or os.getenv("AUTISM_IMAGE_PUBLIC_BASE")
-        or "http://127.0.0.1:11760"
-    ).rstrip("/")
+    configured = os.getenv("FLASK_PUBLIC_BASE_URL") or os.getenv("AUTISM_IMAGE_PUBLIC_BASE")
+    if configured:
+        return configured.rstrip("/")
+    if has_request_context():
+        # 不能把 127.0.0.1 下发给 ESP32；优先沿用手机访问 Flask 的 Host/IP。
+        return request.host_url.rstrip("/")
+    return "http://127.0.0.1:11760"
 
 
 def _http_download_bytes(url: str, timeout: int = 90) -> bytes | None:
@@ -4425,6 +4427,16 @@ def _autism_local_image_url_by_label(label: str) -> str | None:
         return None
 
 
+def _autism_rewrite_local_image_url(url: str | None) -> str | None:
+    if not isinstance(url, str) or not url:
+        return None
+    marker = "/autism/action-images/"
+    pos = url.find(marker)
+    if pos < 0:
+        return url
+    return f"{_autism_public_base_url()}{url[pos:]}"
+
+
 def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: str = "") -> str | None:
     """只查询已缓存的 240x240 图片 URL；不会调用智谱生成新图。"""
     ck, full_prompt = _autism_image_cache_key(prompt_core_zh, chinese_label or "配图")
@@ -4438,7 +4450,7 @@ def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: s
     row = cursor.fetchone()
     if row and row[0]:
         conn.close()
-        return row[0]
+        return _autism_rewrite_local_image_url(row[0])
     label = (chinese_label or "").strip()
     if label:
         cursor.execute(
@@ -4453,7 +4465,7 @@ def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: s
         row = cursor.fetchone()
     conn.close()
     if row and row[0]:
-        return row[0]
+        return _autism_rewrite_local_image_url(row[0])
     return _autism_local_image_url_by_label(label)
 
 
@@ -4479,7 +4491,7 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     row = cursor.fetchone()
     conn.close()
     if row and row[0]:
-        return row[0]
+        return _autism_rewrite_local_image_url(row[0])
 
     tmp_url = _zhipu_raw_image_temp_url(full_prompt)
     if not tmp_url:
@@ -4534,7 +4546,7 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
         )
         row2 = cursor.fetchone()
         if row2 and row2[0]:
-            public_url = row2[0]
+            public_url = _autism_rewrite_local_image_url(row2[0])
     finally:
         conn.close()
     return public_url

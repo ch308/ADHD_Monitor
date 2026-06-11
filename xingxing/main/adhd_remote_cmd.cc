@@ -34,6 +34,7 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_mac.h>
+#include <algorithm>
 #include <ctime>
 #include <memory>
 #include <vector>
@@ -224,36 +225,88 @@ static bool DownloadAndShowPreviewImage(const std::string& url) {
         http->Close();
         return false;
     }
-    size_t content_length = http->GetBodyLength();
-    if (content_length == 0 || content_length > 256 * 1024) {
-        ESP_LOGW(TAG, "autism image invalid length=%u", (unsigned)content_length);
+    const size_t content_length = http->GetBodyLength();
+    const size_t max_image_bytes = 512 * 1024;
+    if (content_length > max_image_bytes) {
+        ESP_LOGW(TAG, "autism image too large length=%u", (unsigned)content_length);
         http->Close();
         return false;
     }
-    char* data = static_cast<char*>(heap_caps_malloc(content_length, MALLOC_CAP_8BIT));
-    if (data == nullptr) {
-        ESP_LOGW(TAG, "autism image malloc failed length=%u", (unsigned)content_length);
-        http->Close();
-        return false;
+    ESP_LOGI(TAG, "autism image http ok body_len=%u", (unsigned)content_length);
+
+    std::vector<uint8_t> dynamic_data;
+    char* data = nullptr;
+    size_t capacity = content_length;
+    if (capacity > 0) {
+        data = static_cast<char*>(heap_caps_malloc(capacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (data == nullptr) {
+            data = static_cast<char*>(heap_caps_malloc(capacity, MALLOC_CAP_8BIT));
+        }
+        if (data == nullptr) {
+            ESP_LOGW(TAG, "autism image malloc failed length=%u", (unsigned)capacity);
+            http->Close();
+            return false;
+        }
+    } else {
+        dynamic_data.reserve(64 * 1024);
     }
     size_t total_read = 0;
-    while (total_read < content_length) {
-        int ret = http->Read(data + total_read, content_length - total_read);
+    while (content_length == 0 || total_read < content_length) {
+        char chunk[4096];
+        char* dst = data != nullptr ? data + total_read : chunk;
+        const size_t want = data != nullptr
+            ? std::min(sizeof(chunk), content_length - total_read)
+            : sizeof(chunk);
+        int ret = http->Read(dst, want);
         if (ret < 0) {
             ESP_LOGW(TAG, "autism image read failed: %s", url.c_str());
-            heap_caps_free(data);
+            if (data != nullptr) {
+                heap_caps_free(data);
+            }
             http->Close();
             return false;
         }
         if (ret == 0) {
             break;
         }
+        if (data == nullptr) {
+            if (total_read + static_cast<size_t>(ret) > max_image_bytes) {
+                ESP_LOGW(TAG, "autism image chunked too large >%u", (unsigned)max_image_bytes);
+                http->Close();
+                return false;
+            }
+            dynamic_data.insert(dynamic_data.end(), chunk, chunk + ret);
+        }
         total_read += ret;
     }
     http->Close();
     if (total_read == 0) {
+        if (data != nullptr) {
+            heap_caps_free(data);
+        }
+        return false;
+    }
+    if (content_length > 0 && total_read != content_length) {
+        ESP_LOGW(TAG, "autism image incomplete read %u/%u", (unsigned)total_read, (unsigned)content_length);
         heap_caps_free(data);
         return false;
+    }
+    if (data == nullptr) {
+        data = static_cast<char*>(heap_caps_malloc(total_read, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        if (data == nullptr) {
+            data = static_cast<char*>(heap_caps_malloc(total_read, MALLOC_CAP_8BIT));
+        }
+        if (data == nullptr) {
+            ESP_LOGW(TAG, "autism image malloc failed after chunked read length=%u", (unsigned)total_read);
+            return false;
+        }
+        memcpy(data, dynamic_data.data(), total_read);
+    }
+    ESP_LOGI(TAG, "autism image downloaded bytes=%u", (unsigned)total_read);
+    if (total_read >= 8) {
+        const auto* u = reinterpret_cast<const uint8_t*>(data);
+        ESP_LOGI(TAG, "autism image head %02x%02x%02x%02x (expect 89504e47 for PNG)",
+                 u[0], u[1], u[2], u[3]);
     }
     auto* lvgl = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
     if (lvgl == nullptr) {
@@ -264,7 +317,7 @@ static bool DownloadAndShowPreviewImage(const std::string& url) {
     try {
         auto image = std::make_unique<LvglAllocatedImage>(data, total_read);
         lvgl->SetPreviewImage(std::move(image));
-        ESP_LOGI(TAG, "autism image shown bytes=%u", (unsigned)total_read);
+        ESP_LOGI(TAG, "autism image SetPreviewImage ok bytes=%u", (unsigned)total_read);
         return true;
     } catch (...) {
         ESP_LOGW(TAG, "autism image decode/show failed");
@@ -668,7 +721,14 @@ static void HandleOneCommand(cJSON* root) {
                 item.image_url = url->valuestring;
                 ctx->items.push_back(std::move(item));
             }
-            StartAutismChoiceSequence(ctx);
+            ESP_LOGI(TAG, "autism_session training_start scene=%s image_urls=%u session_id=%d",
+                     ctx->scene.c_str(), (unsigned)ctx->items.size(), sid);
+            if (ctx->items.empty()) {
+                ESP_LOGW(TAG, "autism_session training_start: no image URLs in payload (check server images + public URL)");
+                delete ctx;
+            } else {
+                StartAutismChoiceSequence(ctx);
+            }
             cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
             std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
             if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
