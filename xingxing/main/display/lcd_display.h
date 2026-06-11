@@ -42,6 +42,8 @@ protected:
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
     bool hide_subtitle_ = false;  // Control whether to hide chat messages/subtitles
 
+    bool IsPreviewVisible() const;
+
     void InitializeLcdThemes();
     virtual bool Lock(int timeout_ms = 0) override;
     virtual void Unlock() override;

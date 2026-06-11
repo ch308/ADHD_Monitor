@@ -561,6 +561,10 @@ class XiaozhiConn:
                 elif st == "detect":
                     t = root.get("text") or ""
                     if isinstance(t, str) and t.strip():
+                        hint = pop_xinvoke_hint(self.device_mac)
+                        if hint:
+                            self.hint_opening = hint.get("opening") or ""
+                            self.hint_context = hint.get("context") or ""
                         self.uplink_packets = []
                         self._reply_turn(t.strip())
             elif mtype == "abort":

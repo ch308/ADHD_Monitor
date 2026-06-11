@@ -1075,6 +1075,12 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
         esp_timer_stop(preview_timer_);
         lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+        if (top_bar_ != nullptr) {
+            lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (status_bar_ != nullptr) {
+            lv_obj_remove_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+        }
         preview_image_cached_.reset();
         if (gif_controller_) {
             gif_controller_->Start();
@@ -1086,18 +1092,34 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     auto img_dsc = preview_image_cached_->image_dsc();
     lv_image_set_src(preview_image_, img_dsc);
     if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
-        // zoom factor 0.5
-        lv_image_set_scale(preview_image_, 128 * width_ / img_dsc->header.w);
+        const int scale_w = 256 * width_ / img_dsc->header.w;
+        const int scale_h = 256 * height_ / img_dsc->header.h;
+        lv_image_set_scale(preview_image_, scale_w < scale_h ? scale_w : scale_h);
     }
 
-    // Hide emoji_box_
+    // Training choice images are the primary UI; hide all chat/status chrome
+    // that would otherwise overlap the 1.54" LCD.
     if (gif_controller_) {
         gif_controller_->Stop();
     }
     lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    if (bottom_bar_ != nullptr) {
+        lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (top_bar_ != nullptr) {
+        lv_obj_add_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (status_bar_ != nullptr) {
+        lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_remove_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(preview_image_);
     esp_timer_stop(preview_timer_);
     ESP_ERROR_CHECK(esp_timer_start_once(preview_timer_, PREVIEW_IMAGE_DURATION_MS * 1000));
+}
+
+bool LcdDisplay::IsPreviewVisible() const {
+    return preview_image_ != nullptr && !lv_obj_has_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 }
 
 void LcdDisplay::SetChatMessage(const char* role, const char* content) {
@@ -1127,6 +1149,8 @@ void LcdDisplay::SetChatMessage(const char* role, const char* content) {
     // Show bottom_bar_ only when there is content (and subtitle is not globally hidden)
     if (bottom_bar_ != nullptr) {
         if (content == nullptr || content[0] == '\0') {
+            lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
+        } else if (IsPreviewVisible()) {
             lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
         } else if (!hide_subtitle_) {
             lv_obj_remove_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);

@@ -105,6 +105,7 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
+    void SubmitChildTextInput(const std::string& text);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);

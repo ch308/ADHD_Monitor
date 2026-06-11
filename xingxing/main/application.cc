@@ -1553,6 +1553,40 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     }
 }
 
+void Application::SubmitChildTextInput(const std::string& text) {
+    if (!protocol_ || text.empty()) {
+        return;
+    }
+
+    Schedule([this, text]() {
+        if (!protocol_) {
+            return;
+        }
+        auto state = GetDeviceState();
+        if (!protocol_->IsAudioChannelOpened()) {
+            SetDeviceState(kDeviceStateConnecting);
+            Schedule([this, text]() {
+                if (!protocol_ || GetDeviceState() != kDeviceStateConnecting) {
+                    return;
+                }
+                if (!protocol_->IsAudioChannelOpened() && !protocol_->OpenAudioChannel()) {
+                    SetDeviceState(kDeviceStateIdle);
+                    return;
+                }
+                protocol_->SendStartListening(GetDefaultListeningMode());
+                protocol_->SendWakeWordDetected(text);
+                SetListeningMode(GetDefaultListeningMode());
+            });
+            return;
+        }
+        if (state == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+        protocol_->SendStartListening(GetDefaultListeningMode());
+        protocol_->SendWakeWordDetected(text);
+    });
+}
+
 bool Application::CanEnterSleepMode() {
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;

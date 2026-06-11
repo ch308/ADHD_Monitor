@@ -4742,8 +4742,29 @@ def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]
         body = body[:32000]
     ids = _xiaozhi_device_ids_for_child(child_id)
     cmd_obj = {"action": "autism_session", "session_json": body}
+    opening = ""
+    if session.get("kind") == "training_start":
+        opening = str(session.get("tts_intro") or "").strip()
+        if not opening:
+            opening = "我们一起来做一个练习吧"
+        opening = (
+            opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
+        )[:500]
+        while "  " in opening:
+            opening = opening.replace("  ", " ")
     with _esp32_cmd_lock:
+        if opening:
+            try:
+                from xiaozhi_bridge import stash_xinvoke_hint
+            except Exception:
+                stash_xinvoke_hint = None
         for did in ids:
+            if opening and stash_xinvoke_hint is not None:
+                stash_xinvoke_hint(
+                    did,
+                    opening,
+                    "这是自闭症/发育支持训练的开场提示。请只播放这句开场白，等待孩子回答；不要把这句当成孩子输入来回应。",
+                )
             q = _esp32_cmd_queue.setdefault(did, deque())
             q.append(dict(cmd_obj))
         _esp32_cmd_lock.notify_all()
@@ -5184,6 +5205,38 @@ def esp32_cmd(device_id: str):
                 # 204 No Content：ESP32 立刻发下一轮
                 return Response(status=204)
             _esp32_cmd_lock.wait(timeout=remaining)
+
+
+@app.route("/device/<device_id>/xiaozhi/opening-hint", methods=["POST"])
+def esp32_xiaozhi_opening_hint(device_id: str):
+    """设备本地定时事件触发前，预置 xiaozhi 主动开场 hint。
+
+    计划表到点由 ESP32 本地调度触发，服务器没有机会提前 stash opening。
+    设备先 POST 这条 hint，再发送 listen/detect 文本，xiaozhi_bridge 就会只播
+    opening，不会把这句主动问题当成孩子输入交给 Kimi。
+    """
+    device_id = _normalize_device_id(device_id)
+    if not _ESP32_DEVICE_ID_RE.match(device_id):
+        return jsonify({"status": "error", "message": "invalid device_id"}), 400
+    data = request.json or {}
+    opening = str(data.get("opening_line") or "").strip()
+    if not opening:
+        return jsonify({"status": "error", "message": "opening_line required"}), 400
+    opening = (
+        opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
+    )[:500]
+    while "  " in opening:
+        opening = opening.replace("  ", " ")
+    context = str(data.get("context") or "").strip()[:8000]
+    try:
+        from xiaozhi_bridge import stash_xinvoke_hint
+
+        stash_xinvoke_hint(device_id, opening, context)
+    except Exception as e:
+        app.logger.warning("xiaozhi opening-hint stash failed: %s", e)
+        return jsonify({"status": "error", "message": "stash failed"}), 500
+    app.logger.info("xiaozhi opening-hint stashed device=%s len=%d", device_id, len(opening))
+    return jsonify({"status": "ok"}), 200
 
 
 if __name__ == '__main__':

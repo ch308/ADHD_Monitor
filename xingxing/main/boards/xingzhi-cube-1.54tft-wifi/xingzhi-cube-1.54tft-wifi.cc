@@ -469,15 +469,9 @@ public:
                     break;
                 case WifiEvent::Connected:
                     OnNetworkEvent(NetworkEvent::Connected, data);
-                    // 只有网络真正连上后才进入行动卡片；否则保持配网/连接界面。
-                    xTaskCreate([](void*) {
-                        vTaskDelay(pdMS_TO_TICKS(300));
-                        auto& cards = ActionCards::GetInstance();
-                        if (!cards.IsActive()) {
-                            cards.Toggle();
-                        }
-                        vTaskDelete(nullptr);
-                    }, "show_cards", 3072, nullptr, 2, nullptr);
+                    // WiFi ready is the default active/listening-ready state.
+                    // Do not auto-enter action cards; cards are an explicit
+                    // child intent UI and would cover training images.
                     break;
                 case WifiEvent::Disconnected:
                     OnNetworkEvent(NetworkEvent::Disconnected);
