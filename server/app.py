@@ -39,16 +39,53 @@ _AUTISM_LOCAL_IMAGE_STORE = os.path.normpath(
 )
 
 
+def _autism_normalize_action_image_filename(fn: str) -> str:
+    """修复 ESP32 直接请求中文路径时产生的 Latin-1 mojibake 文件名。"""
+    if not isinstance(fn, str) or not fn:
+        return ""
+    try:
+        repaired = fn.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return fn
+    return repaired or fn
+
+
+def _autism_local_image_path_for_request(fn: str) -> str:
+    path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
+    if os.path.isfile(path):
+        return path
+
+    # 兼容历史中文文件名与新 ASCII 文件名之间的切换：cache key 前 8 位相同即可。
+    match = re.search(r"_([0-9a-fA-F]{8})\.png$", fn)
+    if not match or not os.path.isdir(_AUTISM_LOCAL_IMAGE_STORE):
+        return path
+    suffix = f"_{match.group(1).lower()}.png"
+    try:
+        for candidate in os.listdir(_AUTISM_LOCAL_IMAGE_STORE):
+            if candidate.lower().endswith(suffix):
+                candidate_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, candidate)
+                if os.path.isfile(candidate_path):
+                    app.logger.info("action-image served by hash fallback: %r -> %r", fn, candidate)
+                    return candidate_path
+    except Exception as e:
+        app.logger.warning("action-image hash fallback failed: %s", e)
+    return path
+
+
 @app.route("/autism/action-images/<fn>", methods=["GET"])
 def autism_action_image_public(fn: str):
     """未配置腾讯云 COS 时，240×240 PNG 落盘于此，供星星机器人通过 HTTP 拉取。"""
+    raw_fn = fn
+    fn = _autism_normalize_action_image_filename(fn)
+    if fn != raw_fn:
+        app.logger.info("action-image repaired filename mojibake: %r -> %r", raw_fn, fn)
     if not fn or ".." in fn or "/" in fn or "\\" in fn:
         app.logger.warning("action-image reject (bad name): %r", fn)
         abort(404)
     if not re.match(r"^[\w\u4e00-\u9fff\-.]+\.png$", fn):
         app.logger.warning("action-image reject (regex): %r", fn)
         abort(404)
-    path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
+    path = _autism_local_image_path_for_request(fn)
     if not os.path.isfile(path):
         app.logger.warning("action-image 404 (file missing on disk): %s", path)
         abort(404)
@@ -4585,8 +4622,10 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     if not png:
         return None
 
-    stem = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", label).strip("._")[:60] or "img"
     short = ck[:8]
+    # ESP32 HTTP client may send non-ASCII path bytes without percent-encoding.
+    # Keep generated local filenames ASCII-only so image URLs are robust.
+    stem = re.sub(r"[^0-9A-Za-z._-]+", "_", label).strip("._")[:40] or "img"
     filename = f"{stem}_{short}.png"
     prefix = (os.getenv("TENCENT_COS_ACTION_PREFIX") or "action").strip("/").strip() or "action"
     cos_object_key = f"{prefix}/{filename}"
