@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 rem =========================================================================
-rem  flash.bat - xiaozhi-esp32-2.2.4 (Xingzhi CUBE 1.54 TFT WiFi, star robot)
+rem  flash.bat - xingxing (Xingzhi CUBE 1.54 TFT WiFi, star robot)
 rem  Build and flash (with erase-flash for a clean state).
 rem
 rem  Usage:

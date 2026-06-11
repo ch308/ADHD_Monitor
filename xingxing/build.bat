@@ -1,7 +1,7 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 rem =========================================================================
-rem  build.bat - xiaozhi-esp32-2.2.4 (Xingzhi CUBE 1.54 TFT WiFi, star robot)
+rem  build.bat - xingxing (Xingzhi CUBE 1.54 TFT WiFi, star robot)
 rem  Use ESP-IDF v6.0.1 (export.bat from that tree). CI uses espressif/idf:v6.0.1.
 rem  Slim fork: this tree only builds 星智 CUBE 1.54 WiFi (no other boards / no camera stack).
 rem  Build only, no flash.
