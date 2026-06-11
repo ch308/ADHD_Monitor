@@ -291,7 +291,8 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   bool _loadingTrainingDraft = false;
   bool _trainingPreparingImages = false;
   bool _trainingImagesReady = false;
-  String _trainingImageStatus = '请先点击“应用”生成 5 个场景的 AI 图片。';
+  Timer? _trainingAssetCheckTimer;
+  String _trainingImageStatus = '正在检查云端是否已有训练图片…';
   Map<String, Map<String, String?>> _preparedTrainingImages = const {};
   final List<_TrainingSceneDraft> _trainingDrafts = _trainingScenePresets
       .map(_TrainingSceneDraft.new)
@@ -304,6 +305,11 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   final List<_DailyPlanRowEdit> _dailyPlanRows = _dailyPlanPresets
       .map(_DailyPlanRowEdit.new)
       .toList();
+  bool _dailyPlanPreparingImages = false;
+  bool _dailyPlanImagesReady = false;
+  Timer? _dailyPlanAssetCheckTimer;
+  String _dailyPlanImageStatus = '正在检查云端是否已有计划表图片…';
+  Map<String, String?> _preparedDailyPlanImages = const {};
 
   String? _boundXiaozhiDeviceId;
 
@@ -315,6 +321,12 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     for (final c in _optionCtrls) {
       c.addListener(_markTrainingDraftDirty);
     }
+    for (final row in _dailyPlanRows) {
+      row.ttsCtrl.addListener(_markDailyPlanDirty);
+      for (final c in row.optionCtrls) {
+        c.addListener(_markDailyPlanDirty);
+      }
+    }
     _cloud = CloudService(serverHost: widget.serverIp)
       ..authToken = widget.authToken
       ..childId = widget.activeChildId;
@@ -322,6 +334,8 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     _pollNeedsOnce(showLoadingSpinner: true);
     _startNeedsPolling();
     _startTrainingEventsPolling();
+    _scheduleTrainingAssetCacheCheck(immediate: true);
+    _scheduleDailyPlanAssetCacheCheck(immediate: true);
   }
 
   @override
@@ -338,15 +352,25 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       _stopNeedsPolling();
       _trainingSessionId = null;
       _trainingPhase = AutismTrainingPhase.parentSetup;
+      _trainingPreparingImages = false;
+      _trainingImagesReady = false;
+      _preparedTrainingImages = const {};
+      _trainingImageStatus = '正在检查云端是否已有训练图片…';
       _needsPollPrimed = false;
       _trainingEventsPrimed = false;
       _lastTrainingEventId = 0;
       _lastPolledNeedIds.clear();
       _childJustChoseBanner = null;
       _trainingEventBanner = null;
+      _dailyPlanPreparingImages = false;
+      _dailyPlanImagesReady = false;
+      _preparedDailyPlanImages = const {};
+      _dailyPlanImageStatus = '正在检查云端是否已有计划表图片…';
       _refreshEspBindings();
       _pollNeedsOnce(showLoadingSpinner: true);
       _pollTrainingEventsOnce();
+      _scheduleTrainingAssetCacheCheck(immediate: true);
+      _scheduleDailyPlanAssetCacheCheck(immediate: true);
       if (_section == 0) {
         _startNeedsPolling();
       }
@@ -358,6 +382,8 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     _stopPoll();
     _stopNeedsPolling();
     _stopTrainingEventsPolling();
+    _trainingAssetCheckTimer?.cancel();
+    _dailyPlanAssetCheckTimer?.cancel();
     for (final c in _optionCtrls) {
       c.dispose();
     }
@@ -392,12 +418,13 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   void _markTrainingDraftDirty() {
     if (_loadingTrainingDraft) return;
     _saveCurrentTrainingDraft();
-    if (_trainingPreparingImages || !_trainingImagesReady) return;
+    if (_trainingPreparingImages) return;
     setState(() {
       _trainingImagesReady = false;
       _preparedTrainingImages = const {};
-      _trainingImageStatus = '训练内容已修改，请重新点击“应用”生成 AI 图片。';
+      _trainingImageStatus = '训练内容已修改，正在检查云端是否已有图片…';
     });
+    _scheduleTrainingAssetCacheCheck();
   }
 
   void _applyTrainingScenePreset(int index) {
@@ -407,13 +434,71 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     draft.options = List<String>.from(preset.options);
     _trainingImagesReady = false;
     _preparedTrainingImages = const {};
-    _trainingImageStatus = '已恢复当前场景预设，请重新点击“应用”生成 AI 图片。';
+    _trainingImageStatus = '已恢复当前场景预设，正在检查云端是否已有图片…';
     _loadingTrainingDraft = true;
     _ttsIntroCtrl.text = preset.ttsIntro;
     for (var i = 0; i < _optionCtrls.length; i++) {
       _optionCtrls[i].text = i < preset.options.length ? preset.options[i] : '';
     }
     _loadingTrainingDraft = false;
+    _scheduleTrainingAssetCacheCheck();
+  }
+
+  void _scheduleTrainingAssetCacheCheck({bool immediate = false}) {
+    _trainingAssetCheckTimer?.cancel();
+    _trainingAssetCheckTimer = Timer(
+      immediate ? Duration.zero : const Duration(milliseconds: 650),
+      _checkTrainingAssetsCached,
+    );
+  }
+
+  Future<void> _checkTrainingAssetsCached() async {
+    if (!mounted || _trainingPreparingImages) return;
+    _saveCurrentTrainingDraft();
+    final scenes = _trainingDrafts.map((d) => d.toJson()).toList();
+    final invalid = scenes.any((scene) => ((scene['options'] as List?) ?? const []).isEmpty);
+    if (invalid) {
+      if (!mounted) return;
+      setState(() {
+        _trainingImagesReady = false;
+        _preparedTrainingImages = const {};
+        _trainingImageStatus = '请先填写每个训练场景的至少一个选项。';
+      });
+      return;
+    }
+
+    final res = await _cloud.checkAutismTrainingAssets(
+      childIdToFetch: widget.activeChildId,
+      scenes: scenes,
+    );
+    if (!mounted || _trainingPreparingImages) return;
+    if (res == null || res['status'] != 'ok') {
+      setState(() {
+        _trainingImagesReady = false;
+        _preparedTrainingImages = const {};
+        _trainingImageStatus = '无法检查云端图片缓存，请点击“应用”生成图片。';
+      });
+      return;
+    }
+    final rawImages = (res['images'] as Map?) ?? const {};
+    final parsed = <String, Map<String, String?>>{};
+    for (final entry in rawImages.entries) {
+      final sceneId = entry.key.toString();
+      final value = entry.value;
+      if (value is Map) {
+        parsed[sceneId] = value.map((k, v) => MapEntry(k.toString(), v?.toString()));
+      }
+    }
+    final ready = res['all_ready'] == true;
+    final readyCount = (res['ready_count'] as num?)?.toInt() ?? 0;
+    final expectedCount = (res['expected_count'] as num?)?.toInt() ?? 0;
+    setState(() {
+      _trainingImagesReady = ready;
+      _preparedTrainingImages = ready ? parsed : const {};
+      _trainingImageStatus = ready
+          ? '已检测到云端已有训练图片，可直接下发。共 $readyCount 张。'
+          : '云端缺少部分训练图片（$readyCount/$expectedCount），请点击“应用”生成。';
+    });
   }
 
   void _selectTrainingScene(int index) {
@@ -684,13 +769,16 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       }
     }
     final count = (res['image_count'] as num?)?.toInt() ?? 0;
+    final ready = res['all_ready'] == true;
+    final readyCount = (res['ready_count'] as num?)?.toInt() ?? count;
+    final expectedCount = (res['expected_count'] as num?)?.toInt() ?? count;
     setState(() {
       _preparedTrainingImages = parsed;
       _trainingPreparingImages = false;
-      _trainingImagesReady = parsed.length == _trainingDrafts.length;
+      _trainingImagesReady = ready;
       _trainingImageStatus = _trainingImagesReady
-          ? 'AI 图片已生成并存储，可下发到星星机器人。共 $count 张。'
-          : 'AI 图片生成不完整，请重试。';
+          ? 'AI 图片已生成并存储，可下发到星星机器人。共 $readyCount 张。'
+          : 'AI 图片生成不完整（$readyCount/$expectedCount），请重试。';
     });
   }
 
@@ -740,8 +828,82 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     );
   }
 
-  Future<void> _postDailyPlan() async {
-    final slots = _dailyPlanRows.map((row) => row.toJson()).toList();
+  List<Map<String, dynamic>> _dailyPlanSlotsJson() {
+    return _dailyPlanRows.map((row) => row.toJson()).toList();
+  }
+
+  int _invalidDailyPlanSlotIndex(List<Map<String, dynamic>> slots) {
+    return slots.indexWhere((slot) {
+      final tts = (slot['tts'] ?? '').toString();
+      final options = (slot['options'] as List?) ?? const [];
+      return tts.isEmpty || options.isEmpty;
+    });
+  }
+
+  void _markDailyPlanDirty() {
+    if (_dailyPlanPreparingImages) return;
+    setState(() {
+      _dailyPlanImagesReady = false;
+      _preparedDailyPlanImages = const {};
+      _dailyPlanImageStatus = '计划表内容已修改，正在检查云端是否已有图片…';
+    });
+    _scheduleDailyPlanAssetCacheCheck();
+  }
+
+  void _scheduleDailyPlanAssetCacheCheck({bool immediate = false}) {
+    _dailyPlanAssetCheckTimer?.cancel();
+    _dailyPlanAssetCheckTimer = Timer(
+      immediate ? Duration.zero : const Duration(milliseconds: 650),
+      _checkDailyPlanAssetsCached,
+    );
+  }
+
+  Future<void> _checkDailyPlanAssetsCached() async {
+    if (!mounted || _dailyPlanPreparingImages) return;
+    final slots = _dailyPlanSlotsJson();
+    final invalidIndex = _invalidDailyPlanSlotIndex(slots);
+    if (invalidIndex >= 0) {
+      if (!mounted) return;
+      setState(() {
+        _dailyPlanImagesReady = false;
+        _preparedDailyPlanImages = const {};
+        _dailyPlanImageStatus = '第 ${invalidIndex + 1} 项需要填写话术和至少一个选项。';
+      });
+      return;
+    }
+
+    final res = await _cloud.checkAutismDailyPlanAssets(
+      widget.activeChildId,
+      slots: slots,
+    );
+    if (!mounted || _dailyPlanPreparingImages) return;
+    if (res == null || res['status'] != 'ok') {
+      setState(() {
+        _dailyPlanImagesReady = false;
+        _preparedDailyPlanImages = const {};
+        _dailyPlanImageStatus = '无法检查云端图片缓存，请点击“应用”生成图片。';
+      });
+      return;
+    }
+    final rawImages = (res['images'] as Map?) ?? const {};
+    final parsed = <String, String?>{};
+    for (final e in rawImages.entries) {
+      parsed[e.key.toString()] = e.value?.toString();
+    }
+    final ready = res['all_ready'] == true;
+    final readyCount = (res['ready_count'] as num?)?.toInt() ?? 0;
+    final expectedCount = (res['expected_count'] as num?)?.toInt() ?? 0;
+    setState(() {
+      _dailyPlanImagesReady = ready;
+      _preparedDailyPlanImages = ready ? parsed : const {};
+      _dailyPlanImageStatus = ready
+          ? '已检测到云端已有计划表图片，可直接同步。共 $readyCount 张。'
+          : '云端缺少部分计划表图片（$readyCount/$expectedCount），请点击“应用”生成。';
+    });
+  }
+
+  Future<void> _applyDailyPlanAssets() async {
+    final slots = _dailyPlanSlotsJson();
     final invalidIndex = slots.indexWhere((slot) {
       final tts = (slot['tts'] ?? '').toString();
       final options = (slot['options'] as List?) ?? const [];
@@ -753,12 +915,68 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       );
       return;
     }
+    setState(() {
+      _dailyPlanPreparingImages = true;
+      _dailyPlanImagesReady = false;
+      _preparedDailyPlanImages = const {};
+      _dailyPlanImageStatus = 'AI 图片生成中，请稍候…';
+    });
+    final res = await _cloud.prepareAutismDailyPlanAssets(
+      widget.activeChildId,
+      slots: slots,
+    );
+    if (!mounted) return;
+    if (res == null || res['status'] != 'ok') {
+      setState(() {
+        _dailyPlanPreparingImages = false;
+        _dailyPlanImagesReady = false;
+        _dailyPlanImageStatus = 'AI 图片生成失败，请检查 GLM_API_KEY、网络或服务端日志后重试。';
+      });
+      return;
+    }
+    final rawImages = (res['images'] as Map?) ?? const {};
+    final parsed = <String, String?>{};
+    for (final e in rawImages.entries) {
+      parsed[e.key.toString()] = e.value?.toString();
+    }
+    final expectedCount = slots.fold<int>(
+      0,
+      (sum, slot) => sum + (((slot['options'] as List?) ?? const []).length),
+    );
+    final readyCount = parsed.values.where((v) => v != null && v!.startsWith('http')).length;
+    final count = (res['image_count'] as num?)?.toInt() ?? 0;
+    setState(() {
+      _preparedDailyPlanImages = parsed;
+      _dailyPlanPreparingImages = false;
+      _dailyPlanImagesReady = expectedCount > 0 && readyCount == expectedCount;
+      _dailyPlanImageStatus = _dailyPlanImagesReady
+          ? 'AI 图片已生成并存储，可同步到星星机器人。共 $count 张。'
+          : 'AI 图片生成不完整（$readyCount/$expectedCount），请重试。';
+    });
+  }
+
+  Future<void> _postDailyPlan() async {
+    if (_dailyPlanPreparingImages || !_dailyPlanImagesReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先点击“应用”，等待 AI 图片全部生成完成')),
+      );
+      return;
+    }
+    final slots = _dailyPlanSlotsJson();
+    final invalidIndex = _invalidDailyPlanSlotIndex(slots);
+    if (invalidIndex >= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('第 ${invalidIndex + 1} 行需要填写话术和至少一个选项')),
+      );
+      return;
+    }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('正在生成图片并同步，可能需要一两分钟…')),
+      const SnackBar(content: Text('正在同步计划表到星星机器人…')),
     );
     final res = await _cloud.postAutismDailyPlan(
       widget.activeChildId,
       slots: slots,
+      images: _preparedDailyPlanImages,
     );
     if (!mounted) return;
     if (res == null) {
@@ -1018,9 +1236,9 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
         children: [
           SegmentedButton<int>(
             segments: const [
-              ButtonSegment(value: 0, label: Text('孩子发起'), icon: Icon(Icons.front_hand_outlined)),
-              ButtonSegment(value: 1, label: Text('孩子训练'), icon: Icon(Icons.psychology_outlined)),
-              ButtonSegment(value: 2, label: Text('日常计划'), icon: Icon(Icons.calendar_today_outlined)),
+              ButtonSegment(value: 0, label: Text('主动发起'), icon: Icon(Icons.front_hand_outlined)),
+              ButtonSegment(value: 1, label: Text('日常训练'), icon: Icon(Icons.psychology_outlined)),
+              ButtonSegment(value: 2, label: Text('计划表'), icon: Icon(Icons.calendar_today_outlined)),
             ],
             selected: {_section},
             onSelectionChanged: (s) {
@@ -1333,13 +1551,14 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   }
 
   Widget _buildDailyPlan() {
+    final canSyncDailyPlan = _dailyPlanImagesReady && !_dailyPlanPreparingImages;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('日常计划（五行可编辑）', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+            const Text('孩子日常计划表', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const SizedBox(height: 8),
             const Text(
               '每一行可编辑时间、机器人要说的话和孩子可选择的图片选项。同步后云端会为每个选项生成 240×240 图片并下发星星机器人。',
@@ -1362,7 +1581,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                         Row(
                           children: [
                             Text(
-                              '第 ${index + 1} 行',
+                              '第 ${index + 1} 项',
                               style: const TextStyle(fontWeight: FontWeight.w800),
                             ),
                             const SizedBox(width: 12),
@@ -1382,10 +1601,13 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                                       ),
                                     )
                                     .toList(),
-                                onChanged: (v) {
-                                  if (v == null) return;
-                                  setState(() => row.time = v);
-                                },
+                                onChanged: _dailyPlanPreparingImages
+                                    ? null
+                                    : (v) {
+                                        if (v == null) return;
+                                        row.time = v;
+                                        _markDailyPlanDirty();
+                                      },
                               ),
                             ),
                           ],
@@ -1393,10 +1615,11 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                         const SizedBox(height: 10),
                         TextField(
                           controller: row.ttsCtrl,
+                          enabled: !_dailyPlanPreparingImages,
                           maxLines: 2,
                           decoration: const InputDecoration(
                             isDense: true,
-                            labelText: '机器人话术',
+                            labelText: '星星机器人说',
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -1410,6 +1633,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                             padding: const EdgeInsets.only(bottom: 8),
                             child: TextField(
                               controller: optEntry.value,
+                              enabled: !_dailyPlanPreparingImages,
                               decoration: InputDecoration(
                                 isDense: true,
                                 labelText: '选项 ${optEntry.key + 1}',
@@ -1424,9 +1648,48 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                 ),
               );
             }),
+            Material(
+              color: _dailyPlanImagesReady
+                  ? AppColors.sage.withValues(alpha: 0.12)
+                  : AppColors.warning.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    if (_dailyPlanPreparingImages)
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else
+                      Icon(
+                        _dailyPlanImagesReady ? Icons.check_circle_rounded : Icons.auto_awesome_rounded,
+                        color: _dailyPlanImagesReady ? AppColors.sage : AppColors.warning,
+                        size: 20,
+                      ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _dailyPlanImageStatus,
+                        style: const TextStyle(height: 1.35),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _dailyPlanPreparingImages ? null : _applyDailyPlanAssets,
+              icon: const Icon(Icons.cloud_upload_outlined),
+              label: const Text('应用：先生成并存储计划表图片'),
+            ),
+            const SizedBox(height: 8),
             FilledButton(
-              onPressed: _postDailyPlan,
-              child: const Text('同步到机器人'),
+              onPressed: canSyncDailyPlan ? _postDailyPlan : null,
+              child: const Text('同步到星星AI机器人'),
             ),
           ],
         ),

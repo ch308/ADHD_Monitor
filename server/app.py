@@ -3297,7 +3297,8 @@ def autism_training_assets(child_id):
     conn.close()
 
     prepared: dict[str, dict[str, str | None]] = {}
-    total = 0
+    expected = 0
+    ready = 0
     for raw in scenes[:5]:
         if not isinstance(raw, dict):
             continue
@@ -3309,15 +3310,80 @@ def autism_training_assets(child_id):
         clean_options = [str(x).strip() for x in options if str(x).strip()]
         scene_images: dict[str, str | None] = {}
         for i, opt in enumerate(clean_options[:4]):
+            expected += 1
             key = f"o{i}"
-            scene_images[key] = _autism_square_image_url_cached(
+            url = _autism_square_image_url_cached(
                 chinese_label=opt,
                 prompt_core_zh=f"儿童训练场景图片，场景：{scene_id}，引导语：{tts_intro}，选项：{opt}，正方形构图，无文字",
             )
-            total += 1
+            scene_images[key] = url
+            if url:
+                ready += 1
         prepared[scene_id] = scene_images
 
-    return jsonify({"status": "ok", "images": prepared, "image_count": total}), 200
+    return jsonify(
+        {
+            "status": "ok",
+            "images": prepared,
+            "image_count": ready,
+            "expected_count": expected,
+            "ready_count": ready,
+            "all_ready": expected > 0 and ready == expected,
+        }
+    ), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/training/assets/check", methods=["POST"])
+def autism_training_assets_check(child_id):
+    """只检查训练图片是否已有缓存；不调用智谱、不生成新图。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    scenes = data.get("scenes") or []
+    if not isinstance(scenes, list) or not scenes:
+        return jsonify({"status": "error", "message": "scenes required"}), 400
+
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    conn.close()
+
+    prepared: dict[str, dict[str, str | None]] = {}
+    expected = 0
+    ready = 0
+    for raw in scenes[:5]:
+        if not isinstance(raw, dict):
+            continue
+        scene_id = (raw.get("scene_id") or "").strip() or "preference_choice"
+        tts_intro = (raw.get("tts_intro") or "").strip()
+        options = raw.get("options") or []
+        if not isinstance(options, list):
+            options = []
+        clean_options = [str(x).strip() for x in options if str(x).strip()]
+        scene_images: dict[str, str | None] = {}
+        for i, opt in enumerate(clean_options[:4]):
+            expected += 1
+            key = f"o{i}"
+            url = _autism_square_image_url_lookup_cached(
+                prompt_core_zh=f"儿童训练场景图片，场景：{scene_id}，引导语：{tts_intro}，选项：{opt}，正方形构图，无文字",
+            )
+            scene_images[key] = url
+            if url:
+                ready += 1
+        prepared[scene_id] = scene_images
+
+    return jsonify(
+        {
+            "status": "ok",
+            "images": prepared,
+            "expected_count": expected,
+            "ready_count": ready,
+            "all_ready": expected > 0 and ready == expected,
+        }
+    ), 200
 
 
 @app.route("/my/children/<int:child_id>/autism/training/status", methods=["GET"])
@@ -3421,15 +3487,19 @@ def autism_daily_plan(child_id):
     if len(slots) != 5:
         slots = default_slots
 
+    provided_images = data.get("images") if isinstance(data.get("images"), dict) else {}
     images: dict[str, str | None] = {}
     for i, slot in enumerate(slots):
         for j, opt in enumerate(slot["options"]):
             key = f"s{i}_o{j}"
-            url = _autism_square_image_url_cached(
-                chinese_label=opt,
-                prompt_core_zh=f"儿童日常计划选择图片，{slot['tts']}，选项：{opt}，正方形构图，无文字",
-            )
-            images[key] = url
+            u = provided_images.get(key)
+            if isinstance(u, str) and u.startswith("http"):
+                images[key] = u
+            else:
+                images[key] = _autism_square_image_url_cached(
+                    chinese_label=opt,
+                    prompt_core_zh=f"儿童日常计划选择图片，{slot['tts']}，选项：{opt}，正方形构图，无文字",
+                )
     plan_obj = {"kind": "daily_plan", "slots": slots, "images": images}
     cursor.execute(
         """
@@ -3450,6 +3520,99 @@ def autism_daily_plan(child_id):
     queued = _enqueue_autism_session_for_child(child_id, session)
     return jsonify(
         {"status": "ok", "plan_id": pid, "queued_devices": queued, "images": images}
+    ), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/daily-plan/assets", methods=["POST"])
+def autism_daily_plan_assets(child_id):
+    """预生成计划表图片，只写缓存/存储，不下发设备。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    raw_slots = data.get("slots") or []
+    if not isinstance(raw_slots, list) or not raw_slots:
+        return jsonify({"status": "error", "message": "slots required"}), 400
+
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    conn.close()
+
+    images: dict[str, str | None] = {}
+    count = 0
+    for i, raw in enumerate(raw_slots[:5]):
+        if not isinstance(raw, dict):
+            continue
+        tts = str(raw.get("tts") or "").strip()[:300]
+        options = raw.get("options") or []
+        if not isinstance(options, list):
+            options = []
+        for j, opt_raw in enumerate(options[:4]):
+            opt = str(opt_raw or "").strip()[:40]
+            if not opt:
+                continue
+            key = f"s{i}_o{j}"
+            url = _autism_square_image_url_cached(
+                chinese_label=opt,
+                prompt_core_zh=f"儿童日常计划选择图片，{tts}，选项：{opt}，正方形构图，无文字",
+            )
+            images[key] = url
+            if url:
+                count += 1
+    return jsonify({"status": "ok", "images": images, "image_count": count}), 200
+
+
+@app.route("/my/children/<int:child_id>/autism/daily-plan/assets/check", methods=["POST"])
+def autism_daily_plan_assets_check(child_id):
+    """只检查计划表图片是否已有缓存；不调用智谱、不生成新图。"""
+    user = _get_request_user()
+    if not user:
+        return jsonify({"status": "error", "message": "unauthorized"}), 401
+    data = request.json or {}
+    raw_slots = data.get("slots") or []
+    if not isinstance(raw_slots, list) or not raw_slots:
+        return jsonify({"status": "error", "message": "slots required"}), 400
+
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    if not _user_can_access_child(cursor, user["id"], child_id):
+        conn.close()
+        return jsonify({"status": "error", "message": "forbidden"}), 403
+    conn.close()
+
+    images: dict[str, str | None] = {}
+    expected = 0
+    ready = 0
+    for i, raw in enumerate(raw_slots[:5]):
+        if not isinstance(raw, dict):
+            continue
+        tts = str(raw.get("tts") or "").strip()[:300]
+        options = raw.get("options") or []
+        if not isinstance(options, list):
+            options = []
+        for j, opt_raw in enumerate(options[:4]):
+            opt = str(opt_raw or "").strip()[:40]
+            if not opt:
+                continue
+            expected += 1
+            key = f"s{i}_o{j}"
+            url = _autism_square_image_url_lookup_cached(
+                prompt_core_zh=f"儿童日常计划选择图片，{tts}，选项：{opt}，正方形构图，无文字",
+            )
+            images[key] = url
+            if url:
+                ready += 1
+    return jsonify(
+        {
+            "status": "ok",
+            "images": images,
+            "expected_count": expected,
+            "ready_count": ready,
+            "all_ready": expected > 0 and ready == expected,
+        }
     ), 200
 
 
@@ -4209,6 +4372,30 @@ def _cos_put_action_png(object_key: str, png_bytes: bytes) -> str | None:
     return f"https://{bucket}.cos.{region}.myqcloud.com/{object_key}"
 
 
+def _autism_image_cache_key(prompt_core_zh: str, fallback_label: str = "配图") -> tuple[str, str]:
+    core = " ".join((prompt_core_zh or "").strip().split())
+    if not core:
+        core = " ".join((fallback_label or "配图").split()) or "配图"
+    full_prompt = core + _IMAGE_STYLE_SUFFIX_ZHIPU
+    if len(full_prompt) > 2000:
+        full_prompt = full_prompt[:2000]
+    return hashlib.sha256(full_prompt.encode("utf-8")).hexdigest(), full_prompt
+
+
+def _autism_square_image_url_lookup_cached(prompt_core_zh: str) -> str | None:
+    """只查询已缓存的 240x240 图片 URL；不会调用智谱生成新图。"""
+    ck, _ = _autism_image_cache_key(prompt_core_zh)
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT public_url FROM autism_image_cache WHERE cache_key = ?",
+        (ck,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row and row[0] else None
+
+
 def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> str | None:
     """按完整 prompt（含固定英文风格）做缓存；中文 label 用于 COS/本地文件名。
 
@@ -4220,14 +4407,7 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
       FLASK_PUBLIC_BASE_URL 或 AUTISM_IMAGE_PUBLIC_BASE（含端口），默认 http://127.0.0.1:11760
     """
     label = (chinese_label or "").strip() or "配图"
-    core = " ".join((prompt_core_zh or "").strip().split())
-    if not core:
-        core = " ".join(label.split()) or "配图"
-    full_prompt = core + _IMAGE_STYLE_SUFFIX_ZHIPU
-    if len(full_prompt) > 2000:
-        full_prompt = full_prompt[:2000]
-
-    ck = hashlib.sha256(full_prompt.encode("utf-8")).hexdigest()
+    ck, full_prompt = _autism_image_cache_key(prompt_core_zh, label)
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     cursor.execute(

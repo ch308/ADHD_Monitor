@@ -590,6 +590,30 @@ class CloudService {
     }
   }
 
+  /// 检查孩子训练五个场景图片是否已在云端缓存；不触发生图。
+  Future<Map<String, dynamic>?> checkAutismTrainingAssets({
+    required int childIdToFetch,
+    required List<Map<String, dynamic>> scenes,
+  }) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/my/children/$childIdToFetch/autism/training/assets/check'),
+            headers: _authHeaders(),
+            body: json.encode({'scenes': scenes}),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: autism training assets check ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      return json.decode(r.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('CloudService: autism training assets check error $e');
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> fetchAutismTrainingStatus({
     required int childIdToFetch,
     required int sessionId,
@@ -618,6 +642,7 @@ class CloudService {
   Future<Map<String, dynamic>?> postAutismDailyPlan(
     int childIdToFetch, {
     List<Map<String, dynamic>>? slots,
+    Map<String, String?>? images,
   }) async {
     try {
       final r = await http
@@ -626,6 +651,7 @@ class CloudService {
             headers: _authHeaders(),
             body: json.encode({
               if (slots != null) 'slots': slots,
+              if (images != null) 'images': images,
             }),
           )
           .timeout(const Duration(seconds: 180));
@@ -636,6 +662,54 @@ class CloudService {
       return json.decode(r.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('CloudService: autism daily-plan error $e');
+      return null;
+    }
+  }
+
+  /// 计划表：预生成所有选项图片，只写云端缓存/存储，不下发机器人。
+  Future<Map<String, dynamic>?> prepareAutismDailyPlanAssets(
+    int childIdToFetch, {
+    required List<Map<String, dynamic>> slots,
+  }) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/my/children/$childIdToFetch/autism/daily-plan/assets'),
+            headers: _authHeaders(),
+            body: json.encode({'slots': slots}),
+          )
+          .timeout(const Duration(seconds: 300));
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: autism daily-plan assets ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      return json.decode(r.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('CloudService: autism daily-plan assets error $e');
+      return null;
+    }
+  }
+
+  /// 检查计划表图片是否已在云端缓存；不触发生图。
+  Future<Map<String, dynamic>?> checkAutismDailyPlanAssets(
+    int childIdToFetch, {
+    required List<Map<String, dynamic>> slots,
+  }) async {
+    try {
+      final r = await http
+          .post(
+            Uri.parse('${_base()}/my/children/$childIdToFetch/autism/daily-plan/assets/check'),
+            headers: _authHeaders(),
+            body: json.encode({'slots': slots}),
+          )
+          .timeout(timeout);
+      if (r.statusCode != 200) {
+        debugPrint('CloudService: autism daily-plan assets check ${r.statusCode}: ${r.body}');
+        return null;
+      }
+      return json.decode(r.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('CloudService: autism daily-plan assets check error $e');
       return null;
     }
   }
