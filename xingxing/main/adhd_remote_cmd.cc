@@ -354,23 +354,6 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
     }
 }
 
-static void StartAutismImageSequence(cJSON* images) {
-    if (!cJSON_IsObject(images)) {
-        return;
-    }
-    auto* urls = new std::vector<std::string>();
-    cJSON* child = nullptr;
-    cJSON_ArrayForEach(child, images) {
-        if (cJSON_IsString(child) && child->valuestring && strlen(child->valuestring) > 0) {
-            urls->push_back(child->valuestring);
-        }
-    }
-    if (urls->empty()) {
-        delete urls;
-        return;
-    }
-    StartAutismImageSequenceUrls(urls);
-}
 
 static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
     if (!slot.image_urls.empty()) {
@@ -464,7 +447,7 @@ static void StoreAutismDailyPlan(cJSON* session) {
         cJSON* options = cJSON_GetObjectItem(item, "options");
         const int opt_count = cJSON_IsArray(options) ? cJSON_GetArraySize(options) : 4;
         for (int j = 0; j < opt_count; ++j) {
-            char key[16];
+            char key[24];
             snprintf(key, sizeof(key), "s%d_o%d", i, j);
             cJSON* url = cJSON_IsObject(images) ? cJSON_GetObjectItem(images, key) : nullptr;
             if (cJSON_IsString(url) && url->valuestring && strlen(url->valuestring) > 0) {
