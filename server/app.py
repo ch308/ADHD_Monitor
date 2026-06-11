@@ -3240,7 +3240,7 @@ def autism_training_start(child_id):
         else:
             images[key] = _autism_square_image_url_cached(
                 chinese_label=opt,
-                prompt_core_zh=f"儿童训练选项图标，{opt}，正方形构图，无文字",
+                prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}"),
             )
     payload = {
         "kind": "training_start",
@@ -3314,7 +3314,7 @@ def autism_training_assets(child_id):
             key = f"o{i}"
             url = _autism_square_image_url_cached(
                 chinese_label=opt,
-                prompt_core_zh=f"儿童训练场景图片，场景：{scene_id}，引导语：{tts_intro}，选项：{opt}，正方形构图，无文字",
+                prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}。引导语：{tts_intro}"),
             )
             scene_images[key] = url
             if url:
@@ -3368,7 +3368,8 @@ def autism_training_assets_check(child_id):
             expected += 1
             key = f"o{i}"
             url = _autism_square_image_url_lookup_cached(
-                prompt_core_zh=f"儿童训练场景图片，场景：{scene_id}，引导语：{tts_intro}，选项：{opt}，正方形构图，无文字",
+                prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}。引导语：{tts_intro}"),
+                chinese_label=opt,
             )
             scene_images[key] = url
             if url:
@@ -3498,7 +3499,7 @@ def autism_daily_plan(child_id):
             else:
                 images[key] = _autism_square_image_url_cached(
                     chinese_label=opt,
-                    prompt_core_zh=f"儿童日常计划选择图片，{slot['tts']}，选项：{opt}，正方形构图，无文字",
+                    prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{slot['tts']}"),
                 )
     plan_obj = {"kind": "daily_plan", "slots": slots, "images": images}
     cursor.execute(
@@ -3557,7 +3558,7 @@ def autism_daily_plan_assets(child_id):
             key = f"s{i}_o{j}"
             url = _autism_square_image_url_cached(
                 chinese_label=opt,
-                prompt_core_zh=f"儿童日常计划选择图片，{tts}，选项：{opt}，正方形构图，无文字",
+                prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{tts}"),
             )
             images[key] = url
             if url:
@@ -3600,7 +3601,8 @@ def autism_daily_plan_assets_check(child_id):
             expected += 1
             key = f"s{i}_o{j}"
             url = _autism_square_image_url_lookup_cached(
-                prompt_core_zh=f"儿童日常计划选择图片，{tts}，选项：{opt}，正方形构图，无文字",
+                prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{tts}"),
+                chinese_label=opt,
             )
             images[key] = url
             if url:
@@ -4256,6 +4258,23 @@ _IMAGE_STYLE_SUFFIX_ZHIPU = (
 )
 
 
+def _autism_option_icon_prompt(label: str, context: str = "") -> str:
+    """给训练/计划表选项生图的统一 prompt：重点只画选项本身，避免被整句上下文带偏。"""
+    clean_label = _compact_text(label, 40)
+    clean_context = _compact_text(context, 120)
+    if clean_context:
+        return (
+            f"只画一个清晰可识别的「{clean_label}」儿童选择卡片图标。"
+            f"主体必须是：{clean_label}。"
+            f"上下文仅供理解，不要画上下文里的其他物品或人物：{clean_context}。"
+            "单一主体，居中，大图标，正方形构图，无文字。"
+        )
+    return (
+        f"只画一个清晰可识别的「{clean_label}」儿童选择卡片图标。"
+        f"主体必须是：{clean_label}。单一主体，居中，大图标，正方形构图，无文字。"
+    )
+
+
 def _autism_public_base_url() -> str:
     """星星拉图的绝对 URL 前缀（设备侧需可访问）。未设置时默认本机端口。"""
     return (
@@ -4382,9 +4401,34 @@ def _autism_image_cache_key(prompt_core_zh: str, fallback_label: str = "配图")
     return hashlib.sha256(full_prompt.encode("utf-8")).hexdigest(), full_prompt
 
 
-def _autism_square_image_url_lookup_cached(prompt_core_zh: str) -> str | None:
+def _autism_local_image_url_by_label(label: str) -> str | None:
+    """兜底：DB 记录缺失时，按 server/action 文件名包含中文标签来找已有备份图。"""
+    label = (label or "").strip()
+    if not label:
+        return None
+    try:
+        if not os.path.isdir(_AUTISM_LOCAL_IMAGE_STORE):
+            return None
+        candidates = []
+        for fn in os.listdir(_AUTISM_LOCAL_IMAGE_STORE):
+            if not fn.lower().endswith(".png"):
+                continue
+            if label in fn:
+                path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
+                candidates.append((os.path.getmtime(path), fn))
+        if not candidates:
+            return None
+        candidates.sort(reverse=True)
+        return f"{_autism_public_base_url()}/autism/action-images/{candidates[0][1]}"
+    except Exception as e:
+        app.logger.warning("autism image local lookup by label failed: %s", e)
+        return None
+
+
+def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: str = "") -> str | None:
     """只查询已缓存的 240x240 图片 URL；不会调用智谱生成新图。"""
-    ck, _ = _autism_image_cache_key(prompt_core_zh)
+    ck, full_prompt = _autism_image_cache_key(prompt_core_zh, chinese_label or "配图")
+    app.logger.info("ZHIPU_IMAGE_PROMPT_CHECK label=%s prompt=%s", chinese_label, full_prompt)
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     cursor.execute(
@@ -4392,8 +4436,25 @@ def _autism_square_image_url_lookup_cached(prompt_core_zh: str) -> str | None:
         (ck,),
     )
     row = cursor.fetchone()
+    if row and row[0]:
+        conn.close()
+        return row[0]
+    label = (chinese_label or "").strip()
+    if label:
+        cursor.execute(
+            """
+            SELECT public_url FROM autism_image_cache
+            WHERE label_zh = ?
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (label,),
+        )
+        row = cursor.fetchone()
     conn.close()
-    return row[0] if row and row[0] else None
+    if row and row[0]:
+        return row[0]
+    return _autism_local_image_url_by_label(label)
 
 
 def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> str | None:
@@ -4408,6 +4469,7 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     """
     label = (chinese_label or "").strip() or "配图"
     ck, full_prompt = _autism_image_cache_key(prompt_core_zh, label)
+    app.logger.info("ZHIPU_IMAGE_PROMPT label=%s prompt=%s", label, full_prompt)
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     cursor.execute(
