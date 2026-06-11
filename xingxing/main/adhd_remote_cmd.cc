@@ -78,6 +78,7 @@ struct AutismChoiceContext {
     std::string kind;
     std::string source;
     std::string slot_time;
+    std::string focus_label;
     std::vector<AutismChoiceItem> items;
 };
 
@@ -269,8 +270,16 @@ static bool PostAutismTrainingChoiceEvent(const AutismChoiceContext& ctx, int in
         cJSON_AddStringToObject(payload, "kind", ctx.kind.c_str());
         cJSON_AddStringToObject(payload, "source", ctx.source.c_str());
         cJSON_AddStringToObject(payload, "slot_time", ctx.slot_time.c_str());
+        cJSON_AddStringToObject(payload, "focus_label", ctx.focus_label.c_str());
         cJSON_AddStringToObject(payload, "label", label.c_str());
         cJSON_AddNumberToObject(payload, "option_index", index);
+        cJSON* opts = cJSON_CreateArray();
+        if (opts != nullptr) {
+            for (const auto& item : ctx.items) {
+                cJSON_AddItemToArray(opts, cJSON_CreateString(item.label.c_str()));
+            }
+            cJSON_AddItemToObject(payload, "options", opts);
+        }
         cJSON_AddItemToObject(root, "payload", payload);
     }
     char* out = cJSON_PrintUnformatted(root);
@@ -511,9 +520,10 @@ static void ChoiceLabelAudioHoldTask(void* arg) {
 }
 
 static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url) {
-    if (audio_url.empty()) {
-        return;
-    }
+    (void)generation;
+    (void)index;
+    (void)audio_url;
+    return;
     auto* req = new ChoiceLabelAudioRequest();
     req->generation = generation;
     req->index = index;
@@ -644,6 +654,7 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
         ctx->kind = "daily_plan";
         ctx->source = "daily_plan";
         ctx->slot_time = slot.time_text;
+        ctx->focus_label = slot.tts;
         for (size_t i = 0; i < slot.image_urls.size(); ++i) {
             AutismChoiceItem item;
             item.image_url = slot.image_urls[i];
@@ -847,12 +858,6 @@ bool adhd_confirm_autism_choice(void) {
              snapshot.scene.c_str(), idx, label.c_str());
     (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
     ScheduleVisualChoiceFallbackRestore();
-    const std::string line = label.empty()
-        ? std::string(reinterpret_cast<const char*>(u8"\u6211\u5df2\u7ecf\u505a\u51fa\u4e86\u9009\u62e9"))
-        : std::string(reinterpret_cast<const char*>(u8"\u6211\u9009\u62e9\u4e86")) + label;
-    Application::GetInstance().Schedule([line]() {
-        Application::GetInstance().SubmitChildTextInput(line);
-    });
     return true;
 }
 
@@ -975,6 +980,7 @@ static void HandleOneCommand(cJSON* root) {
             cJSON* sidn = cJSON_GetObjectItem(session, "session_id");
             const int sid = cJSON_IsNumber(sidn) ? sidn->valueint : 0;
             cJSON* scene = cJSON_GetObjectItem(session, "scene_id");
+            cJSON* focus = cJSON_GetObjectItem(session, "focus_label");
             cJSON* options = cJSON_GetObjectItem(session, "options");
             cJSON* images = cJSON_GetObjectItem(session, "images");
             cJSON* audio = cJSON_GetObjectItem(session, "audio");
@@ -983,6 +989,7 @@ static void HandleOneCommand(cJSON* root) {
             ctx->kind = "training_start";
             ctx->source = "child_training";
             ctx->session_id = sid;
+            ctx->focus_label = cJSON_IsString(focus) && focus->valuestring ? focus->valuestring : "";
             const int opt_count = cJSON_IsArray(options) ? cJSON_GetArraySize(options) : 0;
             for (int i = 0; i < opt_count; ++i) {
                 char key[16];

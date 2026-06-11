@@ -3277,8 +3277,15 @@ def autism_need_confirm(child_id, need_id):
     return jsonify({"status": "ok", "id": need_id}), 200
 
 
-def _autism_followup_options_for_choice(scene: str, label: str) -> list[str]:
+def _autism_followup_options_for_choice(
+    scene: str,
+    label: str,
+    focus_label: str = "",
+    previous_options: list[str] | None = None,
+) -> list[str]:
     label = (label or "").strip()
+    focus = (focus_label or "").strip()
+    target = focus if label == "都不是" and focus else label
     scene = (scene or "").strip()
     pools = {
         "害怕": ["很大的声音", "黑黑的房间", "陌生的人", "突然靠近的小动物", "看起来很高的地方"],
@@ -3286,19 +3293,43 @@ def _autism_followup_options_for_choice(scene: str, label: str) -> list[str]:
         "生气": ["玩具被拿走", "别人插队了", "声音太吵了", "事情没有按计划来", "有人碰了你的东西"],
         "开心": ["喜欢的玩具", "好吃的点心", "妈妈抱抱", "一起玩游戏", "完成了一件事"],
     }
-    candidates = pools.get(label)
+    candidates = list(pools.get(target) or [])
     if not candidates:
         candidates = [
-            f"和{label}有关的事情",
+            f"和{target or label}有关的事情",
             "很大的声音",
             "陌生的人",
             "想休息一下",
             "不知道怎么说",
         ]
+    used = {str(x or "").strip() for x in (previous_options or [])}
+    candidates = [x for x in candidates if x not in used and x != "都不是"] or [
+        x for x in (pools.get(target) or []) if x != "都不是"
+    ] or candidates
     first_two = random.sample(candidates, k=min(2, len(candidates)))
     while len(first_two) < 2:
         first_two.append("不知道怎么说")
     return [first_two[0], first_two[1], "都不是"]
+
+
+def _autism_daily_plan_alternative_options(question: str, previous_options: list[str] | None = None) -> list[str]:
+    """计划表里选“都不是”时，围绕原计划问题换一组选项。"""
+    q = (question or "").strip()
+    used = {str(x or "").strip() for x in (previous_options or [])}
+    if any(k in q for k in ("饭", "吃", "菜", "点心", "早餐", "午餐", "晚餐")):
+        candidates = ["粥", "鸡蛋", "水果", "汤", "面包", "牛奶"]
+    elif any(k in q for k in ("鞋", "衣", "穿", "颜色")):
+        candidates = ["黄色", "绿色", "白色", "黑色", "小花", "星星"]
+    elif any(k in q for k in ("玩", "游戏", "起床后")):
+        candidates = ["画画", "看书", "唱歌", "玩车", "拼图", "贴纸"]
+    elif any(k in q for k in ("午睡", "睡", "起床")):
+        candidates = ["抱抱", "喝水", "再等一下", "上厕所", "听故事"]
+    else:
+        candidates = ["换一个选择", "大人帮我选", "再想一想", "稍等一下", "休息一下"]
+    candidates = [x for x in candidates if x not in used]
+    while len(candidates) < 2:
+        candidates.append("再想一想")
+    return [candidates[0], candidates[1], "都不是"]
 
 
 def _autism_followup_images_for_options(options: list[str], scene: str, previous_label: str) -> dict[str, str | None]:
@@ -3314,6 +3345,24 @@ def _autism_followup_images_for_options(options: list[str], scene: str, previous
             )
         images[f"o{i}"] = _autism_square_image_url_cached(opt, prompt)
     return images
+
+
+def _autism_option_image_url(opt: str, context: str) -> str | None:
+    if (opt or "").strip() == "都不是":
+        return _autism_none_of_above_image_url()
+    return _autism_square_image_url_cached(
+        chinese_label=opt,
+        prompt_core_zh=_autism_option_icon_prompt(opt, context),
+    )
+
+
+def _autism_option_image_url_lookup(opt: str, context: str) -> str | None:
+    if (opt or "").strip() == "都不是":
+        return _autism_none_of_above_image_url()
+    return _autism_square_image_url_lookup_cached(
+        prompt_core_zh=_autism_option_icon_prompt(opt, context),
+        chinese_label=opt,
+    )
 
 
 def _autism_audio_for_options(options: list[str], images: dict[str, str | None], prefix: str = "o") -> dict[str, str | None]:
@@ -3352,10 +3401,7 @@ def autism_training_start(child_id):
         if isinstance(u, str) and u.startswith("http") and _autism_cached_url_is_usable(u):
             images[key] = u
         else:
-            images[key] = _autism_square_image_url_cached(
-                chinese_label=opt,
-                prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}"),
-            )
+            images[key] = _autism_option_image_url(opt, f"训练场景：{scene_id}")
     audio = _autism_audio_for_options(options, images)
     payload = {
         "kind": "training_start",
@@ -3428,10 +3474,7 @@ def autism_training_assets(child_id):
         for i, opt in enumerate(clean_options[:4]):
             expected += 1
             key = f"o{i}"
-            url = _autism_square_image_url_cached(
-                chinese_label=opt,
-                prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}。引导语：{tts_intro}"),
-            )
+            url = _autism_option_image_url(opt, f"训练场景：{scene_id}。引导语：{tts_intro}")
             scene_images[key] = url
             if url:
                 ready += 1
@@ -3483,10 +3526,7 @@ def autism_training_assets_check(child_id):
         for i, opt in enumerate(clean_options[:4]):
             expected += 1
             key = f"o{i}"
-            url = _autism_square_image_url_lookup_cached(
-                prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}。引导语：{tts_intro}"),
-                chinese_label=opt,
-            )
+            url = _autism_option_image_url_lookup(opt, f"训练场景：{scene_id}。引导语：{tts_intro}")
             scene_images[key] = url
             if url:
                 ready += 1
@@ -3613,10 +3653,7 @@ def autism_daily_plan(child_id):
             if isinstance(u, str) and u.startswith("http") and _autism_cached_url_is_usable(u):
                 images[key] = u
             else:
-                images[key] = _autism_square_image_url_cached(
-                    chinese_label=opt,
-                    prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{slot['tts']}"),
-                )
+                images[key] = _autism_option_image_url(opt, f"计划表话术：{slot['tts']}")
     audio: dict[str, str | None] = {}
     for i, slot in enumerate(slots):
         for j, opt in enumerate(slot["options"]):
@@ -3677,10 +3714,7 @@ def autism_daily_plan_assets(child_id):
             if not opt:
                 continue
             key = f"s{i}_o{j}"
-            url = _autism_square_image_url_cached(
-                chinese_label=opt,
-                prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{tts}"),
-            )
+            url = _autism_option_image_url(opt, f"计划表话术：{tts}")
             images[key] = url
             if url:
                 count += 1
@@ -3721,10 +3755,7 @@ def autism_daily_plan_assets_check(child_id):
                 continue
             expected += 1
             key = f"s{i}_o{j}"
-            url = _autism_square_image_url_lookup_cached(
-                prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{tts}"),
-                chinese_label=opt,
-            )
+            url = _autism_option_image_url_lookup(opt, f"计划表话术：{tts}")
             images[key] = url
             if url:
                 ready += 1
@@ -3954,16 +3985,36 @@ def device_autism_training_event(device_id):
     if phase == "image_confirmed" and isinstance(payload, dict):
         label = str(payload.get("label") or "").strip()
         if label:
-            options = _autism_followup_options_for_choice(scene, label)
-            images = _autism_followup_images_for_options(options, scene, label)
-            audio = _autism_audio_for_options(options, images)
-            if label == "都不是":
-                tts_intro = "没关系，我们再换几张图慢慢看。哪个更像呢？"
+            payload_kind = str(payload.get("kind") or "").strip()
+            payload_source = str(payload.get("source") or "").strip()
+            focus_label = str(payload.get("focus_label") or "").strip()
+            previous_options = payload.get("options") if isinstance(payload.get("options"), list) else []
+            is_daily_plan_choice = (
+                payload_kind == "daily_plan"
+                or payload_source == "daily_plan"
+                or scene == "daily_plan"
+            )
+            if is_daily_plan_choice and label != "都不是":
+                return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
+            if is_daily_plan_choice:
+                options = _autism_daily_plan_alternative_options(focus_label, previous_options)
+                image_context = focus_label or "计划表"
+                tts_intro = "好，我们换一组继续看。你更想选哪个？"
             else:
-                tts_intro = f"你选择了{label}。我们看看，是什么让你觉得{label}？"
+                if label != "都不是":
+                    focus_label = label
+                options = _autism_followup_options_for_choice(scene, label, focus_label, previous_options)
+                image_context = focus_label or label
+                if label == "都不是":
+                    tts_intro = "好，我们换一组继续看。哪个更像呢？"
+                else:
+                    tts_intro = f"我们看看，是什么让你觉得{label}？"
+            images = _autism_followup_images_for_options(options, scene, image_context)
+            audio = _autism_audio_for_options(options, images)
             followup = {
                 "kind": "training_start",
                 "scene_id": scene or "follow_up",
+                "focus_label": focus_label,
                 "options": options,
                 "images": images,
                 "audio": audio,
