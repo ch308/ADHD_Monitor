@@ -43,11 +43,14 @@ _AUTISM_LOCAL_IMAGE_STORE = os.path.normpath(
 def autism_action_image_public(fn: str):
     """未配置腾讯云 COS 时，240×240 PNG 落盘于此，供星星机器人通过 HTTP 拉取。"""
     if not fn or ".." in fn or "/" in fn or "\\" in fn:
+        app.logger.warning("action-image reject (bad name): %r", fn)
         abort(404)
     if not re.match(r"^[\w\u4e00-\u9fff\-.]+\.png$", fn):
+        app.logger.warning("action-image reject (regex): %r", fn)
         abort(404)
     path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
     if not os.path.isfile(path):
+        app.logger.warning("action-image 404 (file missing on disk): %s", path)
         abort(404)
     return send_file(path, mimetype="image/png")
 
@@ -3235,7 +3238,10 @@ def autism_training_start(child_id):
     for i, opt in enumerate(options):
         key = f"o{i}"
         u = provided_images.get(key)
-        if isinstance(u, str) and u.startswith("http"):
+        # App 传来的本地兜底图 URL 可能指向已被清理的文件（迁服务器时只搬了 DB，
+        # 没搬 server/action/*.png），原样下发会让星星机器人拉图 404。本地 URL
+        # 必须校验磁盘文件，文件缺失则忽略并走重新生成。
+        if isinstance(u, str) and u.startswith("http") and _autism_cached_url_is_usable(u):
             images[key] = u
         else:
             images[key] = _autism_square_image_url_cached(
@@ -3494,7 +3500,7 @@ def autism_daily_plan(child_id):
         for j, opt in enumerate(slot["options"]):
             key = f"s{i}_o{j}"
             u = provided_images.get(key)
-            if isinstance(u, str) and u.startswith("http"):
+            if isinstance(u, str) and u.startswith("http") and _autism_cached_url_is_usable(u):
                 images[key] = u
             else:
                 images[key] = _autism_square_image_url_cached(
@@ -4437,6 +4443,64 @@ def _autism_rewrite_local_image_url(url: str | None) -> str | None:
     return f"{_autism_public_base_url()}{url[pos:]}"
 
 
+def _autism_cached_url_is_usable(url: str | None) -> bool:
+    """缓存命中的 URL 是否真的可拉取。
+
+    仅本地兜底图（/autism/action-images/<fn>）需要校验磁盘文件是否存在——
+    DB 记录在、文件却被迁移/清理掉时，星星机器人会拿到 404。COS/CDN 等远程
+    URL 无法在此廉价校验，按可用处理。
+    """
+    if not isinstance(url, str) or not url:
+        return False
+    marker = "/autism/action-images/"
+    pos = url.find(marker)
+    if pos < 0:
+        return True  # 远程 URL（如腾讯云 COS），无法本地校验，视为可用
+    fn = url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0]
+    if not fn or ".." in fn or "/" in fn or "\\" in fn:
+        return False
+    return os.path.isfile(os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn))
+
+
+def _prune_stale_autism_image_cache() -> None:
+    """启动自检：删除所有指向缺失本地文件的图片缓存记录。
+
+    迁服务器时常只搬了 adhd_data.db、没搬 server/action/*.png，导致 DB 命中却
+    404。开机时一次性清掉这些死记录，之后首次用到会重新生成（需配 GLM_API_KEY）。
+    COS/CDN 等远程 URL 无法廉价校验，保留不动。
+    """
+    try:
+        conn = sqlite3.connect("adhd_data.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT cache_key, public_url FROM autism_image_cache")
+        rows = cursor.fetchall()
+        stale_keys = [
+            ck for ck, url in rows if not _autism_cached_url_is_usable(url)
+        ]
+        if stale_keys:
+            cursor.executemany(
+                "DELETE FROM autism_image_cache WHERE cache_key = ?",
+                [(ck,) for ck in stale_keys],
+            )
+            conn.commit()
+        conn.close()
+        if stale_keys:
+            print(
+                f"⚠️  图片缓存自检：清理 {len(stale_keys)}/{len(rows)} 条指向缺失"
+                f"本地文件的记录（store={_AUTISM_LOCAL_IMAGE_STORE}）"
+            )
+        else:
+            print(f"✅ 图片缓存自检：{len(rows)} 条记录均有效")
+    except sqlite3.OperationalError:
+        # autism_image_cache 表尚未创建（首次启动）等情况，忽略即可。
+        pass
+    except Exception as e:
+        print(f"图片缓存自检失败（忽略，不影响启动）：{e}")
+
+
+_prune_stale_autism_image_cache()
+
+
 def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: str = "") -> str | None:
     """只查询已缓存的 240x240 图片 URL；不会调用智谱生成新图。"""
     ck, full_prompt = _autism_image_cache_key(prompt_core_zh, chinese_label or "配图")
@@ -4449,8 +4513,10 @@ def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: s
     )
     row = cursor.fetchone()
     if row and row[0]:
-        conn.close()
-        return _autism_rewrite_local_image_url(row[0])
+        cached = _autism_rewrite_local_image_url(row[0])
+        if _autism_cached_url_is_usable(cached):
+            conn.close()
+            return cached
     label = (chinese_label or "").strip()
     if label:
         cursor.execute(
@@ -4465,7 +4531,9 @@ def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: s
         row = cursor.fetchone()
     conn.close()
     if row and row[0]:
-        return _autism_rewrite_local_image_url(row[0])
+        cached = _autism_rewrite_local_image_url(row[0])
+        if _autism_cached_url_is_usable(cached):
+            return cached
     return _autism_local_image_url_by_label(label)
 
 
@@ -4489,9 +4557,23 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
         (ck,),
     )
     row = cursor.fetchone()
-    conn.close()
     if row and row[0]:
-        return _autism_rewrite_local_image_url(row[0])
+        cached = _autism_rewrite_local_image_url(row[0])
+        if _autism_cached_url_is_usable(cached):
+            conn.close()
+            return cached
+        # DB 有记录但本地文件已丢失：删掉死记录，落到下面重新生成。
+        app.logger.warning(
+            "autism image cache stale (file missing), regenerating: %s", cached
+        )
+        try:
+            cursor.execute(
+                "DELETE FROM autism_image_cache WHERE cache_key = ?", (ck,)
+            )
+            conn.commit()
+        except Exception as e:
+            app.logger.warning("autism image cache cleanup failed: %s", e)
+    conn.close()
 
     tmp_url = _zhipu_raw_image_temp_url(full_prompt)
     if not tmp_url:
