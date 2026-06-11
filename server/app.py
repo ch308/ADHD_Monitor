@@ -93,6 +93,23 @@ def autism_action_image_public(fn: str):
     return send_file(path, mimetype="image/png")
 
 
+@app.route("/autism/action-audio/<fn>", methods=["GET"])
+def autism_action_audio_public(fn: str):
+    """动态训练图片对应的本地 OGG 标签音频。"""
+    raw_fn = fn
+    fn = _autism_normalize_action_image_filename(fn)
+    if fn != raw_fn:
+        app.logger.info("action-audio repaired filename mojibake: %r -> %r", raw_fn, fn)
+    if not fn or ".." in fn or "/" in fn or "\\" in fn:
+        abort(404)
+    if not re.match(r"^[\w\u4e00-\u9fff\-.]+\.ogg$", fn):
+        abort(404)
+    path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
+    if not os.path.isfile(path):
+        abort(404)
+    return send_file(path, mimetype="audio/ogg")
+
+
 try:
     from flask_sock import Sock
 
@@ -3285,7 +3302,8 @@ def _autism_followup_images_for_options(options: list[str], scene: str, previous
             prompt = (
                 "只画一个清晰可识别的儿童选择卡片图标：一个大大的圆圈，"
                 "圆圈里面画一个超大的红叉，表示都不是。正方形构图，"
-                "单一主体，居中，大图标，无文字。"
+                "单一主体，居中，图形占画面至少80%，背景是治愈色淡淡的橙色。"
+                "底部预留干净标签区域，不要自己写任何文字。"
             )
         else:
             prompt = _autism_option_icon_prompt(
@@ -3294,6 +3312,14 @@ def _autism_followup_images_for_options(options: list[str], scene: str, previous
             )
         images[f"o{i}"] = _autism_square_image_url_cached(opt, prompt)
     return images
+
+
+def _autism_audio_for_options(options: list[str], images: dict[str, str | None], prefix: str = "o") -> dict[str, str | None]:
+    audio: dict[str, str | None] = {}
+    for i, opt in enumerate(options):
+        key = f"{prefix}{i}"
+        audio[key] = _autism_label_audio_url(opt, images.get(key))
+    return audio
 
 
 @app.route("/my/children/<int:child_id>/autism/training/start", methods=["POST"])
@@ -3328,11 +3354,13 @@ def autism_training_start(child_id):
                 chinese_label=opt,
                 prompt_core_zh=_autism_option_icon_prompt(opt, f"训练场景：{scene_id}"),
             )
+    audio = _autism_audio_for_options(options, images)
     payload = {
         "kind": "training_start",
         "scene_id": scene_id,
         "options": options,
         "images": images,
+        "audio": audio,
         "follow_up": bool(data.get("follow_up")),
         "tts_intro": (data.get("tts_intro") or "").strip(),
     }
@@ -3587,7 +3615,12 @@ def autism_daily_plan(child_id):
                     chinese_label=opt,
                     prompt_core_zh=_autism_option_icon_prompt(opt, f"计划表话术：{slot['tts']}"),
                 )
-    plan_obj = {"kind": "daily_plan", "slots": slots, "images": images}
+    audio: dict[str, str | None] = {}
+    for i, slot in enumerate(slots):
+        for j, opt in enumerate(slot["options"]):
+            key = f"s{i}_o{j}"
+            audio[key] = _autism_label_audio_url(opt, images.get(key))
+    plan_obj = {"kind": "daily_plan", "slots": slots, "images": images, "audio": audio}
     cursor.execute(
         """
         INSERT INTO autism_daily_plans (child_id, plan_json, images_json, created_at)
@@ -3603,7 +3636,7 @@ def autism_daily_plan(child_id):
     pid = cursor.lastrowid
     conn.commit()
     conn.close()
-    session = {"kind": "daily_plan", "plan_id": pid, "slots": slots, "images": images}
+    session = {"kind": "daily_plan", "plan_id": pid, "slots": slots, "images": images, "audio": audio}
     queued = _enqueue_autism_session_for_child(child_id, session)
     return jsonify(
         {"status": "ok", "plan_id": pid, "queued_devices": queued, "images": images}
@@ -3921,6 +3954,7 @@ def device_autism_training_event(device_id):
         if label:
             options = _autism_followup_options_for_choice(scene, label)
             images = _autism_followup_images_for_options(options, scene, label)
+            audio = _autism_audio_for_options(options, images)
             if label == "都不是":
                 tts_intro = "没关系，我们再换几张图慢慢看。哪个更像呢？"
             else:
@@ -3930,6 +3964,7 @@ def device_autism_training_event(device_id):
                 "scene_id": scene or "follow_up",
                 "options": options,
                 "images": images,
+                "audio": audio,
                 "follow_up": True,
                 "tts_intro": tts_intro,
             }
@@ -4360,8 +4395,11 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
 # 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后先备份到本地
 # server/action 目录，再上传腾讯云 COS `action/`，并以完整 prompt 哈希缓存避免重复生成。
 _IMAGE_STYLE_SUFFIX_ZHIPU = (
-    " A minimalist 2D flat vector icon，Cute style, child-friendly, soft pastel colors, "
-    "solid clean background, bold clean lines, no complex details, no text. "
+    " A minimalist 2D flat vector icon, cute child-friendly therapeutic style. "
+    "The main subject must be very large and fill at least 80 percent of the visible card area, "
+    "centered, bold clean outline, simple recognizable shapes, no tiny facial features. "
+    "Use a soft healing pale orange solid background. "
+    "Leave a clean empty label band at the bottom; do not generate any text, letters, watermark, or signature. "
     "Perfect square composition. --ar 1:1"
 )
 
@@ -4375,11 +4413,13 @@ def _autism_option_icon_prompt(label: str, context: str = "") -> str:
             f"只画一个清晰可识别的「{clean_label}」儿童选择卡片图标。"
             f"主体必须是：{clean_label}。"
             f"上下文仅供理解，不要画上下文里的其他物品或人物：{clean_context}。"
-            "单一主体，居中，大图标，正方形构图，无文字。"
+            "单一主体，居中，主体占画面至少80%，正方形构图，背景是治愈色淡淡的橙色。"
+            "底部预留干净标签区域，不要自己写任何文字。"
         )
     return (
         f"只画一个清晰可识别的「{clean_label}」儿童选择卡片图标。"
-        f"主体必须是：{clean_label}。单一主体，居中，大图标，正方形构图，无文字。"
+        f"主体必须是：{clean_label}。单一主体，居中，主体占画面至少80%，"
+        "正方形构图，背景是治愈色淡淡的橙色。底部预留干净标签区域，不要自己写任何文字。"
     )
 
 
@@ -4408,12 +4448,34 @@ def _http_download_bytes(url: str, timeout: int = 90) -> bytes | None:
         return None
 
 
-def _png_bytes_240_square(raw: bytes) -> bytes | None:
-    """将任意智谱返回图中心裁成正方形并缩放为 240×240 PNG。"""
+def _autism_label_font(size: int):
+    from PIL import ImageFont
+
+    candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/arphic/ukai.ttc",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/simsun.ttc",
+    ]
+    for path in candidates:
+        try:
+            if os.path.isfile(path):
+                return ImageFont.truetype(path, size=size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _png_bytes_240_square(raw: bytes, label: str = "") -> bytes | None:
+    """将智谱返回图裁成 240×240，并在底部用服务端字体叠加中文标签。"""
     try:
         from io import BytesIO
 
-        from PIL import Image
+        from PIL import Image, ImageDraw
 
         im = Image.open(BytesIO(raw))
         im = im.convert("RGBA")
@@ -4425,6 +4487,21 @@ def _png_bytes_240_square(raw: bytes) -> bytes | None:
         top = (h - side) // 2
         im = im.crop((left, top, left + side, top + side))
         im = im.resize((240, 240), Image.Resampling.LANCZOS)
+
+        clean_label = (label or "").strip()
+        if clean_label:
+            band_h = 34
+            draw = ImageDraw.Draw(im)
+            draw.rectangle((0, 240 - band_h, 240, 240), fill=(255, 238, 216, 255))
+            font_size = 24 if len(clean_label) <= 4 else 20
+            font = _autism_label_font(font_size)
+            bbox = draw.textbbox((0, 0), clean_label, font=font)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            x = max(0, (240 - tw) // 2)
+            y = 240 - band_h + max(0, (band_h - th) // 2) - 2
+            draw.text((x, y), clean_label, fill=(0, 0, 0, 255), font=font)
+
         buf = BytesIO()
         im.save(buf, format="PNG", optimize=True)
         return buf.getvalue()
@@ -4543,6 +4620,68 @@ def _autism_rewrite_local_image_url(url: str | None) -> str | None:
     if pos < 0:
         return url
     return f"{_autism_public_base_url()}{url[pos:]}"
+
+
+def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
+    """为图片生成同名 OGG 标签音频，如 害怕_xxxx.png -> 害怕_xxxx.ogg。"""
+    label = (label or "").strip()
+    if not label or not isinstance(image_url, str):
+        return None
+    marker = "/autism/action-images/"
+    pos = image_url.find(marker)
+    if pos < 0:
+        return None
+    image_fn = image_url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0]
+    image_fn = _autism_normalize_action_image_filename(image_fn)
+    if not image_fn.lower().endswith(".png"):
+        return None
+    audio_fn = image_fn[:-4] + ".ogg"
+    if ".." in audio_fn or "/" in audio_fn or "\\" in audio_fn:
+        return None
+    audio_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, audio_fn)
+    if os.path.isfile(audio_path):
+        return f"{_autism_public_base_url()}/autism/action-audio/{audio_fn}"
+    try:
+        import asyncio
+        import subprocess
+        import tempfile
+        import edge_tts
+        from xiaozhi_bridge import _ffmpeg_bin
+
+        ffmpeg_exe = _ffmpeg_bin()
+        if ffmpeg_exe is None:
+            app.logger.warning("autism label audio skipped: ffmpeg not found")
+            return None
+        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
+        fd_mp3, mp3 = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd_mp3)
+        try:
+            async def _run() -> None:
+                comm = edge_tts.Communicate(
+                    label, os.getenv("XIAOZHI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+                )
+                await comm.save(mp3)
+
+            asyncio.run(_run())
+            subprocess.run(
+                [
+                    ffmpeg_exe, "-y", "-i", mp3,
+                    "-c:a", "libopus", "-b:a", "24k", "-ar", "24000", "-ac", "1",
+                    audio_path,
+                ],
+                check=True,
+                capture_output=True,
+            )
+        finally:
+            try:
+                os.remove(mp3)
+            except OSError:
+                pass
+        app.logger.info("autism label audio saved: %s", audio_path)
+        return f"{_autism_public_base_url()}/autism/action-audio/{audio_fn}"
+    except Exception as e:
+        app.logger.warning("autism label audio failed: %s", e)
+        return None
 
 
 def _autism_cached_url_is_usable(url: str | None) -> bool:
@@ -4683,14 +4822,14 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     raw = _http_download_bytes(tmp_url)
     if not raw:
         return None
-    png = _png_bytes_240_square(raw)
+    png = _png_bytes_240_square(raw, label)
     if not png:
         return None
 
     short = ck[:8]
     # ESP32 HTTP client may send non-ASCII path bytes without percent-encoding.
     # Keep generated local filenames ASCII-only so image URLs are robust.
-    stem = re.sub(r"[^0-9A-Za-z._-]+", "_", label).strip("._")[:40] or "img"
+    stem = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", label).strip("._")[:60] or "img"
     filename = f"{stem}_{short}.png"
     prefix = (os.getenv("TENCENT_COS_ACTION_PREFIX") or "action").strip("/").strip() or "action"
     cos_object_key = f"{prefix}/{filename}"
@@ -4788,7 +4927,7 @@ def diag_glm_image():
         steps["error"] = "拿到智谱临时 URL 但下载图片失败（临时 URL 可能过期或网络不通）。"
         return jsonify({"ok": False, **steps}), 200
 
-    png = _png_bytes_240_square(raw)
+    png = _png_bytes_240_square(raw, label)
     steps["png_240_bytes"] = len(png) if png else 0
     if not png:
         steps["error"] = "240×240 裁切失败：检查 Pillow 是否已安装（pip install Pillow）。"

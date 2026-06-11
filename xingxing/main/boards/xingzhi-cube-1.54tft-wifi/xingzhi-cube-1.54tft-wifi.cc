@@ -421,18 +421,18 @@ private:
                     continue;
                 }
 
-                // 仅在行动卡片模式下响应摇晃：下一张（避免日常携带误进幻灯片）
-                if (!cards.IsActive()) {
-                    continue;
-                }
-
                 if (delta >= MPU6050_SHAKE_SWITCH_THRESHOLD) {
                     last_switch_us = now_us;
                     board->power_save_timer_->WakeUp();
-                    cards.Next();
-                    board->GetDisplay()->ShowNotification("已切换", 700);
-                    ESP_LOGI(TAG, "MPU6050 shake -> Next(), delta=%d accel=(%d,%d,%d)",
-                             delta, ax, ay, az);
+                    if (adhd_next_autism_choice()) {
+                        ESP_LOGI(TAG, "MPU6050 shake -> autism Next(), delta=%d accel=(%d,%d,%d)",
+                                 delta, ax, ay, az);
+                    } else if (cards.IsActive()) {
+                        cards.Next();
+                        board->GetDisplay()->ShowNotification("已切换", 700);
+                        ESP_LOGI(TAG, "MPU6050 shake -> action Next(), delta=%d accel=(%d,%d,%d)",
+                                 delta, ax, ay, az);
+                    }
                 }
             }
         }, "mpu6050", 4096, this, 4, &mpu6050_task_);

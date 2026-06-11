@@ -59,12 +59,14 @@ struct AutismDailyPlanSlot {
     std::string tts;
     std::vector<std::string> option_labels;
     std::vector<std::string> image_urls;
+    std::vector<std::string> audio_urls;
     int last_fired_yday = -1;
 };
 
 struct AutismChoiceItem {
     std::string label;
     std::string image_url;
+    std::string audio_url;
 };
 
 struct AutismChoiceContext {
@@ -88,6 +90,8 @@ static int g_choice_generation = 0;
 #endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation = 0);
+
 // Must match BLE name `XIAOZHI_<id>` / Flutter `EspProvDevice.deviceId` and the
 // plush-ball `ADHD_<id>` convention: last 4 bytes of STA MAC as 8 upper-hex
 // chars (see adhd_prov_ble::make_prov_name and ESP32-S3-LCD Wireless.c).
@@ -226,6 +230,26 @@ static void ScheduleVisualChoiceFallbackRestore() {
     );
 }
 
+static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url);
+
+struct ChoicePreviewRequest {
+    std::string url;
+    std::string audio_url;
+    int generation = 0;
+    int index = -1;
+};
+
+static void ChoicePreviewTask(void* arg) {
+    auto* req = static_cast<ChoicePreviewRequest*>(arg);
+    if (req != nullptr) {
+        if (DownloadAndShowPreviewImage(req->url, req->generation)) {
+            ScheduleChoiceLabelAudio(req->generation, req->index, req->audio_url);
+        }
+        delete req;
+    }
+    vTaskDelete(nullptr);
+}
+
 static bool PostAutismTrainingChoiceEvent(const AutismChoiceContext& ctx, int index, const std::string& label) {
     const std::string id = PathADeviceIdUpper();
     if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
@@ -309,7 +333,7 @@ void adhd_remote_cmd_start_default_proactive(void) {
     Application::GetInstance().SubmitChildTextInput(opening);
 }
 
-static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation = 0) {
+static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation) {
     if (url.empty()) {
         return false;
     }
@@ -432,6 +456,75 @@ static bool DownloadAndShowPreviewImage(const std::string& url, int choice_gener
     }
 }
 
+static bool DownloadAndPlayOggLabel(const std::string& url) {
+    if (url.empty()) {
+        return false;
+    }
+    auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
+    ESP_LOGI(TAG, "autism label audio download: %s", url.c_str());
+    if (!http->Open("GET", url)) {
+        ESP_LOGW(TAG, "autism label audio open failed: %s", url.c_str());
+        return false;
+    }
+    const int status_code = http->GetStatusCode();
+    if (status_code != 200) {
+        ESP_LOGW(TAG, "autism label audio http status=%d url=%s", status_code, url.c_str());
+        http->Close();
+        return false;
+    }
+    std::string body = http->ReadAll();
+    http->Close();
+    if (body.empty() || body.size() > 256 * 1024) {
+        ESP_LOGW(TAG, "autism label audio invalid size=%u", (unsigned)body.size());
+        return false;
+    }
+    Application::GetInstance().PlaySound(std::string_view(body.data(), body.size()));
+    ESP_LOGI(TAG, "autism label audio played bytes=%u", (unsigned)body.size());
+    return true;
+}
+
+struct ChoiceLabelAudioRequest {
+    int generation = 0;
+    int index = -1;
+    std::string audio_url;
+};
+
+static void ChoiceLabelAudioHoldTask(void* arg) {
+    auto* req = static_cast<ChoiceLabelAudioRequest*>(arg);
+    if (req == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    bool still_current = false;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        still_current = g_choice_context.active &&
+                        g_choice_context.generation == req->generation &&
+                        g_choice_context.current_index == req->index;
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (still_current) {
+        (void)DownloadAndPlayOggLabel(req->audio_url);
+    }
+    delete req;
+    vTaskDelete(nullptr);
+}
+
+static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url) {
+    if (audio_url.empty()) {
+        return;
+    }
+    auto* req = new ChoiceLabelAudioRequest();
+    req->generation = generation;
+    req->index = index;
+    req->audio_url = audio_url;
+    BaseType_t tr = xTaskCreate(ChoiceLabelAudioHoldTask, "choice_audio", 8192, req, 3, nullptr);
+    if (tr != pdPASS) {
+        delete req;
+        ESP_LOGW(TAG, "choice_audio task create failed");
+    }
+}
+
 static int ParseHourMinuteToMinuteOfDay(const char* text) {
     if (text == nullptr) {
         return -1;
@@ -475,22 +568,24 @@ static void AutismChoiceSequenceTask(void* arg) {
         xSemaphoreGive(g_choice_mutex);
     }
     const int64_t deadline_us = esp_timer_get_time() + 60LL * 1000LL * 1000LL;
-    size_t i = 0;
+    bool first_shown = false;
     while (esp_timer_get_time() < deadline_us) {
         bool still_active = true;
+        int current_index = 0;
         if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
             still_active = g_choice_context.active && g_choice_context.generation == ctx->generation;
-            if (still_active) {
-                g_choice_context.current_index = static_cast<int>(i);
-            }
+            current_index = g_choice_context.current_index;
             xSemaphoreGive(g_choice_mutex);
         }
         if (!still_active) {
             break;
         }
-        DownloadAndShowPreviewImage(ctx->items[i].image_url, ctx->generation);
-        vTaskDelay(pdMS_TO_TICKS(4500));
-        i = (i + 1) % ctx->items.size();
+        if (!first_shown && current_index >= 0 && current_index < static_cast<int>(ctx->items.size())) {
+            DownloadAndShowPreviewImage(ctx->items[current_index].image_url, ctx->generation);
+            ScheduleChoiceLabelAudio(ctx->generation, current_index, ctx->items[current_index].audio_url);
+            first_shown = true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(250));
     }
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
@@ -553,6 +648,7 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
             AutismChoiceItem item;
             item.image_url = slot.image_urls[i];
             item.label = i < slot.option_labels.size() ? slot.option_labels[i] : "";
+            item.audio_url = i < slot.audio_urls.size() ? slot.audio_urls[i] : "";
             ctx->items.push_back(std::move(item));
         }
         StartAutismChoiceSequence(ctx);
@@ -610,6 +706,7 @@ static void EnsureDailyPlanSchedulerStarted() {
 static void StoreAutismDailyPlan(cJSON* session) {
     cJSON* slots = cJSON_GetObjectItem(session, "slots");
     cJSON* images = cJSON_GetObjectItem(session, "images");
+    cJSON* audio = cJSON_GetObjectItem(session, "audio");
     if (!cJSON_IsArray(slots)) {
         ESP_LOGW(TAG, "daily_plan missing slots");
         return;
@@ -643,8 +740,10 @@ static void StoreAutismDailyPlan(cJSON* session) {
             cJSON* url = cJSON_IsObject(images) ? cJSON_GetObjectItem(images, key) : nullptr;
             if (cJSON_IsString(url) && url->valuestring && strlen(url->valuestring) > 0) {
                 cJSON* opt = cJSON_IsArray(options) ? cJSON_GetArrayItem(options, j) : nullptr;
+                cJSON* audio_url = cJSON_IsObject(audio) ? cJSON_GetObjectItem(audio, key) : nullptr;
                 slot.option_labels.push_back(cJSON_IsString(opt) && opt->valuestring ? opt->valuestring : "");
                 slot.image_urls.push_back(url->valuestring);
+                slot.audio_urls.push_back(cJSON_IsString(audio_url) && audio_url->valuestring ? audio_url->valuestring : "");
             }
         }
         parsed.push_back(std::move(slot));
@@ -757,6 +856,41 @@ bool adhd_confirm_autism_choice(void) {
     return true;
 }
 
+bool adhd_next_autism_choice(void) {
+    EnsureAutismChoiceMutex();
+    std::string url;
+    std::string audio_url;
+    int next_idx = -1;
+    int generation = 0;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (g_choice_context.active && !g_choice_context.items.empty()) {
+            next_idx = (g_choice_context.current_index + 1) %
+                       static_cast<int>(g_choice_context.items.size());
+            g_choice_context.current_index = next_idx;
+            url = g_choice_context.items[next_idx].image_url;
+            audio_url = g_choice_context.items[next_idx].audio_url;
+            generation = g_choice_context.generation;
+        }
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (next_idx < 0 || url.empty()) {
+        return false;
+    }
+    auto* req = new ChoicePreviewRequest();
+    req->url = url;
+    req->audio_url = audio_url;
+    req->generation = generation;
+    req->index = next_idx;
+    BaseType_t tr = xTaskCreate(ChoicePreviewTask, "choice_next", 8192, req, 3, nullptr);
+    if (tr != pdPASS) {
+        ESP_LOGW(TAG, "choice_next task create failed");
+        delete req;
+        return false;
+    }
+    ESP_LOGI(TAG, "autism choice next idx=%d generation=%d", next_idx, generation);
+    return true;
+}
+
 static void AutismTrainingAckTask(void* arg) {
     const int sid = static_cast<int>(reinterpret_cast<intptr_t>(arg));
     if (sid <= 0) {
@@ -843,6 +977,7 @@ static void HandleOneCommand(cJSON* root) {
             cJSON* scene = cJSON_GetObjectItem(session, "scene_id");
             cJSON* options = cJSON_GetObjectItem(session, "options");
             cJSON* images = cJSON_GetObjectItem(session, "images");
+            cJSON* audio = cJSON_GetObjectItem(session, "audio");
             auto* ctx = new AutismChoiceContext();
             ctx->scene = cJSON_IsString(scene) && scene->valuestring ? scene->valuestring : "training";
             ctx->kind = "training_start";
@@ -857,9 +992,11 @@ static void HandleOneCommand(cJSON* root) {
                     continue;
                 }
                 cJSON* opt = cJSON_GetArrayItem(options, i);
+                cJSON* audio_url = cJSON_IsObject(audio) ? cJSON_GetObjectItem(audio, key) : nullptr;
                 AutismChoiceItem item;
                 item.label = cJSON_IsString(opt) && opt->valuestring ? opt->valuestring : "";
                 item.image_url = url->valuestring;
+                item.audio_url = cJSON_IsString(audio_url) && audio_url->valuestring ? audio_url->valuestring : "";
                 ctx->items.push_back(std::move(item));
             }
             ESP_LOGI(TAG, "autism_session training_start scene=%s image_urls=%u session_id=%d",
@@ -1012,6 +1149,9 @@ bool adhd_post_autism_need_event(const char*, const char*, const char*) {
     return false;
 }
 bool adhd_confirm_autism_choice(void) {
+    return false;
+}
+bool adhd_next_autism_choice(void) {
     return false;
 }
 
