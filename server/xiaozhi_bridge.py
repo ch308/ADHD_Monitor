@@ -650,6 +650,15 @@ class XiaozhiConn:
             )
         elif is_asr_miss:
             reply = "我刚才没有听清楚。你可以靠近一点，再慢慢说一遍吗？"
+        elif user_text.startswith("我选择了") and len(user_text.strip()) > 4:
+            choice = user_text.replace("我选择了", "", 1).strip(" 。！？!?")
+            if choice == "都不是":
+                reply = "你选择了都不是，谢谢你告诉我。没关系，我们可以再换几张图慢慢看。"
+            else:
+                reply = (
+                    f"你选择了{choice}，{choice}是很真实的感受，谢谢你愿意告诉我。"
+                    f"你愿意看看是什么让你觉得{choice}吗？我在这里陪着你。"
+                )
         else:
             sys_prompt = (
                 "你是星星守护者，一个陪伴孩子成长的口语伙伴，语气温暖简短，适合外放给孩子听。"

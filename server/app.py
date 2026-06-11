@@ -8,6 +8,7 @@ import time
 import hashlib
 import hmac
 import secrets
+import random
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, Response, send_file, abort, has_request_context
@@ -3253,6 +3254,48 @@ def autism_need_confirm(child_id, need_id):
     return jsonify({"status": "ok", "id": need_id}), 200
 
 
+def _autism_followup_options_for_choice(scene: str, label: str) -> list[str]:
+    label = (label or "").strip()
+    scene = (scene or "").strip()
+    pools = {
+        "害怕": ["很大的声音", "黑黑的房间", "陌生的人", "突然靠近的小动物", "看起来很高的地方"],
+        "难过": ["玩具坏了", "想妈妈了", "朋友不一起玩", "被别人说了不喜欢的话", "想要的东西没有了"],
+        "生气": ["玩具被拿走", "别人插队了", "声音太吵了", "事情没有按计划来", "有人碰了你的东西"],
+        "开心": ["喜欢的玩具", "好吃的点心", "妈妈抱抱", "一起玩游戏", "完成了一件事"],
+    }
+    candidates = pools.get(label)
+    if not candidates:
+        candidates = [
+            f"和{label}有关的事情",
+            "很大的声音",
+            "陌生的人",
+            "想休息一下",
+            "不知道怎么说",
+        ]
+    first_two = random.sample(candidates, k=min(2, len(candidates)))
+    while len(first_two) < 2:
+        first_two.append("不知道怎么说")
+    return [first_two[0], first_two[1], "都不是"]
+
+
+def _autism_followup_images_for_options(options: list[str], scene: str, previous_label: str) -> dict[str, str | None]:
+    images: dict[str, str | None] = {}
+    for i, opt in enumerate(options):
+        if opt == "都不是":
+            prompt = (
+                "只画一个清晰可识别的儿童选择卡片图标：一个大大的圆圈，"
+                "圆圈里面画一个超大的红叉，表示都不是。正方形构图，"
+                "单一主体，居中，大图标，无文字。"
+            )
+        else:
+            prompt = _autism_option_icon_prompt(
+                opt,
+                f"延续训练场景：{scene}。孩子刚选择了：{previous_label}。",
+            )
+        images[f"o{i}"] = _autism_square_image_url_cached(opt, prompt)
+    return images
+
+
 @app.route("/my/children/<int:child_id>/autism/training/start", methods=["POST"])
 def autism_training_start(child_id):
     user = _get_request_user()
@@ -3873,6 +3916,28 @@ def device_autism_training_event(device_id):
         )
     conn.commit()
     conn.close()
+    if phase == "image_confirmed" and isinstance(payload, dict):
+        label = str(payload.get("label") or "").strip()
+        if label:
+            options = _autism_followup_options_for_choice(scene, label)
+            images = _autism_followup_images_for_options(options, scene, label)
+            if label == "都不是":
+                tts_intro = "没关系，我们再换几张图慢慢看。哪个更像呢？"
+            else:
+                tts_intro = f"你选择了{label}。我们看看，是什么让你觉得{label}？"
+            followup = {
+                "kind": "training_start",
+                "scene_id": scene or "follow_up",
+                "options": options,
+                "images": images,
+                "follow_up": True,
+                "tts_intro": tts_intro,
+            }
+            queued = _enqueue_autism_session_for_child(child_id, followup)
+            app.logger.info(
+                "autism follow-up queued child=%s scene=%s label=%s targets=%s options=%s",
+                child_id, scene, label, queued, options,
+            )
     return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
 
 

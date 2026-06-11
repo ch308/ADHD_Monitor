@@ -529,6 +529,12 @@ void Application::HandleActivationDoneEvent() {
     adhd_remote_cmd_announce_sync_once();
 #endif
     adhd_remote_cmd_start();
+
+    Schedule([this]() {
+        if (!visual_choice_mode_ && GetDeviceState() == kDeviceStateIdle) {
+            StartListening();
+        }
+    });
 }
 
 bool Application::SyncClockFromMonitorServer() {
@@ -1252,6 +1258,12 @@ void Application::HandleStateChangedEvent() {
                 esp_timer_stop(endpoint_timer_handle_);
             }
 
+            if (visual_choice_mode_) {
+                audio_service_.EnableVoiceProcessing(false);
+                audio_service_.EnableWakeWordDetection(false);
+                break;
+            }
+
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
                 // For auto mode, wait for playback queue to be empty before enabling voice processing
@@ -1551,6 +1563,20 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
             }
         });
     }
+}
+
+void Application::SetVisualChoiceMode(bool enabled) {
+    Schedule([this, enabled]() {
+        visual_choice_mode_ = enabled;
+        if (enabled) {
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(false);
+        } else if (GetDeviceState() == kDeviceStateListening) {
+            audio_service_.EnableVoiceProcessing(true);
+            audio_service_.EnableWakeWordDetection(false);
+        }
+        ESP_LOGI(TAG, "Visual choice mode: %s", enabled ? "on" : "off");
+    });
 }
 
 void Application::SubmitChildTextInput(const std::string& text) {

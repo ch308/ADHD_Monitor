@@ -193,6 +193,31 @@ static bool IsChoiceGenerationActive(int generation) {
     return active;
 }
 
+static void VisualChoiceFallbackRestoreTask(void*) {
+    vTaskDelay(pdMS_TO_TICKS(30000));
+    bool any_active = false;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        any_active = g_choice_context.active;
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (!any_active) {
+        ESP_LOGI(TAG, "visual choice fallback restore default listening");
+        Application::GetInstance().SetVisualChoiceMode(false);
+    }
+    vTaskDelete(nullptr);
+}
+
+static void ScheduleVisualChoiceFallbackRestore() {
+    (void)xTaskCreate(
+        VisualChoiceFallbackRestoreTask,
+        "choice_restore",
+        3072,
+        nullptr,
+        2,
+        nullptr
+    );
+}
+
 static bool PostAutismTrainingChoiceEvent(const AutismChoiceContext& ctx, int index, const std::string& label) {
     const std::string id = PathADeviceIdUpper();
     if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
@@ -448,6 +473,7 @@ static void AutismChoiceSequenceTask(void* arg) {
         if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
             ESP_LOGI(TAG, "autism choice sequence timeout scene=%s", ctx->scene.c_str());
             g_choice_context.active = false;
+            Application::GetInstance().SetVisualChoiceMode(false);
         }
         xSemaphoreGive(g_choice_mutex);
     }
@@ -473,6 +499,7 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
         delete ctx;
         return;
     }
+    Application::GetInstance().SetVisualChoiceMode(true);
     EnsureAutismChoiceMutex();
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         g_choice_generation++;
@@ -696,6 +723,7 @@ bool adhd_confirm_autism_choice(void) {
     ESP_LOGI(TAG, "autism choice confirmed scene=%s idx=%d label=%s",
              snapshot.scene.c_str(), idx, label.c_str());
     (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
+    ScheduleVisualChoiceFallbackRestore();
     const std::string line = label.empty()
         ? std::string(reinterpret_cast<const char*>(u8"\u6211\u5df2\u7ecf\u505a\u51fa\u4e86\u9009\u62e9"))
         : std::string(reinterpret_cast<const char*>(u8"\u6211\u9009\u62e9\u4e86")) + label;

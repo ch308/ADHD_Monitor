@@ -874,7 +874,14 @@ void LcdDisplay::SetupUI() {
     lv_obj_center(emoji_image_);
     lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
 
-    /* Middle layer: preview_image_ - centered display */
+    /* Middle layer: preview backdrop + image - centered display */
+    preview_backdrop_ = lv_obj_create(screen);
+    lv_obj_remove_style_all(preview_backdrop_);
+    lv_obj_set_size(preview_backdrop_, width_, height_);
+    lv_obj_set_style_bg_color(preview_backdrop_, lvgl_theme->background_color(), 0);
+    lv_obj_set_style_bg_opa(preview_backdrop_, LV_OPA_COVER, 0);
+    lv_obj_add_flag(preview_backdrop_, LV_OBJ_FLAG_HIDDEN);
+
     preview_image_ = lv_image_create(screen);
     lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
@@ -1074,6 +1081,9 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     if (image == nullptr) {
         esp_timer_stop(preview_timer_);
         lv_obj_remove_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+        if (preview_backdrop_ != nullptr) {
+            lv_obj_add_flag(preview_backdrop_, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
         if (top_bar_ != nullptr) {
             lv_obj_remove_flag(top_bar_, LV_OBJ_FLAG_HIDDEN);
@@ -1103,6 +1113,9 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
         gif_controller_->Stop();
     }
     lv_obj_add_flag(emoji_box_, LV_OBJ_FLAG_HIDDEN);
+    if (preview_backdrop_ != nullptr) {
+        lv_obj_remove_flag(preview_backdrop_, LV_OBJ_FLAG_HIDDEN);
+    }
     if (bottom_bar_ != nullptr) {
         lv_obj_add_flag(bottom_bar_, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1112,7 +1125,16 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     if (status_bar_ != nullptr) {
         lv_obj_add_flag(status_bar_, LV_OBJ_FLAG_HIDDEN);
     }
+    if (center_status_label_ != nullptr) {
+        lv_obj_add_flag(center_status_label_, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (welcome_label_ != nullptr) {
+        lv_obj_add_flag(welcome_label_, LV_OBJ_FLAG_HIDDEN);
+    }
     lv_obj_remove_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
+    if (preview_backdrop_ != nullptr) {
+        lv_obj_move_foreground(preview_backdrop_);
+    }
     lv_obj_move_foreground(preview_image_);
     esp_timer_stop(preview_timer_);
     ESP_ERROR_CHECK(esp_timer_start_once(preview_timer_, PREVIEW_IMAGE_DURATION_MS * 1000));
