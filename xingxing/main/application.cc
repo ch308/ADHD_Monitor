@@ -1584,9 +1584,10 @@ void Application::SubmitChildTextInput(const std::string& text) {
             return;
         }
         auto state = GetDeviceState();
+        const ListeningMode submit_mode = visual_choice_mode_ ? kListeningModeManualStop : GetDefaultListeningMode();
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
-            Schedule([this, text]() {
+            Schedule([this, text, submit_mode]() {
                 if (!protocol_ || GetDeviceState() != kDeviceStateConnecting) {
                     return;
                 }
@@ -1594,17 +1595,20 @@ void Application::SubmitChildTextInput(const std::string& text) {
                     SetDeviceState(kDeviceStateIdle);
                     return;
                 }
-                protocol_->SendStartListening(GetDefaultListeningMode());
+                protocol_->SendStartListening(submit_mode);
                 protocol_->SendWakeWordDetected(text);
-                SetListeningMode(GetDefaultListeningMode());
+                SetListeningMode(submit_mode);
             });
             return;
         }
         if (state == kDeviceStateSpeaking) {
             AbortSpeaking(kAbortReasonNone);
         }
-        protocol_->SendStartListening(GetDefaultListeningMode());
+        protocol_->SendStartListening(submit_mode);
         protocol_->SendWakeWordDetected(text);
+        if (visual_choice_mode_) {
+            SetListeningMode(submit_mode);
+        }
     });
 }
 

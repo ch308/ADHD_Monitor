@@ -883,7 +883,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(preview_backdrop_, LV_OBJ_FLAG_HIDDEN);
 
     preview_image_ = lv_image_create(screen);
-    lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
+    lv_obj_set_size(preview_image_, width_, height_);
     lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
     lv_obj_add_flag(preview_image_, LV_OBJ_FLAG_HIDDEN);
 
@@ -1101,11 +1101,13 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     preview_image_cached_ = std::move(image);
     auto img_dsc = preview_image_cached_->image_dsc();
     lv_image_set_src(preview_image_, img_dsc);
+    lv_obj_set_size(preview_image_, width_, height_);
     if (img_dsc->header.w > 0 && img_dsc->header.h > 0) {
         const int scale_w = 256 * width_ / img_dsc->header.w;
         const int scale_h = 256 * height_ / img_dsc->header.h;
         lv_image_set_scale(preview_image_, scale_w < scale_h ? scale_w : scale_h);
     }
+    lv_obj_align(preview_image_, LV_ALIGN_CENTER, 0, 0);
 
     // Training choice images are the primary UI; hide all chat/status chrome
     // that would otherwise overlap the 1.54" LCD.

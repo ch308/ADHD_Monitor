@@ -11,6 +11,7 @@ import secrets
 import random
 from collections import deque
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote, unquote
 from flask import Flask, request, jsonify, Response, send_file, abort, has_request_context
 from flask_cors import CORS
 from openai import OpenAI
@@ -44,6 +45,11 @@ def _autism_normalize_action_image_filename(fn: str) -> str:
     """修复 ESP32 直接请求中文路径时产生的 Latin-1 mojibake 文件名。"""
     if not isinstance(fn, str) or not fn:
         return ""
+    if "%" in fn:
+        try:
+            fn = unquote(fn)
+        except Exception:
+            pass
     try:
         repaired = fn.encode("latin-1").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):
@@ -3299,12 +3305,8 @@ def _autism_followup_images_for_options(options: list[str], scene: str, previous
     images: dict[str, str | None] = {}
     for i, opt in enumerate(options):
         if opt == "都不是":
-            prompt = (
-                "只画一个清晰可识别的儿童选择卡片图标：一个大大的圆圈，"
-                "圆圈里面画一个超大的红叉，表示都不是。正方形构图，"
-                "单一主体，居中，图形占画面至少80%，背景是治愈色淡淡的橙色。"
-                "底部预留干净标签区域，不要自己写任何文字。"
-            )
+            images[f"o{i}"] = _autism_none_of_above_image_url()
+            continue
         else:
             prompt = _autism_option_icon_prompt(
                 opt,
@@ -4434,6 +4436,14 @@ def _autism_public_base_url() -> str:
     return "http://127.0.0.1:11760"
 
 
+def _autism_action_image_url(filename: str) -> str:
+    return f"{_autism_public_base_url()}/autism/action-images/{quote(filename, safe='')}"
+
+
+def _autism_action_audio_url(filename: str) -> str:
+    return f"{_autism_public_base_url()}/autism/action-audio/{quote(filename, safe='')}"
+
+
 def _http_download_bytes(url: str, timeout: int = 90) -> bytes | None:
     try:
         import requests as req_lib
@@ -4507,6 +4517,41 @@ def _png_bytes_240_square(raw: bytes, label: str = "") -> bytes | None:
         return buf.getvalue()
     except Exception as e:
         app.logger.warning("autism image 240 resize error: %s", e)
+        return None
+
+
+def _autism_none_of_above_image_url() -> str | None:
+    """确定性生成“都不是”选择卡，避免文生图漏画红叉。"""
+    label = "都不是"
+    short = hashlib.sha256(b"autism-none-of-above-red-cross-v2").hexdigest()[:8]
+    filename = f"{label}_{short}.png"
+    local_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, filename)
+    if os.path.isfile(local_path):
+        return _autism_action_image_url(filename)
+    try:
+        from PIL import Image, ImageDraw
+
+        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
+        im = Image.new("RGBA", (240, 240), (255, 238, 216, 255))
+        draw = ImageDraw.Draw(im)
+        band_h = 34
+
+        draw.ellipse((42, 24, 198, 180), fill=(255, 255, 255, 255), outline=(210, 130, 92, 255), width=6)
+        draw.line((78, 62, 162, 146), fill=(220, 20, 20, 255), width=18)
+        draw.line((162, 62, 78, 146), fill=(220, 20, 20, 255), width=18)
+
+        draw.rectangle((0, 240 - band_h, 240, 240), fill=(255, 238, 216, 255))
+        font = _autism_label_font(24)
+        bbox = draw.textbbox((0, 0), label, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        draw.text(((240 - tw) // 2, 240 - band_h + (band_h - th) // 2 - 2), label, fill=(0, 0, 0, 255), font=font)
+
+        im.save(local_path, format="PNG", optimize=True)
+        app.logger.info("autism none-of-above image saved: %s", local_path)
+        return _autism_action_image_url(filename)
+    except Exception as e:
+        app.logger.warning("autism none-of-above image failed: %s", e)
         return None
 
 
@@ -4606,7 +4651,7 @@ def _autism_local_image_url_by_label(label: str) -> str | None:
         if not candidates:
             return None
         candidates.sort(reverse=True)
-        return f"{_autism_public_base_url()}/autism/action-images/{candidates[0][1]}"
+        return _autism_action_image_url(candidates[0][1])
     except Exception as e:
         app.logger.warning("autism image local lookup by label failed: %s", e)
         return None
@@ -4619,7 +4664,8 @@ def _autism_rewrite_local_image_url(url: str | None) -> str | None:
     pos = url.find(marker)
     if pos < 0:
         return url
-    return f"{_autism_public_base_url()}{url[pos:]}"
+    filename = _autism_normalize_action_image_filename(url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0])
+    return _autism_action_image_url(filename)
 
 
 def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
@@ -4640,7 +4686,7 @@ def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
         return None
     audio_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, audio_fn)
     if os.path.isfile(audio_path):
-        return f"{_autism_public_base_url()}/autism/action-audio/{audio_fn}"
+        return _autism_action_audio_url(audio_fn)
     try:
         import asyncio
         import subprocess
@@ -4678,7 +4724,7 @@ def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
             except OSError:
                 pass
         app.logger.info("autism label audio saved: %s", audio_path)
-        return f"{_autism_public_base_url()}/autism/action-audio/{audio_fn}"
+        return _autism_action_audio_url(audio_fn)
     except Exception as e:
         app.logger.warning("autism label audio failed: %s", e)
         return None
@@ -4697,7 +4743,9 @@ def _autism_cached_url_is_usable(url: str | None) -> bool:
     pos = url.find(marker)
     if pos < 0:
         return True  # 远程 URL（如腾讯云 COS），无法本地校验，视为可用
-    fn = url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0]
+    fn = _autism_normalize_action_image_filename(
+        url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0]
+    )
     if not fn or ".." in fn or "/" in fn or "\\" in fn:
         return False
     return os.path.isfile(os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn))
@@ -4847,7 +4895,7 @@ def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> 
     public_url = _cos_put_action_png(cos_object_key, png)
     stored_cos_key = cos_object_key
     if not public_url:
-        public_url = f"{_autism_public_base_url()}/autism/action-images/{filename}"
+        public_url = _autism_action_image_url(filename)
         stored_cos_key = f"local:{filename}"
         app.logger.info("autism image served locally (configure COS for Tencent Cloud): %s", filename)
 
