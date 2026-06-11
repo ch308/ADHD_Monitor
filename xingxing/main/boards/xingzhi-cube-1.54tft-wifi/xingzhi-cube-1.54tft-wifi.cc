@@ -469,9 +469,16 @@ public:
                     break;
                 case WifiEvent::Connected:
                     OnNetworkEvent(NetworkEvent::Connected, data);
-                    // WiFi ready is the default active/listening-ready state.
-                    // Do not auto-enter action cards; cards are an explicit
-                    // child intent UI and would cover training images.
+                    // Default child-initiated mode for autistic kids: show the
+                    // 10 action cards so the child can communicate without speech.
+                    xTaskCreate([](void*) {
+                        vTaskDelay(pdMS_TO_TICKS(300));
+                        auto& cards = ActionCards::GetInstance();
+                        if (!cards.IsActive()) {
+                            cards.Toggle();
+                        }
+                        vTaskDelete(nullptr);
+                    }, "show_cards", 3072, nullptr, 2, nullptr);
                     break;
                 case WifiEvent::Disconnected:
                     OnNetworkEvent(NetworkEvent::Disconnected);

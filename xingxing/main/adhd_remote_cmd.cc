@@ -181,6 +181,13 @@ static void ExitActionCardsIfCoveringPreview() {
     }
 }
 
+static void RestoreDefaultActionCards() {
+    if (!ActionCards::GetInstance().IsActive()) {
+        ESP_LOGI(TAG, "restore default action cards");
+        ActionCards::GetInstance().Toggle();
+    }
+}
+
 static bool IsChoiceGenerationActive(int generation) {
     if (generation <= 0) {
         return true;
@@ -201,8 +208,9 @@ static void VisualChoiceFallbackRestoreTask(void*) {
         xSemaphoreGive(g_choice_mutex);
     }
     if (!any_active) {
-        ESP_LOGI(TAG, "visual choice fallback restore default listening");
+        ESP_LOGI(TAG, "visual choice fallback restore default action cards");
         Application::GetInstance().SetVisualChoiceMode(false);
+        RestoreDefaultActionCards();
     }
     vTaskDelete(nullptr);
 }
@@ -284,6 +292,21 @@ static bool PostXiaozhiOpeningHint(const std::string& opening, const std::string
         ESP_LOGW(TAG, "xiaozhi opening hint POST failed");
     }
     return ok;
+}
+
+void adhd_remote_cmd_start_default_proactive(void) {
+    const std::string opening(reinterpret_cast<const char*>(
+        u8"\u4f60\u597d\u5440\uff0c\u6211\u662f\u661f\u661f\u3002"
+        u8"\u6211\u5728\u8fd9\u91cc\u966a\u4f60\uff0c\u4f60\u73b0\u5728\u60f3\u544a\u8bc9\u6211\uff0c"
+        u8"\u4f60\u7684\u5fc3\u60c5\u662f\u4ec0\u4e48\u6837\u7684\u5417\uff1f"
+    ));
+    const std::string context(reinterpret_cast<const char*>(
+        u8"\u8fd9\u662fWiFi\u8fde\u63a5\u540e\u7684\u9ed8\u8ba4\u5b69\u5b50\u4e3b\u52a8\u4e8b\u4ef6\u3002"
+        u8"\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u5f00\u573a\u767d\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u56de\u7b54\u3002"
+    ));
+    ESP_LOGI(TAG, "default proactive opening start");
+    (void)PostXiaozhiOpeningHint(opening, context);
+    Application::GetInstance().SubmitChildTextInput(opening);
 }
 
 static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation = 0) {
@@ -474,6 +497,7 @@ static void AutismChoiceSequenceTask(void* arg) {
             ESP_LOGI(TAG, "autism choice sequence timeout scene=%s", ctx->scene.c_str());
             g_choice_context.active = false;
             Application::GetInstance().SetVisualChoiceMode(false);
+            RestoreDefaultActionCards();
         }
         xSemaphoreGive(g_choice_mutex);
     }
@@ -983,6 +1007,7 @@ void adhd_remote_cmd_start(void) {
 
 void adhd_remote_cmd_announce_sync_once(void) {}
 void adhd_remote_cmd_start(void) {}
+void adhd_remote_cmd_start_default_proactive(void) {}
 bool adhd_post_autism_need_event(const char*, const char*, const char*) {
     return false;
 }

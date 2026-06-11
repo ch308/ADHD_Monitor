@@ -530,11 +530,6 @@ void Application::HandleActivationDoneEvent() {
 #endif
     adhd_remote_cmd_start();
 
-    Schedule([this]() {
-        if (!visual_choice_mode_ && GetDeviceState() == kDeviceStateIdle) {
-            StartListening();
-        }
-    });
 }
 
 bool Application::SyncClockFromMonitorServer() {
