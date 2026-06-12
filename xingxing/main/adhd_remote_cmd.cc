@@ -299,6 +299,54 @@ static bool PostAutismTrainingChoiceEvent(const AutismChoiceContext& ctx, int in
     return ok;
 }
 
+static bool PostAutismTrainingChoiceTimeoutEvent(const AutismChoiceContext& ctx) {
+    if (ctx.session_id <= 0 || ctx.source != "child_training") {
+        return false;
+    }
+    const std::string id = PathADeviceIdUpper();
+    if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
+        return false;
+    }
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        return false;
+    }
+    cJSON_AddStringToObject(root, "scene", ctx.scene.empty() ? "unknown" : ctx.scene.c_str());
+    cJSON_AddStringToObject(root, "phase", "choice_timeout");
+    cJSON_AddNumberToObject(root, "session_id", ctx.session_id);
+    cJSON* payload = cJSON_CreateObject();
+    if (payload != nullptr) {
+        cJSON_AddStringToObject(payload, "kind", ctx.kind.c_str());
+        cJSON_AddStringToObject(payload, "source", ctx.source.c_str());
+        cJSON_AddStringToObject(payload, "slot_time", ctx.slot_time.c_str());
+        cJSON_AddStringToObject(payload, "focus_label", ctx.focus_label.c_str());
+        cJSON_AddBoolToObject(payload, "timed_out", true);
+        cJSON* opts = cJSON_CreateArray();
+        if (opts != nullptr) {
+            for (const auto& item : ctx.items) {
+                cJSON_AddItemToArray(opts, cJSON_CreateString(item.label.c_str()));
+            }
+            cJSON_AddItemToObject(payload, "options", opts);
+        }
+        cJSON_AddItemToObject(root, "payload", payload);
+    }
+    char* out = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!out) {
+        return false;
+    }
+    std::string body(out);
+    cJSON_free(out);
+    std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
+                       std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/" + id +
+                       "/autism/training-event";
+    const bool ok = HttpPostJson(url, body);
+    if (!ok) {
+        ESP_LOGW(TAG, "autism training choice_timeout POST failed");
+    }
+    return ok;
+}
+
 static bool PostXiaozhiOpeningHint(const std::string& opening, const std::string& context) {
     const std::string id = PathADeviceIdUpper();
     if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0 || opening.empty()) {
@@ -550,6 +598,27 @@ static int ParseHourMinuteToMinuteOfDay(const char* text) {
     return hh * 60 + mm;
 }
 
+/// Rough delay so cloud TTS for the intro can play before we show choice images.
+static int EstimateIntroDelayMs(const std::string& line) {
+    if (line.empty()) {
+        return 1500;
+    }
+    int n = 0;
+    for (unsigned char c : line) {
+        if ((c & 0xC0) != 0x80) {
+            ++n;
+        }
+    }
+    int ms = 1400 + n * 320;
+    if (ms < 2200) {
+        ms = 2200;
+    }
+    if (ms > 55000) {
+        ms = 55000;
+    }
+    return ms;
+}
+
 static void AutismImageSequenceTask(void* arg) {
     auto* urls = static_cast<std::vector<std::string>*>(arg);
     if (urls == nullptr) {
@@ -579,6 +648,7 @@ static void AutismChoiceSequenceTask(void* arg) {
     }
     const int64_t deadline_us = esp_timer_get_time() + 60LL * 1000LL * 1000LL;
     bool first_shown = false;
+    bool user_finished = false;
     while (esp_timer_get_time() < deadline_us) {
         bool still_active = true;
         int current_index = 0;
@@ -588,6 +658,7 @@ static void AutismChoiceSequenceTask(void* arg) {
             xSemaphoreGive(g_choice_mutex);
         }
         if (!still_active) {
+            user_finished = true;
             break;
         }
         if (!first_shown && current_index >= 0 && current_index < static_cast<int>(ctx->items.size())) {
@@ -596,6 +667,9 @@ static void AutismChoiceSequenceTask(void* arg) {
             first_shown = true;
         }
         vTaskDelay(pdMS_TO_TICKS(250));
+    }
+    if (!user_finished) {
+        (void)PostAutismTrainingChoiceTimeoutEvent(*ctx);
     }
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
@@ -645,24 +719,44 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
     }
 }
 
+struct IntroThenChoiceArg {
+    AutismChoiceContext* ctx = nullptr;
+    int delay_ms = 0;
+};
+
+static void IntroThenChoiceTask(void* arg) {
+    auto* a = static_cast<IntroThenChoiceArg*>(arg);
+    if (a == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    if (a->delay_ms > 0) {
+        vTaskDelay(pdMS_TO_TICKS(a->delay_ms));
+    }
+    if (a->ctx != nullptr) {
+        StartAutismChoiceSequence(a->ctx);
+    }
+    delete a;
+    vTaskDelete(nullptr);
+}
 
 static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
     ExitActionCardsIfCoveringPreview();
+    AutismChoiceContext* plan_ctx = nullptr;
     if (!slot.image_urls.empty()) {
-        auto* ctx = new AutismChoiceContext();
-        ctx->scene = "daily_plan";
-        ctx->kind = "daily_plan";
-        ctx->source = "daily_plan";
-        ctx->slot_time = slot.time_text;
-        ctx->focus_label = slot.tts;
+        plan_ctx = new AutismChoiceContext();
+        plan_ctx->scene = "daily_plan";
+        plan_ctx->kind = "daily_plan";
+        plan_ctx->source = "daily_plan";
+        plan_ctx->slot_time = slot.time_text;
+        plan_ctx->focus_label = slot.tts;
         for (size_t i = 0; i < slot.image_urls.size(); ++i) {
             AutismChoiceItem item;
             item.image_url = slot.image_urls[i];
             item.label = i < slot.option_labels.size() ? slot.option_labels[i] : "";
             item.audio_url = i < slot.audio_urls.size() ? slot.audio_urls[i] : "";
-            ctx->items.push_back(std::move(item));
+            plan_ctx->items.push_back(std::move(item));
         }
-        StartAutismChoiceSequence(ctx);
     }
     const std::string line = slot.tts.empty()
         ? std::string(reinterpret_cast<const char*>(u8"\u65f6\u95f4\u5230\u5566\uff0c\u6211\u4eec\u6765\u9009\u4e00\u9009\u5427"))
@@ -675,6 +769,17 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
     Application::GetInstance().Schedule([line]() {
         Application::GetInstance().SubmitChildTextInput(line);
     });
+    if (plan_ctx != nullptr) {
+        auto* delay_arg = new IntroThenChoiceArg();
+        delay_arg->ctx = plan_ctx;
+        delay_arg->delay_ms = EstimateIntroDelayMs(line);
+        BaseType_t tr = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
+        if (tr != pdPASS) {
+            ESP_LOGW(TAG, "autism_intro_wait task create failed");
+            delete plan_ctx;
+            delete delay_arg;
+        }
+    }
 }
 
 static void DailyPlanSchedulerTask(void*) {
@@ -1012,22 +1117,41 @@ static void HandleOneCommand(cJSON* root) {
                 ESP_LOGW(TAG, "autism_session training_start: no image URLs in payload (check server images + public URL)");
                 delete ctx;
             } else {
-                StartAutismChoiceSequence(ctx);
+                cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
+                std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
+                if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
+                    line = tts->valuestring;
+                }
+                Application::GetInstance().Schedule([line]() {
+                    Application::GetInstance().SubmitChildTextInput(line);
+                });
+                auto* delay_arg = new IntroThenChoiceArg();
+                delay_arg->ctx = ctx;
+                delay_arg->delay_ms = EstimateIntroDelayMs(line);
+                BaseType_t tr_intro = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
+                if (tr_intro != pdPASS) {
+                    ESP_LOGW(TAG, "autism_intro_wait task create failed");
+                    delete ctx;
+                    delete delay_arg;
+                }
             }
-            cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
-            std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
-            if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
-                line = tts->valuestring;
-            }
-            Application::GetInstance().Schedule([line]() {
-                Application::GetInstance().SubmitChildTextInput(line);
-            });
             if (sid > 0) {
                 BaseType_t tr = xTaskCreate(AutismTrainingAckTask, "autism_ack", 8192,
                                             reinterpret_cast<void*>(static_cast<intptr_t>(sid)), 3, nullptr);
                 if (tr != pdPASS) {
                     ESP_LOGW(TAG, "autism_ack task create failed");
                 }
+            }
+        } else if (strcmp(k, "training_score") == 0) {
+            cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
+            std::string line;
+            if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
+                line = tts->valuestring;
+            }
+            if (!line.empty()) {
+                Application::GetInstance().Schedule([line]() {
+                    Application::GetInstance().SubmitChildTextInput(line);
+                });
             }
         } else if (strcmp(k, "daily_plan") == 0) {
             StoreAutismDailyPlan(session);

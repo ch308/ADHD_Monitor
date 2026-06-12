@@ -506,6 +506,11 @@ def init_db():
         )
         """
     )
+    cursor.execute("PRAGMA table_info(autism_training_events)")
+    _ev_cols = {row[1] for row in cursor.fetchall()}
+    if "session_id" not in _ev_cols:
+        cursor.execute("ALTER TABLE autism_training_events ADD COLUMN session_id INTEGER")
+
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS autism_image_cache (
@@ -539,6 +544,83 @@ def _session_id_from_json(raw):
         return int(raw)
     except (TypeError, ValueError):
         return None
+
+
+def _autism_payload_is_daily_plan_slot(payload, scene: str) -> bool:
+    if (scene or "").strip() == "daily_plan":
+        return True
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("kind") == "daily_plan" or payload.get("source") == "daily_plan"
+
+
+def _autism_payload_is_app_child_training(payload, scene: str) -> bool:
+    """App 下发的场景跟选训练（多轮+打分），不含时间表 daily_plan。"""
+    if _autism_payload_is_daily_plan_slot(payload, scene):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return (payload.get("source") or "") == "child_training" or (payload.get("kind") or "") == "training_start"
+
+
+def _autism_training_round_totals(cursor, child_id: int, session_id: int) -> tuple[int, int]:
+    """同一 autism_training_sessions.id 下，已完成轮次：点选确认次数 + 超时次数。"""
+    cursor.execute(
+        """
+        SELECT
+          COALESCE(SUM(CASE WHEN phase = 'image_confirmed' THEN 1 ELSE 0 END), 0),
+          COALESCE(SUM(CASE WHEN phase = 'choice_timeout' THEN 1 ELSE 0 END), 0)
+        FROM autism_training_events
+        WHERE child_id = ? AND session_id = ?
+        """,
+        (child_id, session_id),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return 0, 0
+    return int(row[0] or 0), int(row[1] or 0)
+
+
+def _autism_training_confirmed_count(cursor, child_id: int, session_id: int) -> int:
+    cursor.execute(
+        """
+        SELECT COUNT(*) FROM autism_training_events
+        WHERE child_id = ? AND session_id = ? AND phase = 'image_confirmed'
+        """,
+        (child_id, session_id),
+    )
+    row = cursor.fetchone()
+    return int(row[0] or 0) if row else 0
+
+
+def _autism_training_score_tts(hits: int) -> tuple[int, str]:
+    """三轮内点选次数 → 分数与对孩子念的总结（含分数）。"""
+    h = max(0, min(3, int(hits)))
+    if h >= 3:
+        return 100, "三次你都选到了，真棒！这次练习你得了100分。"
+    if h == 2:
+        return 80, "你有两次选到了，这次练习你得了80分。"
+    if h == 1:
+        return 60, "你有一次选到了，这次练习你得了60分。"
+    return 0, "时间到了，我们下次再玩吧。这次练习是零分。"
+
+
+def _append_autism_training_score_parent_log(
+    cursor, child_id: int, scene_id: str, score: int, hits: int, detail_tts: str
+) -> None:
+    """写入家长日报 parent_logs（不触发 Kimi 建议、不推 xiaozhi 队列）。"""
+    ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    obs = (
+        f"孤独症日常训练「{scene_id}」三轮结束打分：{score} 分"
+        f"（三轮内点选 {hits} 次）。机器人对孩子说：{detail_tts}"
+    )
+    cursor.execute(
+        """
+        INSERT INTO parent_logs (timestamp, bpm, observation, ai_advice, condition_type, child_id)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (ts, 0, obs[:2000], "", "autism", child_id),
+    )
 
 
 def _default_status():
@@ -3854,13 +3936,14 @@ def autism_events_training(child_id):
         conn.close()
         return jsonify({"status": "error", "message": "forbidden"}), 403
     pj = json.dumps(payload, ensure_ascii=False) if payload is not None else "{}"
+    sid_i = _session_id_from_json(data.get("session_id"))
     cursor.execute(
         """
         INSERT INTO autism_training_events
-        (child_id, device_id, scene, phase, payload_json, ts, created_at)
-        VALUES (?, NULL, ?, ?, ?, ?, ?)
+        (child_id, device_id, scene, phase, payload_json, ts, created_at, session_id)
+        VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
         """,
-        (child_id, scene, phase, pj, ts, now),
+        (child_id, scene, phase, pj, ts, now, sid_i),
     )
     eid = cursor.lastrowid
     if phase == "image_confirmed" and isinstance(payload, dict):
@@ -3874,7 +3957,6 @@ def autism_events_training(child_id):
             ts=ts,
             payload=payload,
         )
-    sid_i = _session_id_from_json(data.get("session_id"))
     if sid_i is not None:
         cursor.execute(
             """
@@ -3903,7 +3985,7 @@ def autism_events_training_list(child_id):
         return jsonify({"status": "error", "message": "forbidden"}), 403
     cursor.execute(
         """
-        SELECT id, device_id, scene, phase, payload_json, ts, created_at
+        SELECT id, device_id, scene, phase, payload_json, ts, created_at, session_id
         FROM autism_training_events
         WHERE child_id = ? AND id > ?
         ORDER BY id ASC
@@ -3914,7 +3996,15 @@ def autism_events_training_list(child_id):
     rows = cursor.fetchall()
     conn.close()
     items = []
-    for eid, device_id, scene, phase, payload_json, ts, created_at in rows:
+    for row in rows:
+        eid = row[0]
+        device_id = row[1]
+        scene = row[2]
+        phase = row[3]
+        payload_json = row[4]
+        ts = row[5]
+        created_at = row[6]
+        session_id_ev = row[7] if len(row) > 7 else None
         try:
             payload = json.loads(payload_json or "{}")
         except Exception:
@@ -3928,6 +4018,7 @@ def autism_events_training_list(child_id):
                 "payload": payload,
                 "ts": ts,
                 "created_at": created_at,
+                "session_id": session_id_ev,
             }
         )
     return jsonify({"status": "ok", "items": items}), 200
@@ -3949,16 +4040,17 @@ def device_autism_training_event(device_id):
     payload = data.get("payload")
     ts = (data.get("ts") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sid_i = _session_id_from_json(data.get("session_id"))
     pj = json.dumps(payload, ensure_ascii=False) if payload is not None else "{}"
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
     cursor.execute(
         """
         INSERT INTO autism_training_events
-        (child_id, device_id, scene, phase, payload_json, ts, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        (child_id, device_id, scene, phase, payload_json, ts, created_at, session_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (child_id, device_id, scene, phase, pj, ts, now),
+        (child_id, device_id, scene, phase, pj, ts, now, sid_i),
     )
     eid = cursor.lastrowid
     if phase == "image_confirmed" and isinstance(payload, dict):
@@ -3972,7 +4064,6 @@ def device_autism_training_event(device_id):
             ts=ts,
             payload=payload,
         )
-    sid_i = _session_id_from_json(data.get("session_id"))
     if sid_i is not None:
         cursor.execute(
             """
@@ -3983,6 +4074,74 @@ def device_autism_training_event(device_id):
         )
     conn.commit()
     conn.close()
+
+    app_training = (
+        sid_i is not None
+        and isinstance(payload, dict)
+        and _autism_payload_is_app_child_training(payload, scene)
+    )
+    if app_training and phase in ("image_confirmed", "choice_timeout"):
+        cx = sqlite3.connect("adhd_data.db")
+        cu = cx.cursor()
+        n_c, n_t = _autism_training_round_totals(cu, child_id, sid_i)
+        tot = n_c + n_t
+        if tot == 3:
+            hits = _autism_training_confirmed_count(cu, child_id, sid_i)
+            score, tts = _autism_training_score_tts(hits)
+            _append_autism_training_score_parent_log(
+                cu, child_id, scene or "training", score, hits, tts
+            )
+            now_u = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cu.execute(
+                """
+                UPDATE autism_training_sessions SET status = ?, updated_at = ?
+                WHERE id = ? AND child_id = ?
+                """,
+                (f"completed_score:{score}", now_u, sid_i, child_id),
+            )
+            cx.commit()
+            cx.close()
+            score_session = {
+                "kind": "training_score",
+                "session_id": sid_i,
+                "scene_id": scene or "training",
+                "score": score,
+                "tts_intro": tts,
+            }
+            _enqueue_autism_session_for_child(child_id, score_session)
+            return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
+        if phase == "choice_timeout":
+            focus_label = str(payload.get("focus_label") or "").strip()
+            previous_options = (
+                payload.get("options") if isinstance(payload.get("options"), list) else []
+            )
+            options = _autism_followup_options_for_choice(
+                scene, "都不是", focus_label, previous_options
+            )
+            image_context = focus_label or "练习"
+            tts_intro = "我们再看看下一组图，慢慢选就好。"
+            images = _autism_followup_images_for_options(options, scene, image_context)
+            audio = _autism_audio_for_options(options, images)
+            followup = {
+                "kind": "training_start",
+                "scene_id": scene or "follow_up",
+                "focus_label": focus_label,
+                "options": options,
+                "images": images,
+                "audio": audio,
+                "follow_up": True,
+                "tts_intro": tts_intro,
+                "session_id": sid_i,
+            }
+            queued = _enqueue_autism_session_for_child(child_id, followup)
+            app.logger.info(
+                "autism timeout follow-up queued child=%s scene=%s targets=%s options=%s",
+                child_id, scene, queued, options,
+            )
+            cx.close()
+            return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
+        cx.close()
+
     if phase == "image_confirmed" and isinstance(payload, dict):
         label = str(payload.get("label") or "").strip()
         if label:
@@ -4022,6 +4181,8 @@ def device_autism_training_event(device_id):
                 "follow_up": True,
                 "tts_intro": tts_intro,
             }
+            if app_training and sid_i is not None:
+                followup["session_id"] = sid_i
             queued = _enqueue_autism_session_for_child(child_id, followup)
             app.logger.info(
                 "autism follow-up queued child=%s scene=%s label=%s targets=%s options=%s",
@@ -4473,12 +4634,17 @@ def _xingxing_device_ids_for_child(child_id: int) -> list[str]:
 
 # 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后先备份到本地
 # server/action 目录，再上传腾讯云 COS `action/`，并以完整 prompt 哈希缓存避免重复生成。
+# 与 assets/action 下手工参考图对齐：minimalist + soft pastel + solid bg + bold lines + no text；
+# 仍保留「底部留白条供服务端叠字、单主体约 80%」等约束，避免破坏裁切与标签逻辑。
 _IMAGE_STYLE_SUFFIX_ZHIPU = (
-    " A minimalist 2D flat vector icon, cute child-friendly therapeutic style. "
-    "The main subject must be very large and fill at least 80 percent of the visible card area, "
-    "centered, bold clean outline, simple recognizable shapes, no tiny facial features. "
-    "Use a soft healing pale orange solid background. "
-    "Leave a clean empty label band at the bottom; do not generate any text, letters, watermark, or signature. "
+    " A minimalist 2D flat vector icon, cute style, child-friendly, soft pastel colors, "
+    "solid clean background; prefer a soft warm peach or pale apricot-orange fill as the default mood "
+    "(still flat and simple, not textured), unless a slightly different pastel would keep the subject clearer. "
+    "Bold clean lines, no complex details, no text. "
+    "One clear focal subject only; very large and centered, filling about 80 percent of the square; "
+    "simple recognizable shapes, no photorealism, no tiny facial detail. "
+    "Leave a clean empty label band at the bottom for overlay text; "
+    "do not generate any letters, numbers, watermark, or signature. "
     "Perfect square composition. --ar 1:1"
 )
 
@@ -5072,7 +5238,9 @@ def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]
     ids = _xingxing_device_ids_for_child(child_id)
     cmd_obj = {"action": "autism_session", "session_json": body}
     opening = ""
-    if session.get("kind") == "training_start":
+    hint_ctx = ""
+    sk = session.get("kind")
+    if sk == "training_start":
         opening = str(session.get("tts_intro") or "").strip()
         if not opening:
             opening = "我们一起来做一个练习吧"
@@ -5081,6 +5249,21 @@ def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]
         )[:500]
         while "  " in opening:
             opening = opening.replace("  ", " ")
+        hint_ctx = (
+            "这是自闭症/发育支持训练的开场提示。请只播放这句开场白，等待孩子回答；"
+            "不要把这句当成孩子输入来回应。"
+        )
+    elif sk == "training_score":
+        opening = str(session.get("tts_intro") or "").strip()
+        opening = (
+            opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
+        )[:500]
+        while "  " in opening:
+            opening = opening.replace("  ", " ")
+        hint_ctx = (
+            "这是自闭症日常训练结束后的打分总结。请只播放这段文字（含分数），不要扩展；"
+            "不要把这句当成孩子输入来回应。"
+        )
     with _esp32_cmd_lock:
         if opening:
             try:
@@ -5092,7 +5275,10 @@ def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]
                 stash_xinvoke_hint(
                     did,
                     opening,
-                    "这是自闭症/发育支持训练的开场提示。请只播放这句开场白，等待孩子回答；不要把这句当成孩子输入来回应。",
+                    hint_ctx or (
+                        "这是自闭症/发育支持训练的开场提示。请只播放这句开场白，等待孩子回答；"
+                        "不要把这句当成孩子输入来回应。"
+                    ),
                 )
             q = _esp32_cmd_queue.setdefault(did, deque())
             q.append(dict(cmd_obj))
