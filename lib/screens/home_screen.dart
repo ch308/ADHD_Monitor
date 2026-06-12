@@ -1097,8 +1097,8 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     }
   }
 
-  /// 入口：跳转到 xiaozhi 星星机器人 BLE 配网页面（与毛绒球完全相同的 UI 和流程，
-  /// 只是广播名前缀换成 `XIAOZHI_`、绑定时给云端打 `kind=xiaozhi` 标签）。
+  /// 入口：跳转到多动症星星机器人 BLE 配网页面（与毛绒球完全相同的 UI 和流程，
+  /// 只是广播名前缀换成 `XIAOZHI_`、绑定时给云端打 `kind=xiaozhi-esp32-2.2.4` 标签）。
   Future<void> _openXiaozhiProvisionPage() async {
     final id = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
@@ -1243,7 +1243,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     );
   }
 
-  /// 绑定小智（xiaozhi）板：输入 WiFi MAC，服务器 `esp32_devices.kind` 记为 xiaozhi，用于 submit_log 后自动唤醒。
+  /// 绑定多动症小智板：输入 WiFi MAC，服务器 kind 记为 xiaozhi-esp32-2.2.4，用于 submit_log 后自动唤醒。
   Future<void> _showXiaozhiBindDialog() async {
     final ctrl = TextEditingController();
     final submit = await showDialog<bool>(
@@ -1307,7 +1307,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final ok = await _cloudService.bindEsp32(
       raw,
       widget.activeChildId,
-      kind: 'xiaozhi',
+      kind: 'xiaozhi-esp32-2.2.4',
     );
     if (!mounted) return;
     if (ok) {

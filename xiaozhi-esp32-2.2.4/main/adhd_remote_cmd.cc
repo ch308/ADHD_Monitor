@@ -128,7 +128,7 @@ static void DoAnnounceOnce() {
         ESP_LOGW(TAG, "announce skipped: empty device id");
         return;
     }
-    std::string body = std::string("{\"device_id\":\"") + id + "\",\"kind\":\"xiaozhi\"}";
+    std::string body = std::string("{\"device_id\":\"") + id + "\",\"kind\":\"xiaozhi-esp32-2.2.4\"}";
     std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
                        std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/esp32/announce";
     ESP_LOGI(TAG, "announce POST → %s", url.c_str());

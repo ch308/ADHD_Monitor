@@ -675,7 +675,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     for (final m in list) {
       final cid = m['child_id'];
       final kid = (m['kind'] ?? '').toString().toLowerCase();
-      if (cid == widget.activeChildId && kid == 'xiaozhi') {
+      if (cid == widget.activeChildId && kid == 'xingxing') {
         xz = (m['device_id'] ?? '').toString();
         break;
       }
@@ -1169,7 +1169,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       );
       return;
     }
-    final ok = await _cloud.bindEsp32(raw, widget.activeChildId, kind: 'xiaozhi');
+    final ok = await _cloud.bindEsp32(raw, widget.activeChildId, kind: 'xingxing');
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(ok ? '绑定成功' : '绑定失败')),

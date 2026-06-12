@@ -81,15 +81,14 @@ class _EspProvisionPageState extends State<EspProvisionPage> {
     return SessionStore.saveBoundEsp32(widget.activeChildId, deviceId);
   }
 
-  /// 云端 list 接口里挑出当前设备类型那一类。毛绒球用空 / esp32-s3-lcd 类型；
-  /// xiaozhi 用 `kind=xiaozhi`。
+  /// 云端 list 接口里挑出当前设备类型那一类。毛绒球只接受空 / esp32-s3-lcd 类型；
+  /// 多动症星星兼容旧 `xiaozhi` 和新 `xiaozhi-esp32-2.2.4`。
   bool _matchKind(Map<String, dynamic> dev) {
     final raw = (dev['kind'] ?? '').toString().toLowerCase();
     if (widget.kind == EspProvKind.xiaozhi) {
-      return raw == 'xiaozhi';
+      return raw == 'xiaozhi' || raw.contains('xiaozhi-esp32-2.2.4');
     }
-    // 毛绒球：除了 xiaozhi 都视为毛绒球（包含空值与 esp32-s3-lcd-1.47B）。
-    return raw != 'xiaozhi';
+    return raw.isEmpty || raw.contains('esp32-s3-lcd-1.47b');
   }
 
   @override

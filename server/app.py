@@ -7,12 +7,13 @@ import threading
 import time
 import hashlib
 import hmac
+import html
 import secrets
 import random
 from collections import deque
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote, unquote
-from flask import Flask, request, jsonify, Response, send_file, abort, has_request_context
+from flask import Flask, request, jsonify, Response, send_file, abort, has_request_context, redirect
 from flask_cors import CORS
 from openai import OpenAI
 
@@ -4364,18 +4365,32 @@ def _get_esp32_device(device_id: str):
     }
 
 
-def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
-    """挑出该孩子绑定的 xiaozhi 星星机器人 device_id 列表。
+def _esp32_device_role(kind: str | None) -> str:
+    """Normalize stored kind strings into the three ESP32 roles we support."""
+    k = (kind or "").strip().lower()
+    if not k:
+        return "unknown"
+    if k == "xingxing" or "autism" in k or "孤独" in k:
+        return "autism_star"
+    if k == "xiaozhi" or "xiaozhi-esp32-2.2.4" in k or "adhd-star" in k or "多动" in k:
+        return "adhd_star"
+    if "esp32-s3-lcd-1.47b" in k or "lcd" in k or "plush" in k or "毛绒" in k:
+        return "plush"
+    return "unknown"
 
-    用户名下两类设备**绝对不能搞混**：
+
+def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
+    """挑出该孩子绑定的多动症星星机器人 device_id 列表。
+
+    三类 ESP32 设备**绝对不能搞混**：
 
       * 毛绒球 `ESP32-S3-LCD-1.47B`：固件 announce 写 `kind='esp32-s3-lcd-1.47B'`，
         Flutter 端 bind 时不带 kind。它走 LED 呼吸命令，**不能**收到 `xiaozhi_invoke_chat`。
-      * 星星机器人 `xiaozhi-esp32-2.2.4`：固件 announce 写 `kind='xiaozhi'`，
-        Flutter 端 bind 时也写 `kind='xiaozhi'`。这才是我们要 TTS 的对象。
+      * 多动症星星机器人 `xiaozhi-esp32-2.2.4`：用于 submit_log 后的主动陪聊。
+      * 孤独症星星机器人 `xingxing`：只用于孤独症训练 / 计划表视觉选择。
 
     选择策略（按优先级）：
-      1) 严格：`kind LIKE '%xiaozhi%'` —— 99% 的情况落在这里。
+      1) 严格：`kind` 归一化为 `adhd_star` —— 99% 的情况落在这里。
       2) 仅当严格命中为 0 行时，回退到 `kind IS NULL` 的"裸 bind"行。这种行
          只可能出现在「Flutter 已 bind 但设备从未 announce 过」的极端情况下，
          不会含毛绒球（毛绒球只要正常上电就一定有 `esp32-s3-lcd-...` 字面值）。
@@ -4405,31 +4420,19 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
         )
         return []
 
-    # 已知的"绝对不是 xiaozhi"的 kind 关键词 —— 命中即排除，绝不回退。
-    NON_XIAOZHI_HINTS = ("lcd", "plush", "毛绒")
-
-    def _is_plush(kind_val: str | None) -> bool:
-        if not kind_val:
-            return False
-        k = str(kind_val).lower()
-        return any(hint in k for hint in NON_XIAOZHI_HINTS)
-
-    strict = [r[0] for r in rows if r[1] and "xiaozhi" in str(r[1]).lower()]
+    strict = [r[0] for r in rows if _esp32_device_role(r[1]) == "adhd_star"]
     if strict:
         return strict
 
     # 仅在严格无命中时，回退到「绑定了但 announce 从未上送 kind」的行；明确
     # 已写为毛绒球家族字面值的行不会被纳入。
-    relaxed = [
-        r[0] for r in rows
-        if (r[1] is None or str(r[1]).strip() == "") and not _is_plush(r[1])
-    ]
+    relaxed = [r[0] for r in rows if _esp32_device_role(r[1]) == "unknown"]
     if relaxed:
         app.logger.warning(
             "xiaozhi target lookup: no strict kind=xiaozhi match for child_id=%s; "
             "falling back to %d device(s) with NULL kind: %s (all rows=%s). "
-            "If you actually have a xiaozhi bound, power-cycle it once so its "
-            "announce writes kind='xiaozhi'.",
+            "If you actually have an ADHD xiaozhi bound, power-cycle it once so its "
+            "announce writes kind='xiaozhi-esp32-2.2.4'.",
             child_id, len(relaxed), relaxed,
             [(r[0], r[1]) for r in rows],
         )
@@ -4443,6 +4446,29 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
         child_id, len(rows), [(r[0], r[1]) for r in rows],
     )
     return []
+
+
+def _xingxing_device_ids_for_child(child_id: int) -> list[str]:
+    """挑出该孩子绑定的孤独症星星机器人 device_id 列表。"""
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT device_id, kind FROM esp32_devices
+        WHERE child_id = ?
+        ORDER BY last_seen_at DESC
+        """,
+        (child_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    ids = [r[0] for r in rows if _esp32_device_role(r[1]) == "autism_star"]
+    if not ids:
+        app.logger.warning(
+            "xingxing target lookup: child_id=%s has no bound autism xingxing device. rows=%s",
+            child_id, [(r[0], r[1]) for r in rows],
+        )
+    return ids
 
 
 # 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后先备份到本地
@@ -5043,7 +5069,7 @@ def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]
     body = json.dumps(session, ensure_ascii=False)
     if len(body) > 32000:
         body = body[:32000]
-    ids = _xiaozhi_device_ids_for_child(child_id)
+    ids = _xingxing_device_ids_for_child(child_id)
     cmd_obj = {"action": "autism_session", "session_json": body}
     opening = ""
     if session.get("kind") == "training_start":
@@ -5420,6 +5446,279 @@ def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
             return False, "session_json too long (max 64000)"
         payload["session_json"] = sj.strip()
     return True, ""
+
+
+def _device_bind_admin_secret() -> str:
+    return (
+        (os.getenv("DEVICE_BIND_ADMIN_TOKEN") or "").strip()
+        or (os.getenv("ESP32_BIND_ADMIN_TOKEN") or "").strip()
+        or (os.getenv("WEEKLY_REPORT_SECRET") or "").strip()
+    )
+
+
+def _device_bind_admin_authorized() -> bool:
+    secret = _device_bind_admin_secret()
+    if not secret:
+        return False
+    supplied = (
+        (request.args.get("token") or "").strip()
+        or (request.form.get("token") or "").strip()
+        or (request.headers.get("X-Device-Bind-Admin-Token") or "").strip()
+    )
+    return hmac.compare_digest(supplied, secret)
+
+
+def _device_kind_label(kind: str | None) -> str:
+    role = _esp32_device_role(kind)
+    if role == "plush":
+        return "毛绒球"
+    if role == "adhd_star":
+        return "多动症星星机器人"
+    if role == "autism_star":
+        return "孤独症星星机器人"
+    return "未标记设备"
+
+
+def _device_bind_admin_redirect(message: str):
+    token = (request.form.get("token") or request.args.get("token") or "").strip()
+    msg = quote(message, safe="")
+    if token:
+        return redirect(f"/admin/device-bindings?token={quote(token, safe='')}&msg={msg}")
+    return redirect(f"/admin/device-bindings?msg={msg}")
+
+
+@app.route("/admin/device-bindings", methods=["GET", "POST"])
+def admin_device_bindings():
+    """管理三类 ESP32 设备与孩子的绑定关系。"""
+    if not _device_bind_admin_secret():
+        return Response(
+            "DEVICE_BIND_ADMIN_TOKEN is not configured. "
+            "Set it in the server environment before using this admin page.",
+            status=503,
+            mimetype="text/plain; charset=utf-8",
+        )
+    if not _device_bind_admin_authorized():
+        return Response(
+            "Unauthorized. Open /admin/device-bindings?token=<DEVICE_BIND_ADMIN_TOKEN>.",
+            status=401,
+            mimetype="text/plain; charset=utf-8",
+        )
+
+    conn = sqlite3.connect("adhd_data.db")
+    cursor = conn.cursor()
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip()
+        device_id = _normalize_device_id(request.form.get("device_id") or "")
+        if not _ESP32_DEVICE_ID_RE.match(device_id):
+            conn.close()
+            return _device_bind_admin_redirect("设备 ID 无效")
+        now = _now_str()
+        if action == "unbind":
+            cursor.execute(
+                """
+                UPDATE esp32_devices
+                SET child_id = NULL, bound_by_user_id = NULL, last_seen_at = ?
+                WHERE device_id = ?
+                """,
+                (now, device_id),
+            )
+            conn.commit()
+            conn.close()
+            return _device_bind_admin_redirect(f"已解绑 {device_id}")
+        if action in ("bind", "create_bind"):
+            try:
+                child_id = int(request.form.get("child_id") or 0)
+            except (TypeError, ValueError):
+                conn.close()
+                return _device_bind_admin_redirect("孩子 ID 无效")
+            cursor.execute("SELECT id FROM children WHERE id = ?", (child_id,))
+            if cursor.fetchone() is None:
+                conn.close()
+                return _device_bind_admin_redirect("孩子不存在")
+            kind = (request.form.get("kind") or "").strip() or None
+            cursor.execute(
+                "SELECT user_id FROM child_members WHERE child_id = ? ORDER BY id ASC LIMIT 1",
+                (child_id,),
+            )
+            member = cursor.fetchone()
+            bound_by_user_id = member[0] if member else None
+            cursor.execute("SELECT id FROM esp32_devices WHERE device_id = ?", (device_id,))
+            row = cursor.fetchone()
+            if row is None:
+                cursor.execute(
+                    """
+                    INSERT INTO esp32_devices
+                        (device_id, kind, child_id, bound_by_user_id, first_seen_at, last_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (device_id, kind, child_id, bound_by_user_id, now, now),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE esp32_devices
+                    SET kind = COALESCE(?, kind),
+                        child_id = ?,
+                        bound_by_user_id = ?,
+                        last_seen_at = ?
+                    WHERE device_id = ?
+                    """,
+                    (kind, child_id, bound_by_user_id, now, device_id),
+                )
+            conn.commit()
+            conn.close()
+            return _device_bind_admin_redirect(f"已绑定 {device_id} 到孩子 {child_id}")
+        conn.close()
+        return _device_bind_admin_redirect("未知操作")
+
+    cursor.execute(
+        """
+        SELECT c.id, c.nickname,
+               GROUP_CONCAT(COALESCE(u.display_name, u.username), ', ')
+        FROM children c
+        LEFT JOIN child_members m ON m.child_id = c.id
+        LEFT JOIN users u ON u.id = m.user_id
+        GROUP BY c.id, c.nickname
+        ORDER BY c.id ASC
+        """
+    )
+    children = cursor.fetchall()
+    cursor.execute(
+        """
+        SELECT e.device_id, e.kind, e.child_id, c.nickname,
+               e.bound_by_user_id, COALESCE(u.display_name, u.username),
+               e.first_seen_at, e.last_seen_at
+        FROM esp32_devices e
+        LEFT JOIN children c ON c.id = e.child_id
+        LEFT JOIN users u ON u.id = e.bound_by_user_id
+        ORDER BY e.last_seen_at DESC
+        """
+    )
+    devices = cursor.fetchall()
+    conn.close()
+
+    token = html.escape((request.args.get("token") or "").strip(), quote=True)
+    msg = html.escape((request.args.get("msg") or "").strip())
+
+    def child_options(selected=None) -> str:
+        out = []
+        for cid, nick, members in children:
+            label = f"{cid} - {nick or '未命名孩子'}"
+            if members:
+                label += f"（{members}）"
+            sel = " selected" if selected is not None and int(selected) == int(cid) else ""
+            out.append(f'<option value="{cid}"{sel}>{html.escape(label)}</option>')
+        return "".join(out)
+
+    kind_options = [
+        ("esp32-s3-lcd-1.47B", "毛绒球（ESP32-S3-LCD-1.47B 目录）"),
+        ("xiaozhi-esp32-2.2.4", "多动症星星机器人（xiaozhi-esp32-2.2.4 目录）"),
+        ("xingxing", "孤独症星星机器人（xingxing 目录）"),
+        ("", "保持原 kind / 未标记"),
+    ]
+
+    def kind_select(current: str | None) -> str:
+        cur = (current or "").strip()
+        role = _esp32_device_role(cur)
+        if role == "plush":
+            selected_value = "esp32-s3-lcd-1.47B"
+        elif role == "adhd_star":
+            selected_value = "xiaozhi-esp32-2.2.4"
+        elif role == "autism_star":
+            selected_value = "xingxing"
+        else:
+            selected_value = cur
+        opts = []
+        for val, label in kind_options:
+            sel = " selected" if val == selected_value else ""
+            opts.append(
+                f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
+            )
+        return "".join(opts)
+
+    rows = []
+    for device_id, kind, child_id, child_nick, bound_uid, bound_user, first_seen, last_seen in devices:
+        did = html.escape(device_id or "", quote=True)
+        kind_raw = html.escape(kind or "")
+        kind_label = html.escape(_device_kind_label(kind))
+        child_text = "未绑定" if child_id is None else f"{child_id} - {child_nick or '未命名孩子'}"
+        child_text = html.escape(child_text)
+        bound_user_text = html.escape(bound_user or "")
+        rows.append(
+            f"""
+            <tr>
+              <td><code>{did}</code></td>
+              <td>{kind_label}<br><small>{kind_raw}</small></td>
+              <td>{child_text}<br><small>{bound_user_text}</small></td>
+              <td><small>first: {html.escape(first_seen or '')}<br>last: {html.escape(last_seen or '')}</small></td>
+              <td>
+                <form method="post" class="inline">
+                  <input type="hidden" name="token" value="{token}">
+                  <input type="hidden" name="action" value="bind">
+                  <input type="hidden" name="device_id" value="{did}">
+                  <select name="child_id">{child_options(child_id)}</select>
+                  <select name="kind">{kind_select(kind)}</select>
+                  <button type="submit">绑定/改绑</button>
+                </form>
+                <form method="post" class="inline">
+                  <input type="hidden" name="token" value="{token}">
+                  <input type="hidden" name="action" value="unbind">
+                  <input type="hidden" name="device_id" value="{did}">
+                  <button type="submit" class="danger">解绑</button>
+                </form>
+              </td>
+            </tr>
+            """
+        )
+
+    body = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设备绑定管理</title>
+  <style>
+    body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; background:#f7f7f8; color:#1f2937; }}
+    h1 {{ margin-bottom: 8px; }}
+    .card {{ background:white; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin:16px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }}
+    table {{ width:100%; border-collapse:collapse; background:white; }}
+    th, td {{ border-bottom:1px solid #e5e7eb; padding:10px; text-align:left; vertical-align:top; }}
+    th {{ background:#f3f4f6; }}
+    select, input {{ padding:6px; margin:3px 4px 3px 0; }}
+    button {{ padding:6px 10px; border:0; border-radius:7px; background:#2563eb; color:white; cursor:pointer; }}
+    button.danger {{ background:#dc2626; }}
+    form.inline {{ display:inline-block; margin:2px 6px 2px 0; }}
+    .msg {{ background:#ecfdf5; border:1px solid #a7f3d0; padding:10px; border-radius:8px; }}
+    small {{ color:#6b7280; }}
+    code {{ font-weight:700; }}
+  </style>
+</head>
+<body>
+  <h1>设备绑定管理</h1>
+  <p>管理三类 ESP32 设备与孩子之间的绑定关系：毛绒球、多动症星星机器人、孤独症星星机器人。</p>
+  {f'<div class="msg">{msg}</div>' if msg else ''}
+  <div class="card">
+    <h2>手动添加/绑定设备</h2>
+    <form method="post">
+      <input type="hidden" name="token" value="{token}">
+      <input type="hidden" name="action" value="create_bind">
+      <input name="device_id" placeholder="例如 8FDAD94C" required>
+      <select name="child_id">{child_options()}</select>
+      <select name="kind">{kind_select('esp32-s3-lcd-1.47B')}</select>
+      <button type="submit">创建并绑定</button>
+    </form>
+  </div>
+  <div class="card">
+    <h2>当前设备</h2>
+    <table>
+      <thead><tr><th>Device ID</th><th>类型</th><th>绑定孩子</th><th>在线时间</th><th>操作</th></tr></thead>
+      <tbody>{''.join(rows) or '<tr><td colspan="5">暂无设备</td></tr>'}</tbody>
+    </table>
+  </div>
+</body>
+</html>"""
+    return Response(body, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/device/<device_id>/cmd", methods=["GET", "POST"])

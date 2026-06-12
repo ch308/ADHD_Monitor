@@ -106,7 +106,7 @@ class ProvResult {
 /// 我们支持的 ESP32 设备种类。
 ///
 /// - [plush]：ESP32-S3-LCD 毛绒球呼吸灯，BLE 广播名前缀 `ADHD_`。
-/// - [xiaozhi]：xiaozhi-esp32 星星机器人，BLE 广播名前缀 `XIAOZHI_`。
+/// - [xiaozhi]：多动症 xiaozhi-esp32-2.2.4 星星机器人，BLE 广播名前缀 `XIAOZHI_`。
 ///
 /// 两种设备共用同一个 protocomm 服务 UUID 与 sec0 协议，唯一区别就是
 /// 广播名前缀 → 在 Flutter 端按前缀分流，避免在同一次扫描里把两种设备混进
@@ -132,7 +132,7 @@ enum EspProvKind {
       case EspProvKind.plush:
         return null; // 默认 esp32-s3-lcd
       case EspProvKind.xiaozhi:
-        return 'xiaozhi';
+        return 'xiaozhi-esp32-2.2.4';
     }
   }
 }
