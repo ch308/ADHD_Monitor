@@ -423,21 +423,6 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
     }
   }
 
-  Future<void> _showTrainingReward({
-    required int score,
-    required int hits,
-    String? label,
-  }) async {
-    if (!mounted) return;
-    HapticFeedback.mediumImpact();
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierColor: Colors.black.withValues(alpha: 0.32),
-      builder: (ctx) => _RewardDialog(score: score, hits: hits, label: label),
-    );
-  }
-
   void _onSelectSection(int v) {
     setState(() => _section = v);
     if (v == 0) {
@@ -700,17 +685,6 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       if (!_trainingEventsPrimed) {
         _trainingEventsPrimed = true;
         return;
-      }
-
-      // 三轮结束打分事件：弹出彩虹奖励动画。
-      final scored = list.where((e) => (e['phase'] ?? '').toString() == 'scored').toList();
-      if (scored.isNotEmpty) {
-        final s = scored.last;
-        final sp = Map<String, dynamic>.from((s['payload'] as Map?) ?? const {});
-        final score = (sp['score'] as num?)?.toInt() ?? 0;
-        final hits = (sp['hits'] as num?)?.toInt() ?? 0;
-        final lbl = (sp['label'] ?? '').toString().trim();
-        _showTrainingReward(score: score, hits: hits, label: lbl.isEmpty ? null : lbl);
       }
 
       final confirmed = list.where((e) => (e['phase'] ?? '').toString() == 'image_confirmed').toList();
@@ -2154,157 +2128,6 @@ class _SectionTile extends StatelessWidget {
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 三轮训练完成后的奖励弹窗：彩虹渐变 + 弹性缩放的「完成啦」。
-/// 尊重系统「减少动画」设置（感官敏感友好），并在数秒后自动消失。
-class _RewardDialog extends StatefulWidget {
-  const _RewardDialog({
-    required this.score,
-    required this.hits,
-    this.label,
-  });
-
-  final int score;
-  final int hits;
-  final String? label;
-
-  @override
-  State<_RewardDialog> createState() => _RewardDialogState();
-}
-
-class _RewardDialogState extends State<_RewardDialog>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _scale;
-  late final Animation<double> _opacity;
-  Timer? _autoClose;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 800),
-      vsync: this,
-    );
-    _scale = Tween<double>(begin: 0.6, end: 1.0).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
-    );
-    _opacity = Tween<double>(begin: 0, end: 1).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeIn),
-    );
-    _controller.forward();
-    _autoClose = Timer(const Duration(milliseconds: 2800), () {
-      if (mounted) Navigator.of(context).maybePop();
-    });
-  }
-
-  @override
-  void dispose() {
-    _autoClose?.cancel();
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final stars = widget.hits.clamp(0, 3);
-    final content = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 36, vertical: 32),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [
-            Color(0xFF7AA8FF),
-            Color(0xFF7BCF8C),
-            Color(0xFFFFD27A),
-            Color(0xFFF6A6C1),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(36),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 28,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('🌟', style: TextStyle(fontSize: 56)),
-          const SizedBox(height: 10),
-          const Text(
-            '完成啦！',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 26,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          if (widget.label != null) ...[
-            const SizedBox(height: 8),
-            Text(
-              '你选了「${widget.label}」',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.95),
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: List.generate(3, (i) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                child: Text(
-                  i < stars ? '⭐' : '☆',
-                  style: const TextStyle(fontSize: 28),
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: Text(
-              '获得 ${widget.score} 分 ✨',
-              style: const TextStyle(
-                color: _Az.primaryDeep,
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    return Center(
-      child: Material(
-        type: MaterialType.transparency,
-        child: GestureDetector(
-          onTap: () => Navigator.of(context).maybePop(),
-          child: reduceMotion
-              ? content
-              : ScaleTransition(
-                  scale: _scale,
-                  child: FadeTransition(opacity: _opacity, child: content),
-                ),
         ),
       ),
     );

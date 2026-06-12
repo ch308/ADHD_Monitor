@@ -678,6 +678,13 @@ static void AutismChoiceSequenceTask(void* arg) {
     }
     if (!user_finished) {
         (void)PostAutismTrainingChoiceTimeoutEvent(*ctx);
+        if (ctx->source == "child_training") {
+            const std::string closing(reinterpret_cast<const char*>(
+                u8"\u65f6\u95f4\u5230\u4e86\uff0c\u6211\u4eec\u4e0b\u6b21\u518d\u73a9\u5427\u3002"));
+            Application::GetInstance().Schedule([closing]() {
+                Application::GetInstance().SubmitChildTextInput(closing);
+            });
+        }
     }
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
@@ -1035,6 +1042,16 @@ bool adhd_confirm_autism_choice(void) {
     ESP_LOGI(TAG, "autism choice confirmed scene=%s idx=%d label=%s",
              snapshot.scene.c_str(), idx, label.c_str());
     (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
+    if (snapshot.source == "child_training") {
+        std::string praise = std::string(reinterpret_cast<const char*>(u8"\u592a\u68d2\u4e86\uff01\u4f60\u9009\u5f97\u771f\u597d\uff0c\u7ee7\u7eed\u52a0\u6cb9\uff01"));
+        if (!label.empty()) {
+            praise = std::string(reinterpret_cast<const char*>(u8"\u771f\u68d2\uff01\u4f60\u9009\u4e86")) + label +
+                     std::string(reinterpret_cast<const char*>(u8"\uff0c\u505a\u5f97\u5f88\u597d\uff01"));
+        }
+        Application::GetInstance().Schedule([praise]() {
+            Application::GetInstance().SubmitChildTextInput(praise);
+        });
+    }
     ScheduleVisualChoiceFallbackRestore();
     return true;
 }
