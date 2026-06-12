@@ -3939,7 +3939,8 @@ def autism_daily_plan(child_id):
         for j, opt in enumerate(slot["options"]):
             key = f"s{i}_o{j}"
             audio[key] = _autism_label_audio_url(opt, images.get(key))
-    plan_obj = {"kind": "daily_plan", "slots": slots, "images": images, "audio": audio}
+    # 新计划覆盖旧计划：先清库中该孩子历史计划，再写入当前版本。
+    cursor.execute("DELETE FROM autism_daily_plans WHERE child_id = ?", (child_id,))
     cursor.execute(
         """
         INSERT INTO autism_daily_plans (child_id, plan_json, images_json, created_at)
@@ -5462,6 +5463,62 @@ def diag_glm_image():
     return jsonify({"ok": bool(public_url), **steps}), 200
 
 
+def _strip_pending_autism_daily_plan_from_device_queues(device_ids: list[str]) -> None:
+    """从星星命令队列中移除尚未下发的旧「日常计划表」会话，避免多次下发时堆积或乱序。
+
+    须在持有 `_esp32_cmd_lock` 时调用。"""
+    for did in device_ids:
+        q = _esp32_cmd_queue.get(did)
+        if not q:
+            continue
+        kept: deque = deque()
+        while q:
+            cmd = q.popleft()
+            if cmd.get("action") != "autism_session":
+                kept.append(cmd)
+                continue
+            raw = cmd.get("session_json")
+            if not isinstance(raw, str):
+                kept.append(cmd)
+                continue
+            try:
+                sj = json.loads(raw[:32000])
+            except Exception:
+                sj = {}
+            if isinstance(sj, dict) and sj.get("kind") == "daily_plan":
+                continue
+            kept.append(cmd)
+        _esp32_cmd_queue[did] = kept
+
+
+def _strip_pending_autism_training_start_from_device_queues(device_ids: list[str]) -> None:
+    """移除尚未下发的旧「日常训练开始」会话，避免家长多次下发在队列与单包批量里堆积。
+
+    须在持有 `_esp32_cmd_lock` 时调用。"""
+    for did in device_ids:
+        q = _esp32_cmd_queue.get(did)
+        if not q:
+            continue
+        kept: deque = deque()
+        while q:
+            cmd = q.popleft()
+            if cmd.get("action") != "autism_session":
+                kept.append(cmd)
+                continue
+            raw = cmd.get("session_json")
+            if not isinstance(raw, str):
+                kept.append(cmd)
+                continue
+            try:
+                sj = json.loads(raw[:32000])
+            except Exception:
+                sj = {}
+            if isinstance(sj, dict) and sj.get("kind") == "training_start":
+                continue
+            kept.append(cmd)
+        _esp32_cmd_queue[did] = kept
+
+
 def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:
     """把孤独症训练/日程 JSON 推入星星机器人长轮询命令队列。"""
     body = json.dumps(session, ensure_ascii=False)
@@ -5497,6 +5554,10 @@ def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]
             "不要把这句当成孩子输入来回应。"
         )
     with _esp32_cmd_lock:
+        if sk == "daily_plan":
+            _strip_pending_autism_daily_plan_from_device_queues(ids)
+        elif sk == "training_start":
+            _strip_pending_autism_training_start_from_device_queues(ids)
         if opening:
             try:
                 from xiaozhi_bridge import stash_xinvoke_hint

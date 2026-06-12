@@ -61,6 +61,8 @@ struct AutismDailyPlanSlot {
     std::vector<std::string> image_urls;
     std::vector<std::string> audio_urls;
     int last_fired_yday = -1;
+    /// 每次服务端下发新计划表递增；用于丢弃旧 intro/选图任务与「表已换」检测。
+    int plan_table_revision = 0;
 };
 
 struct AutismChoiceItem {
@@ -74,6 +76,10 @@ struct AutismChoiceContext {
     int current_index = -1;
     int generation = 0;
     int session_id = 0;
+    /// 仅 daily_plan：与 StoreAutismDailyPlan 写入的 revision 一致，用于丢弃过期 intro。
+    int plan_table_revision = 0;
+    /// 仅 child_training：每次新的 training_start 递增，用于丢弃过期 intro。
+    int training_cmd_revision = 0;
     std::string scene;
     std::string kind;
     std::string source;
@@ -85,9 +91,11 @@ struct AutismChoiceContext {
 static SemaphoreHandle_t g_daily_plan_mutex = nullptr;
 static TaskHandle_t g_daily_plan_task = nullptr;
 static std::vector<AutismDailyPlanSlot> g_daily_plan_slots;
+static int g_daily_plan_store_revision = 0;
 static SemaphoreHandle_t g_choice_mutex = nullptr;
 static AutismChoiceContext g_choice_context;
 static int g_choice_generation = 0;
+static int g_autism_training_cmd_revision = 0;
 #endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
@@ -733,11 +741,48 @@ static void IntroThenChoiceTask(void* arg) {
     if (a->delay_ms > 0) {
         vTaskDelay(pdMS_TO_TICKS(a->delay_ms));
     }
+    if (a->ctx != nullptr && a->ctx->scene == "daily_plan" &&
+        a->ctx->plan_table_revision != g_daily_plan_store_revision) {
+        ESP_LOGI(TAG, "daily_plan intro stale (rev=%d current=%d); skip choice UI",
+                 a->ctx->plan_table_revision, g_daily_plan_store_revision);
+        delete a->ctx;
+        delete a;
+        vTaskDelete(nullptr);
+        return;
+    }
+    if (a->ctx != nullptr && a->ctx->source == "child_training" &&
+        a->ctx->training_cmd_revision != g_autism_training_cmd_revision) {
+        ESP_LOGI(TAG, "training_start intro stale (rev=%d current=%d); skip choice UI",
+                 a->ctx->training_cmd_revision, g_autism_training_cmd_revision);
+        delete a->ctx;
+        delete a;
+        vTaskDelete(nullptr);
+        return;
+    }
     if (a->ctx != nullptr) {
         StartAutismChoiceSequence(a->ctx);
     }
     delete a;
     vTaskDelete(nullptr);
+}
+
+/// 新的一次日常训练覆盖尚未结束的上一轮：清选图 UI，避免多路 intro/选图任务叠内存。
+static void InvalidateAutismTrainingChoiceUi() {
+    EnsureAutismChoiceMutex();
+    bool cleared = false;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        if (g_choice_context.active && g_choice_context.source == "child_training") {
+            g_choice_context.active = false;
+            ++g_choice_generation;
+            cleared = true;
+        }
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (cleared) {
+        Application::GetInstance().SetVisualChoiceMode(false);
+        RestoreDefaultActionCards();
+        ESP_LOGI(TAG, "autism training superseded: cleared in-progress training choice UI");
+    }
 }
 
 static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
@@ -750,6 +795,7 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
         plan_ctx->source = "daily_plan";
         plan_ctx->slot_time = slot.time_text;
         plan_ctx->focus_label = slot.tts;
+        plan_ctx->plan_table_revision = slot.plan_table_revision;
         for (size_t i = 0; i < slot.image_urls.size(); ++i) {
             AutismChoiceItem item;
             item.image_url = slot.image_urls[i];
@@ -819,6 +865,25 @@ static void EnsureDailyPlanSchedulerStarted() {
     }
 }
 
+/// 新计划表覆盖旧表：结束进行中的计划表选图，避免旧图/旧 TTS 与新表混用。
+static void InvalidateAutismDailyPlanChoiceUi() {
+    EnsureAutismChoiceMutex();
+    bool cleared = false;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
+        if (g_choice_context.active && g_choice_context.scene == "daily_plan") {
+            g_choice_context.active = false;
+            ++g_choice_generation;
+            cleared = true;
+        }
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (cleared) {
+        Application::GetInstance().SetVisualChoiceMode(false);
+        RestoreDefaultActionCards();
+        ESP_LOGI(TAG, "daily_plan superseded: cleared in-progress plan choice UI");
+    }
+}
+
 static void StoreAutismDailyPlan(cJSON* session) {
     cJSON* slots = cJSON_GetObjectItem(session, "slots");
     cJSON* images = cJSON_GetObjectItem(session, "images");
@@ -869,11 +934,19 @@ static void StoreAutismDailyPlan(cJSON* session) {
         return;
     }
 
+    InvalidateAutismDailyPlanChoiceUi();
+
     EnsureDailyPlanSchedulerStarted();
     if (g_daily_plan_mutex != nullptr && xSemaphoreTake(g_daily_plan_mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+        const int next_rev = g_daily_plan_store_revision + 1;
+        for (auto& slot : parsed) {
+            slot.plan_table_revision = next_rev;
+        }
         g_daily_plan_slots = std::move(parsed);
+        g_daily_plan_store_revision = next_rev;
         xSemaphoreGive(g_daily_plan_mutex);
-        ESP_LOGI(TAG, "daily_plan stored slots=%u; waiting for scheduled time", (unsigned)g_daily_plan_slots.size());
+        ESP_LOGI(TAG, "daily_plan stored slots=%u rev=%d; waiting for scheduled time",
+                 (unsigned)g_daily_plan_slots.size(), g_daily_plan_store_revision);
     } else {
         ESP_LOGW(TAG, "daily_plan store failed: mutex unavailable");
     }
@@ -1117,6 +1190,9 @@ static void HandleOneCommand(cJSON* root) {
                 ESP_LOGW(TAG, "autism_session training_start: no image URLs in payload (check server images + public URL)");
                 delete ctx;
             } else {
+                InvalidateAutismTrainingChoiceUi();
+                ++g_autism_training_cmd_revision;
+                ctx->training_cmd_revision = g_autism_training_cmd_revision;
                 cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
                 std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
                 if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
