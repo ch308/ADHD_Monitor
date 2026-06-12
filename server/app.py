@@ -4285,10 +4285,45 @@ def device_autism_training_event(device_id):
         if tot == 3:
             hits = _autism_training_confirmed_count(cu, child_id, sid_i)
             score, tts = _autism_training_score_tts(hits)
+            # 先复述孩子最后一次的选择，再播打分总结（最后一轮为点选确认时）。
+            spoken = tts
+            if phase == "image_confirmed":
+                last_label = str(payload.get("label") or "").strip()
+                if last_label and last_label != "都不是":
+                    spoken = f"你选了{last_label}。{tts}"
             _append_autism_training_score_parent_log(
-                cu, child_id, scene or "training", score, hits, tts
+                cu, child_id, scene or "training", score, hits, spoken
             )
             now_u = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            last_label = ""
+            if phase == "image_confirmed":
+                last_label = str(payload.get("label") or "").strip()
+            # 记录一条 scored 事件，供家长端轮询后弹出奖励动画（不计入轮次统计）。
+            cu.execute(
+                """
+                INSERT INTO autism_training_events
+                (child_id, device_id, scene, phase, payload_json, ts, created_at, session_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    child_id,
+                    device_id,
+                    scene,
+                    "scored",
+                    json.dumps(
+                        {
+                            "score": score,
+                            "hits": hits,
+                            "label": last_label,
+                            "tts": spoken,
+                        },
+                        ensure_ascii=False,
+                    ),
+                    now_u,
+                    now_u,
+                    sid_i,
+                ),
+            )
             cu.execute(
                 """
                 UPDATE autism_training_sessions SET status = ?, updated_at = ?
@@ -4303,7 +4338,7 @@ def device_autism_training_event(device_id):
                 "session_id": sid_i,
                 "scene_id": scene or "training",
                 "score": score,
-                "tts_intro": tts,
+                "tts_intro": spoken,
             }
             _enqueue_autism_session_for_child(child_id, score_session)
             return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
