@@ -1319,8 +1319,8 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
             const SizedBox(height: 8),
             Text(
               _boundXiaozhiDeviceId != null
-                  ? '星星已绑定（$_boundXiaozhiDeviceId）。孩子在设备上选择并确认需求后，本页会自动更新，无需手动刷新。'
-                  : '尚未检测到已绑定的星星机器人，请先在菜单中配网并绑定。',
+                  ? '星星机器人等待孩子确认需求中。'
+                  : '星星机器人等待孩子确认需求中。',
               style: const TextStyle(height: 1.45, color: AppColors.muted),
             ),
             const SizedBox(height: 8),
@@ -1579,7 +1579,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
             const Text('孩子日常计划表', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const SizedBox(height: 8),
             const Text(
-              '每一行可编辑时间、机器人要说的话和孩子可选择的图片选项。同步后云端会为每个选项生成 240×240 图片并下发星星机器人。',
+              '每一项可编辑时间、机器人要说的话和孩子可选择的图片选项，点击应用按钮后，云端会为每个选项生成 图片并下发星星机器人。',
               style: TextStyle(height: 1.45, color: AppColors.muted),
             ),
             const SizedBox(height: 16),

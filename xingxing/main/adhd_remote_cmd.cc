@@ -552,7 +552,8 @@ static void ChoiceLabelAudioHoldTask(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
-    vTaskDelay(pdMS_TO_TICKS(1000));
+    // 图片已显示后再播标签 OGG（与服务端预生成 o 对应）
+    vTaskDelay(pdMS_TO_TICKS(2000));
     bool still_current = false;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
         still_current = g_choice_context.active &&
@@ -568,10 +569,9 @@ static void ChoiceLabelAudioHoldTask(void* arg) {
 }
 
 static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url) {
-    (void)generation;
-    (void)index;
-    (void)audio_url;
-    return;
+    if (audio_url.empty()) {
+        return;
+    }
     auto* req = new ChoiceLabelAudioRequest();
     req->generation = generation;
     req->index = index;

@@ -46,6 +46,20 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
   _PeriodOption get _current =>
       _periods.firstWhere((p) => p.type == _periodType);
 
+  /// 与云端 `child_profiles.category` 一致：孤独症孩子不展示心率向报告 UI。
+  bool get _autismUi {
+    final r = _viewingReport;
+    if (r != null) {
+      final d = r['digest'];
+      if (d is Map) {
+        final f = '${d['report_focus']}';
+        if (f == 'autism') return true;
+        if (f == 'adhd') return false;
+      }
+    }
+    return (_status?['report_focus']?.toString() ?? '') == 'autism';
+  }
+
   Map<String, String> get _jsonHeaders => {
         ...widget.headers,
         'Content-Type': 'application/json',
@@ -352,7 +366,9 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Text(
-            '报告由 AI 基于设备心率与家长记录生成，仅供家庭参考，不能替代医生或康复师面诊。',
+            _autismUi
+                ? '报告由 AI 基于孤独症训练事件与家长笔记（孤独症类）生成，不含手环心率；仅供家庭参考，不能替代医生或康复师面诊。'
+                : '报告由 AI 基于设备心率与家长记录生成，仅供家庭参考，不能替代医生或康复师面诊。',
             style: TextStyle(
                 fontSize: 11, color: Colors.grey.shade500, height: 1.4),
           ),
@@ -475,19 +491,23 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
           Row(
             children: [
               _MiniStat(
-                  icon: Icons.favorite_rounded,
-                  label: '心率天数',
+                  icon: _autismUi
+                      ? Icons.event_available_rounded
+                      : Icons.favorite_rounded,
+                  label: _autismUi ? '有活动天数' : '心率天数',
                   value: '$daysCollected'),
               const SizedBox(width: 20),
               _MiniStat(
                   icon: Icons.edit_note_rounded,
-                  label: '行为记录',
+                  label: _autismUi ? '训练与笔记量' : '行为记录',
                   value: '$logCount'),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            '${_current.currentLabel}结束后即可生成报告，期间持续佩戴设备和记录行为，报告内容会更完整哦～',
+            _autismUi
+                ? '${_current.currentLabel}结束后即可生成报告。请持续用「日常训练 / 计划表」与星星机器人互动，家长笔记选「孤独症」分类，报告会更完整哦～'
+                : '${_current.currentLabel}结束后即可生成报告，期间持续佩戴设备和记录行为，报告内容会更完整哦～',
             style: TextStyle(
                 fontSize: 12, color: Colors.grey.shade500, height: 1.4),
           ),
@@ -567,7 +587,9 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
             ),
             const SizedBox(height: 6),
             Text(
-              '$start ~ $end 的数据已收集完毕，可以生成 AI ${_current.label}了',
+              _autismUi
+                  ? '$start ~ $end 的训练与事件记录已就绪，可以生成 AI ${_current.label}了'
+                  : '$start ~ $end 的数据已收集完毕，可以生成 AI ${_current.label}了',
               style: TextStyle(
                   fontSize: 12, color: Colors.grey.shade600, height: 1.4),
             ),
@@ -617,7 +639,9 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '该周期没有收集到心率或行为数据，无法生成报告',
+                  _autismUi
+                      ? '该周期暂无孤独症训练事件、主动发起或家长笔记（孤独症类），无法生成报告'
+                      : '该周期没有收集到心率或行为数据，无法生成报告',
                   style: TextStyle(
                       fontSize: 12, color: Colors.grey.shade500, height: 1.3),
                 ),
@@ -659,7 +683,11 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
         ),
 
         // 数据概览卡
-        if (digest is Map) _buildDigestCard(Map<String, dynamic>.from(digest)),
+        if (digest is Map)
+          _buildDigestCard(
+            Map<String, dynamic>.from(digest),
+            autismMode: _autismUi,
+          ),
 
         const SizedBox(height: 10),
 
@@ -700,7 +728,68 @@ class _WeeklyReportPageState extends State<WeeklyReportPage> {
     );
   }
 
-  Widget _buildDigestCard(Map<String, dynamic> digest) {
+  Widget _buildDigestCard(Map<String, dynamic> digest, {required bool autismMode}) {
+    if (autismMode) {
+      final logs = digest['parent_logs'];
+      final events = digest['autism_training_events'];
+      final needs = digest['child_initiated_needs'];
+      final logCount = logs is List ? logs.length : 0;
+      final eventCount = events is List ? events.length : 0;
+      final needCount = needs is List ? needs.length : 0;
+
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.teal.shade50, Colors.cyan.shade50],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.teal.shade100),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '本周期数据概览（孤独症）',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: Colors.teal.shade900,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _DataTile(
+                  label: '训练/计划事件',
+                  value: '$eventCount',
+                  unit: '条',
+                ),
+                _DataTile(
+                  label: '主动发起',
+                  value: '$needCount',
+                  unit: '条',
+                ),
+                _DataTile(
+                  label: '家长笔记',
+                  value: '$logCount',
+                  unit: '条',
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              '说明：孤独症向报告不包含手环心率；摘要来自星星机器人互动与「孤独症」类家长记录。',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700, height: 1.35),
+            ),
+          ],
+        ),
+      );
+    }
+
     final heartCount = digest['heart_sample_count'] ?? 0;
     final heartAvg = digest['heart_avg_bpm'];
     final heartMin = digest['heart_min_bpm'];

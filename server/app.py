@@ -1035,6 +1035,23 @@ def _read_child_profile_row(cursor, child_id):
     }
 
 
+def _child_profile_category_is_autism(cursor, child_id: int) -> bool:
+    """与 App `ChildCondition` / profile.category 一致：孤独症孩子走训练向报告，不含心率。"""
+    row = _read_child_profile_row(cursor, child_id)
+    if not row:
+        return False
+    profile = row.get("profile") or {}
+    cat = str(profile.get("category") or profile.get("categoryLabel") or "").strip()
+    if not cat:
+        return False
+    low = cat.lower()
+    if "孤独" in cat or "自闭" in cat or "谱系" in cat:
+        return True
+    if "asd" in low or "autism" in low:
+        return True
+    return False
+
+
 def _skill_list_append_unique(items, value, limit=12):
     if not isinstance(items, list):
         items = []
@@ -1974,15 +1991,29 @@ def footprint_today():
     try:
         conn = sqlite3.connect("adhd_data.db")
         cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT id, timestamp, bpm, observation, ai_advice, condition_type
-            FROM parent_logs
-            WHERE child_id = ? AND timestamp LIKE ?
-            ORDER BY id ASC
-            """,
-            (cid, prefix),
-        )
+        is_autism = _child_profile_category_is_autism(cursor, cid)
+
+        if is_autism:
+            cursor.execute(
+                """
+                SELECT id, timestamp, bpm, observation, ai_advice, condition_type
+                FROM parent_logs
+                WHERE child_id = ? AND timestamp LIKE ?
+                  AND LOWER(COALESCE(condition_type, '')) = 'autism'
+                ORDER BY id ASC
+                """,
+                (cid, prefix),
+            )
+        else:
+            cursor.execute(
+                """
+                SELECT id, timestamp, bpm, observation, ai_advice, condition_type
+                FROM parent_logs
+                WHERE child_id = ? AND timestamp LIKE ?
+                ORDER BY id ASC
+                """,
+                (cid, prefix),
+            )
         rows = cursor.fetchall()
 
         logs_out = []
@@ -1991,9 +2022,19 @@ def footprint_today():
         for row in rows:
             _id, ts, bpm, obs, advice, cond = row
             cond = (cond or "adhd").lower()
-            trend_code, trend_label, avg_b, avg_a, nb, na = _trend_after_advice(
-                cursor, ts, cid
-            )
+            if is_autism:
+                trend_code, trend_label, avg_b, avg_a, nb, na = (
+                    "unknown",
+                    "（孤独症向记录不对比心率）",
+                    None,
+                    None,
+                    0,
+                    0,
+                )
+            else:
+                trend_code, trend_label, avg_b, avg_a, nb, na = _trend_after_advice(
+                    cursor, ts, cid
+                )
             summary[trend_code] = summary.get(trend_code, 0) + 1
 
             logs_out.append(
@@ -2074,7 +2115,10 @@ def footprint_today():
         {
             "child_id": cid,
             "date": date_str,
+            "report_focus": "autism" if is_autism else "adhd",
             "log_count": len(logs_out),
+            "training_event_count": len(autism_events),
+            "child_need_count": len(child_initiated_needs),
             "trend_summary": summary,
             "logs": logs_out,
             "autism_training_events": autism_events,
@@ -2161,83 +2205,105 @@ def _latest_completed_anchor(period_type: str, now: datetime = None) -> datetime
     raise ValueError("period_type must be week, month or year")
 
 
-def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
-    """聚合本周心率与家长记录，供 Kimi 与 digest_json 存档。"""
-    cursor.execute(
-        """
-        SELECT COUNT(*), AVG(bpm), MIN(bpm), MAX(bpm), SUM(is_alert)
-        FROM heart_rate_history
-        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-        """,
-        (child_id, t_lo, t_hi),
-    )
-    hrow = cursor.fetchone()
-    heart_n = int(hrow[0] or 0)
-    heart_avg = float(hrow[1]) if hrow[1] is not None else None
-    heart_min = float(hrow[2]) if hrow[2] is not None else None
-    heart_max = float(hrow[3]) if hrow[3] is not None else None
-    alert_sum = int(hrow[4] or 0)
-
-    cursor.execute(
-        """
-        SELECT substr(timestamp, 1, 13) AS bucket,
-               AVG(bpm) AS avgb,
-               AVG(is_alert * 1.0) AS ar,
-               COUNT(*) AS n
-        FROM heart_rate_history
-        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-        GROUP BY bucket
-        ORDER BY ar DESC, avgb DESC
-        LIMIT 12
-        """,
-        (child_id, t_lo, t_hi),
-    )
-    hourly_stress = []
-    for bucket, avgb, ar, n in cursor.fetchall():
-        hourly_stress.append(
-            {
-                "bucket": bucket,
-                "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
-                "alert_rate": round(float(ar), 3) if ar is not None else None,
-                "n": int(n),
-            }
+def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_autism: bool = False):
+    """聚合周期内数据供 Kimi 与 digest_json 存档。孤独症模式不含心率，以训练事件与家长笔记为主。"""
+    if not for_autism:
+        cursor.execute(
+            """
+            SELECT COUNT(*), AVG(bpm), MIN(bpm), MAX(bpm), SUM(is_alert)
+            FROM heart_rate_history
+            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+            """,
+            (child_id, t_lo, t_hi),
         )
+        hrow = cursor.fetchone()
+        heart_n = int(hrow[0] or 0)
+        heart_avg = float(hrow[1]) if hrow[1] is not None else None
+        heart_min = float(hrow[2]) if hrow[2] is not None else None
+        heart_max = float(hrow[3]) if hrow[3] is not None else None
+        alert_sum = int(hrow[4] or 0)
 
-    cursor.execute(
-        """
-        SELECT date(timestamp) AS d,
-               AVG(bpm) AS avgb,
-               AVG(is_alert * 1.0) AS ar,
-               COUNT(*) AS n
-        FROM heart_rate_history
-        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-        GROUP BY d
-        ORDER BY d
-        """,
-        (child_id, t_lo, t_hi),
-    )
-    daily = []
-    for d, avgb, ar, n in cursor.fetchall():
-        daily.append(
-            {
-                "date": d,
-                "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
-                "alert_rate": round(float(ar), 3) if ar is not None else None,
-                "n": int(n),
-            }
+        cursor.execute(
+            """
+            SELECT substr(timestamp, 1, 13) AS bucket,
+                   AVG(bpm) AS avgb,
+                   AVG(is_alert * 1.0) AS ar,
+                   COUNT(*) AS n
+            FROM heart_rate_history
+            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+            GROUP BY bucket
+            ORDER BY ar DESC, avgb DESC
+            LIMIT 12
+            """,
+            (child_id, t_lo, t_hi),
         )
+        hourly_stress = []
+        for bucket, avgb, ar, n in cursor.fetchall():
+            hourly_stress.append(
+                {
+                    "bucket": bucket,
+                    "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
+                    "alert_rate": round(float(ar), 3) if ar is not None else None,
+                    "n": int(n),
+                }
+            )
 
-    cursor.execute(
-        """
-        SELECT timestamp, bpm, observation, ai_advice,
-               COALESCE(condition_type, 'adhd') AS ctype
-        FROM parent_logs
-        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-        ORDER BY timestamp DESC
-        LIMIT 40
-        """,
-        (child_id, t_lo, t_hi),
-    )
+        cursor.execute(
+            """
+            SELECT date(timestamp) AS d,
+                   AVG(bpm) AS avgb,
+                   AVG(is_alert * 1.0) AS ar,
+                   COUNT(*) AS n
+            FROM heart_rate_history
+            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+            GROUP BY d
+            ORDER BY d
+            """,
+            (child_id, t_lo, t_hi),
+        )
+        daily = []
+        for d, avgb, ar, n in cursor.fetchall():
+            daily.append(
+                {
+                    "date": d,
+                    "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
+                    "alert_rate": round(float(ar), 3) if ar is not None else None,
+                    "n": int(n),
+                }
+            )
+    else:
+        heart_n = 0
+        heart_avg = heart_min = heart_max = None
+        alert_sum = 0
+        hourly_stress = []
+        daily = []
+
+    log_limit = 60 if for_autism else 40
+    if for_autism:
+        cursor.execute(
+            """
+            SELECT timestamp, bpm, observation, ai_advice,
+                   COALESCE(condition_type, 'autism') AS ctype
+            FROM parent_logs
+            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+                  AND LOWER(COALESCE(condition_type, '')) = 'autism'
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (child_id, t_lo, t_hi, log_limit),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT timestamp, bpm, observation, ai_advice,
+                   COALESCE(condition_type, 'adhd') AS ctype
+            FROM parent_logs
+            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (child_id, t_lo, t_hi, log_limit),
+        )
     log_rows = list(cursor.fetchall())
     log_rows.reverse()
     logs = []
@@ -2251,19 +2317,20 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
                 "observation": obs_s,
                 "ai_advice_snippet": adv_s,
                 "condition_type": ctype,
-                "condition_label": _condition_label(ctype.lower()),
+                "condition_label": _condition_label(str(ctype).lower()),
             }
         )
 
+    autism_limit = 400 if for_autism else 80
     cursor.execute(
         """
         SELECT ts, scene, phase, payload_json
         FROM autism_training_events
         WHERE child_id = ? AND ts >= ? AND ts <= ?
         ORDER BY ts ASC
-        LIMIT 80
+        LIMIT ?
         """,
-        (child_id, t_lo, t_hi),
+        (child_id, t_lo, t_hi, autism_limit),
     )
     autism_events = []
     for ts, scene, phase, payload_json in cursor.fetchall():
@@ -2282,15 +2349,16 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
             }
         )
 
+    needs_limit = 120 if for_autism else 80
     cursor.execute(
         """
         SELECT created_at, card_slug, label, voice_text, status, parent_confirmed_at
         FROM autism_child_needs
         WHERE child_id = ? AND created_at >= ? AND created_at <= ?
         ORDER BY created_at ASC
-        LIMIT 80
+        LIMIT ?
         """,
-        (child_id, t_lo, t_hi),
+        (child_id, t_lo, t_hi, needs_limit),
     )
     child_initiated_needs = []
     for created_at, card_slug, label, voice_text, status, parent_confirmed_at in cursor.fetchall():
@@ -2306,6 +2374,7 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
         )
 
     return {
+        "report_focus": "autism" if for_autism else "adhd",
         "heart_sample_count": heart_n,
         "heart_avg_bpm": round(heart_avg, 1) if heart_avg is not None else None,
         "heart_min_bpm": round(heart_min, 1) if heart_min is not None else None,
@@ -2397,6 +2466,8 @@ def _build_period_kimi_user_prompt(
     period_start: str,
     period_end: str,
     digest: dict,
+    *,
+    for_autism: bool = False,
 ) -> str:
     report_label = _PERIOD_LABELS.get(period_type, "报告")
     range_label = _PERIOD_RANGE_LABELS.get(period_type, "一段时间")
@@ -2410,6 +2481,57 @@ def _build_period_kimi_user_prompt(
         "month": "全文约 500～900 字，分 3～5 段",
         "year": "全文约 700～1200 字，分 4～6 段",
     }.get(period_type, "全文分段自然")
+
+    if for_autism:
+        lines = [
+            f"请根据以下「{range_label}摘要」（孤独症支持向，不含手环心率），给家长写一份中文「AI {report_label}」。",
+            "",
+            f"【统计周期】{period_start} 至 {period_end}",
+            f"【孩子称呼】{child_name}（文中可直接用此称呼）",
+            "",
+            "【数据说明】本档案为孤独症谱系支持向：摘要中仅含「星星机器人训练/日常计划事件」、"
+            "「家长笔记（孤独症类）」与「孩子主动发起需求」。请勿推断或描述心率、BPM、手环采样等（本周期无此类数据）。",
+        ]
+        logs = digest.get("parent_logs") or []
+        lines += ["", f"【家长笔记（孤独症类）】共 {len(logs)} 条"]
+        for p in logs:
+            lines.append(f"- {p['timestamp']} 观察：{p['observation']}")
+            adv = (p.get("ai_advice_snippet") or "").strip()
+            if adv:
+                lines.append(f"  当时建议摘要：{adv}")
+        if not logs:
+            lines.append("- （该周期暂无此类家长笔记）")
+
+        needs = digest.get("child_initiated_needs") or []
+        lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
+        for n in needs:
+            lines.append(
+                f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
+            )
+        if not needs:
+            lines.append("- （该周期暂无孩子主动发起需求记录）")
+
+        events = digest.get("autism_training_events") or []
+        lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
+        for e in events:
+            label = e.get("label") or "（无选项文字）"
+            slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
+            lines.append(
+                f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择/结果：{label}"
+            )
+        if not events:
+            lines.append("- （该周期暂无训练或日常计划事件）")
+
+        lines += [
+            "",
+            "【写作要求】",
+            "1. 用自然、亲切的第二人称写给家长；不要医学诊断，不要替代就医。",
+            "2. 围绕训练互动、日常计划执行、孩子主动表达与家长笔记，归纳规律、亮点与可改进处；不要编造心率或生理数据。",
+            f"3. {suggestion_hint}",
+            "4. 对自闭症谱系支持保持温和、具体、非标签化表达。",
+            f"5. {length_hint}，不要用 Markdown 标题符号，不要输出 JSON。",
+        ]
+        return "\n".join(lines)
 
     lines = [
         f"请根据以下「{range_label}数据摘要」，给家长写一份中文「AI {report_label}」。",
@@ -2505,14 +2627,24 @@ def fetch_kimi_weekly_report(user_prompt: str) -> str:
         raise
 
 
-def fetch_kimi_period_report(period_type: str, user_prompt: str) -> str:
+def fetch_kimi_period_report(
+    period_type: str, user_prompt: str, *, for_autism: bool = False
+) -> str:
     """调用 Kimi 生成周/月/年周期报告。"""
     report_label = _PERIOD_LABELS.get(period_type, "报告")
-    system = (
-        "你是儿童发育与特殊教育领域的资深顾问，熟悉 ADHD 与自闭症谱系的居家与学校适应支持。"
-        f"你根据家长端设备采集的心率与家长文字记录，撰写「{report_label}」帮助家长看见规律与下一步。"
-        "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
-    )
+    if for_autism:
+        system = (
+            "你是儿童发育与特殊教育领域的资深顾问，擅长自闭症谱系的沟通、情绪与结构化支持。"
+            f"你仅根据「孤独症训练/日常计划事件」与家长文字笔记撰写「{report_label}」，"
+            "不要描述或推断心率、手环采样、BPM 等（本场景不存在此类数据）。"
+            "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
+        )
+    else:
+        system = (
+            "你是儿童发育与特殊教育领域的资深顾问，熟悉 ADHD 与自闭症谱系的居家与学校适应支持。"
+            f"你根据家长端设备采集的心率与家长文字记录，撰写「{report_label}」帮助家长看见规律与下一步。"
+            "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
+        )
     model = (
         os.getenv("PERIOD_REPORT_MODEL")
         or os.getenv("WEEKLY_REPORT_MODEL")
@@ -2589,14 +2721,27 @@ def generate_period_report(
             }
 
     t_lo, t_hi = _period_sql_bounds(period_start, period_end)
-    digest = _collect_week_digest(cursor, t_lo, t_hi, child_id)
+    for_autism = _child_profile_category_is_autism(cursor, child_id)
+    digest = _collect_week_digest(cursor, t_lo, t_hi, child_id, for_autism=for_autism)
+    row_name = _read_child_profile_row(cursor, child_id)
     conn.close()
 
-    child_name = (os.getenv("CHILD_DISPLAY_NAME") or "孩子").strip() or "孩子"
+    child_name = "孩子"
+    if row_name:
+        nick = (row_name.get("nickname") or "").strip()
+        if nick:
+            child_name = nick
+    if not child_name or child_name == "孩子":
+        child_name = (os.getenv("CHILD_DISPLAY_NAME") or "孩子").strip() or "孩子"
     user_prompt = _build_period_kimi_user_prompt(
-        period_type, child_name, period_start, period_end, digest
+        period_type,
+        child_name,
+        period_start,
+        period_end,
+        digest,
+        for_autism=for_autism,
     )
-    summary = fetch_kimi_period_report(period_type, user_prompt)
+    summary = fetch_kimi_period_report(period_type, user_prompt, for_autism=for_autism)
     if not summary or len(summary) < 40:
         raise RuntimeError("Kimi 返回内容过短，未写入报告表")
 
@@ -2817,17 +2962,51 @@ def reports_status():
     t_lo, t_hi = _period_sql_bounds(cur_start, cur_end)
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
+    is_autism = _child_profile_category_is_autism(cursor, cid)
 
-    cursor.execute(
-        "SELECT COUNT(DISTINCT date(timestamp)) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
-        (cid, t_lo, t_hi),
-    )
-    days_collected = cursor.fetchone()[0] or 0
-    cursor.execute(
-        "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
-        (cid, t_lo, t_hi),
-    )
-    log_count = cursor.fetchone()[0] or 0
+    if is_autism:
+        cursor.execute(
+            """
+            SELECT COUNT(*) FROM (
+                SELECT substr(ts, 1, 10) AS d FROM autism_training_events
+                WHERE child_id = ? AND ts >= ? AND ts <= ?
+                UNION
+                SELECT substr(created_at, 1, 10) AS d FROM autism_child_needs
+                WHERE child_id = ? AND created_at >= ? AND created_at <= ?
+                UNION
+                SELECT substr(timestamp, 1, 10) AS d FROM parent_logs
+                WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+                  AND LOWER(COALESCE(condition_type, '')) = 'autism'
+            ) AS active_days
+            """,
+            (cid, t_lo, t_hi, cid, t_lo, t_hi, cid, t_lo, t_hi),
+        )
+        days_collected = int(cursor.fetchone()[0] or 0)
+        cursor.execute(
+            """
+            SELECT
+              (SELECT COUNT(*) FROM autism_training_events
+               WHERE child_id = ? AND ts >= ? AND ts <= ?)
+            + (SELECT COUNT(*) FROM autism_child_needs
+               WHERE child_id = ? AND created_at >= ? AND created_at <= ?)
+            + (SELECT COUNT(*) FROM parent_logs
+               WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+                 AND LOWER(COALESCE(condition_type, '')) = 'autism')
+            """,
+            (cid, t_lo, t_hi, cid, t_lo, t_hi, cid, t_lo, t_hi),
+        )
+        log_count = int(cursor.fetchone()[0] or 0)
+    else:
+        cursor.execute(
+            "SELECT COUNT(DISTINCT date(timestamp)) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
+            (cid, t_lo, t_hi),
+        )
+        days_collected = cursor.fetchone()[0] or 0
+        cursor.execute(
+            "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
+            (cid, t_lo, t_hi),
+        )
+        log_count = cursor.fetchone()[0] or 0
 
     current_period = {
         "start": cur_start,
@@ -2853,20 +3032,37 @@ def reports_status():
         last_report_id = existing[0]
     else:
         lt_lo, lt_hi = _period_sql_bounds(last_start, last_end)
-        cursor.execute(
-            "SELECT COUNT(*) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
-            (cid, lt_lo, lt_hi),
-        )
-        has_data = (cursor.fetchone()[0] or 0) > 0
-        cursor.execute(
-            "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
-            (cid, lt_lo, lt_hi),
-        )
-        has_logs = (cursor.fetchone()[0] or 0) > 0
-        if has_data or has_logs:
-            last_status = "ready"
+        if is_autism:
+            cursor.execute(
+                """
+                SELECT
+                  (SELECT COUNT(*) FROM autism_training_events
+                   WHERE child_id = ? AND ts >= ? AND ts <= ?)
+                + (SELECT COUNT(*) FROM autism_child_needs
+                   WHERE child_id = ? AND created_at >= ? AND created_at <= ?)
+                + (SELECT COUNT(*) FROM parent_logs
+                   WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+                     AND LOWER(COALESCE(condition_type, '')) = 'autism')
+                """,
+                (cid, lt_lo, lt_hi, cid, lt_lo, lt_hi, cid, lt_lo, lt_hi),
+            )
+            has_touch = (cursor.fetchone()[0] or 0) > 0
+            last_status = "ready" if has_touch else "no_data"
         else:
-            last_status = "no_data"
+            cursor.execute(
+                "SELECT COUNT(*) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
+                (cid, lt_lo, lt_hi),
+            )
+            has_data = (cursor.fetchone()[0] or 0) > 0
+            cursor.execute(
+                "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
+                (cid, lt_lo, lt_hi),
+            )
+            has_logs = (cursor.fetchone()[0] or 0) > 0
+            if has_data or has_logs:
+                last_status = "ready"
+            else:
+                last_status = "no_data"
         last_report_id = None
 
     conn.close()
@@ -2882,6 +3078,7 @@ def reports_status():
         "child_id": cid,
         "period_type": period_type,
         "period_label": _PERIOD_LABELS[period_type],
+        "report_focus": "autism" if is_autism else "adhd",
         "current_period": current_period,
         "last_period": last_period,
     }), 200
