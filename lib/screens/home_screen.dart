@@ -1547,18 +1547,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                 _recordController.clear();
               }),
             ),
-            const SizedBox(height: 8),
-            _OptionCard(
-              icon: Icons.volunteer_activism_rounded,
-              label: '自闭症 · 记录当前行为',
-              subtitle: '描述行为，获取 AI 建议',
-              color: _sage,
-              onTap: () => setState(() {
-                _selectedConditionType = 'autism';
-                _selectedConditionLabel = '自闭症';
-                _recordController.clear();
-              }),
-            ),
           ],
         ),
       );
