@@ -60,6 +60,8 @@ struct AutismDailyPlanSlot {
     std::vector<std::string> option_labels;
     std::vector<std::string> image_urls;
     std::vector<std::string> audio_urls;
+    /// 该时段开场白 OGG（服务端 edge-tts 预生成）；到点直接外放，不走聊天链路。
+    std::string intro_audio_url;
     int last_fired_yday = -1;
     /// 每次服务端下发新计划表递增；用于丢弃旧 intro/选图任务与「表已换」检测。
     int plan_table_revision = 0;
@@ -69,6 +71,8 @@ struct AutismChoiceItem {
     std::string label;
     std::string image_url;
     std::string audio_url;
+    /// 选中后要外放的鼓励语 OGG（服务端 edge-tts 预生成，确定性本地播放）。
+    std::string praise_audio_url;
 };
 
 struct AutismChoiceContext {
@@ -540,6 +544,33 @@ static bool DownloadAndPlayOggLabel(const std::string& url) {
     return true;
 }
 
+struct RobotOggRequest {
+    std::string url;
+};
+
+static void RobotOggPlayTask(void* arg) {
+    auto* req = static_cast<RobotOggRequest*>(arg);
+    if (req != nullptr) {
+        (void)DownloadAndPlayOggLabel(req->url);
+        delete req;
+    }
+    vTaskDelete(nullptr);
+}
+
+/// 外放服务端预生成的脚本语音（开场白 / 鼓励语）。确定性本地播放，不经 LLM、
+/// 不开麦克风、不依赖主动开场匹配——孩子必定听到这句固定内容。
+static void PlayRobotOggAsync(const std::string& url) {
+    if (url.empty()) {
+        return;
+    }
+    auto* req = new RobotOggRequest();
+    req->url = url;
+    if (xTaskCreate(RobotOggPlayTask, "robot_ogg", 8192, req, 3, nullptr) != pdPASS) {
+        ESP_LOGW(TAG, "robot_ogg task create failed");
+        delete req;
+    }
+}
+
 struct ChoiceLabelAudioRequest {
     int generation = 0;
     int index = -1;
@@ -597,28 +628,6 @@ static int ParseHourMinuteToMinuteOfDay(const char* text) {
     }
     return hh * 60 + mm;
 }
-
-/// Rough delay so cloud TTS for the intro can play before we show choice UI.
-static int EstimateIntroDelayMs(const std::string& line) {
-    if (line.empty()) {
-        return 1500;
-    }
-    int n = 0;
-    for (unsigned char c : line) {
-        if ((c & 0xC0) != 0x80) {
-            ++n;
-        }
-    }
-    int ms = 1400 + n * 320;
-    if (ms < 2200) {
-        ms = 2200;
-    }
-    if (ms > 55000) {
-        ms = 55000;
-    }
-    return ms;
-}
-
 static void AutismImageSequenceTask(void* arg) {
     auto* urls = static_cast<std::vector<std::string>*>(arg);
     if (urls == nullptr) {
@@ -740,7 +749,10 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
 
 struct IntroThenChoiceArg {
     AutismChoiceContext* ctx = nullptr;
-    int delay_ms = 0;
+    /// 开场白 OGG；先完整外放它，播完再出选图，避免图片突兀出现。
+    std::string intro_audio_url;
+    /// 没有开场白音频时的兜底等待（让等待界面不至于瞬间弹出）。
+    int fallback_delay_ms = 500;
 };
 
 static void IntroThenChoiceTask(void* arg) {
@@ -749,8 +761,13 @@ static void IntroThenChoiceTask(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
-    if (a->delay_ms > 0) {
-        vTaskDelay(pdMS_TO_TICKS(a->delay_ms));
+    if (!a->intro_audio_url.empty()) {
+        // 先把开场白整段播完（含解码/播放队列排空），再露出选图界面。
+        (void)DownloadAndPlayOggLabel(a->intro_audio_url);
+        Application::GetInstance().GetAudioService().WaitForPlaybackQueueEmpty();
+        vTaskDelay(pdMS_TO_TICKS(400));  // 一点自然停顿，避免说完立刻跳图
+    } else if (a->fallback_delay_ms > 0) {
+        vTaskDelay(pdMS_TO_TICKS(a->fallback_delay_ms));
     }
     if (a->ctx != nullptr && a->ctx->scene == "daily_plan" &&
         a->ctx->plan_table_revision != g_daily_plan_store_revision) {
@@ -815,19 +832,13 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
             plan_ctx->items.push_back(std::move(item));
         }
     }
-    const std::string line = slot.tts.empty()
-        ? std::string(reinterpret_cast<const char*>(u8"\u65f6\u95f4\u5230\u5566\uff0c\u6211\u4eec\u6765\u9009\u4e00\u9009\u5427"))
-        : slot.tts;
     ESP_LOGI(TAG, "daily_plan fire %s images=%u", slot.time_text.c_str(), (unsigned)slot.image_urls.size());
-    SubmitRobotOpeningLine(
-        line,
-        std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8ba1\u5212\u8868\u5230\u70b9\u89e6\u53d1\u7684\u4e3b\u52a8\u63d0\u95ee\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u9009\u62e9\u56fe\u7247\u6216\u8bed\u97f3\u56de\u7b54\u3002"))
-    );
     if (plan_ctx != nullptr) {
+        // 开场白播完后再出选图界面，避免突兀。
         auto* delay_arg = new IntroThenChoiceArg();
         delay_arg->ctx = plan_ctx;
-        delay_arg->delay_ms = EstimateIntroDelayMs(line);
-        BaseType_t tr = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
+        delay_arg->intro_audio_url = slot.intro_audio_url;
+        BaseType_t tr = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 8192, delay_arg, 3, nullptr);
         if (tr != pdPASS) {
             ESP_LOGW(TAG, "autism_intro_wait task create failed");
             delete plan_ctx;
@@ -896,6 +907,7 @@ static void StoreAutismDailyPlan(cJSON* session) {
     cJSON* slots = cJSON_GetObjectItem(session, "slots");
     cJSON* images = cJSON_GetObjectItem(session, "images");
     cJSON* audio = cJSON_GetObjectItem(session, "audio");
+    cJSON* intro_audio = cJSON_GetObjectItem(session, "intro_audio");
     if (!cJSON_IsArray(slots)) {
         ESP_LOGW(TAG, "daily_plan missing slots");
         return;
@@ -920,6 +932,14 @@ static void StoreAutismDailyPlan(cJSON* session) {
         slot.time_text = time_text ? time_text : "";
         if (cJSON_IsString(tts) && tts->valuestring) {
             slot.tts = tts->valuestring;
+        }
+        if (cJSON_IsObject(intro_audio)) {
+            char intro_key[16];
+            snprintf(intro_key, sizeof(intro_key), "s%d", i);
+            cJSON* intro_url = cJSON_GetObjectItem(intro_audio, intro_key);
+            if (cJSON_IsString(intro_url) && intro_url->valuestring) {
+                slot.intro_audio_url = intro_url->valuestring;
+            }
         }
         cJSON* options = cJSON_GetObjectItem(item, "options");
         const int opt_count = cJSON_IsArray(options) ? cJSON_GetArraySize(options) : 4;
@@ -1056,15 +1076,16 @@ bool adhd_confirm_autism_choice(void) {
              snapshot.scene.c_str(), idx, label.c_str());
     (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
     if (snapshot.source == "child_training") {
-        std::string praise = std::string(reinterpret_cast<const char*>(u8"\u592a\u68d2\u4e86\uff01\u4f60\u9009\u5f97\u771f\u597d\uff0c\u7ee7\u7eed\u52a0\u6cb9\uff01"));
-        if (!label.empty()) {
-            praise = std::string(reinterpret_cast<const char*>(u8"\u771f\u68d2\uff01\u4f60\u9009\u4e86")) + label +
-                     std::string(reinterpret_cast<const char*>(u8"\uff0c\u505a\u5f97\u5f88\u597d\uff01"));
+        // 鼓励语用服务端预生成的 OGG 确定性外放，不再经聊天链路（避免被当孩子输入追问）。
+        const std::string praise_url =
+            (idx >= 0 && idx < static_cast<int>(snapshot.items.size()))
+                ? snapshot.items[idx].praise_audio_url
+                : std::string();
+        if (!praise_url.empty()) {
+            PlayRobotOggAsync(praise_url);
+        } else {
+            ESP_LOGW(TAG, "autism praise audio missing (server edge-tts/ffmpeg?) idx=%d", idx);
         }
-        SubmitRobotOpeningLine(
-            praise,
-            std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8bad\u7ec3\u56fe\u7247\u9009\u62e9\u786e\u8ba4\u540e\u7684\u7ed3\u675f\u9f13\u52b1\u8bed\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u4e0d\u8981\u8ffd\u95ee\u3002"))
-        );
     }
     ScheduleVisualChoiceFallbackRestore();
     return true;
@@ -1203,6 +1224,7 @@ static void HandleOneCommand(cJSON* root) {
             cJSON* options = cJSON_GetObjectItem(session, "options");
             cJSON* images = cJSON_GetObjectItem(session, "images");
             cJSON* audio = cJSON_GetObjectItem(session, "audio");
+            cJSON* praise_audio = cJSON_GetObjectItem(session, "praise_audio");
             auto* ctx = new AutismChoiceContext();
             ctx->scene = cJSON_IsString(scene) && scene->valuestring ? scene->valuestring : "training";
             ctx->kind = "training_start";
@@ -1219,10 +1241,12 @@ static void HandleOneCommand(cJSON* root) {
                 }
                 cJSON* opt = cJSON_GetArrayItem(options, i);
                 cJSON* audio_url = cJSON_IsObject(audio) ? cJSON_GetObjectItem(audio, key) : nullptr;
+                cJSON* praise_url = cJSON_IsObject(praise_audio) ? cJSON_GetObjectItem(praise_audio, key) : nullptr;
                 AutismChoiceItem item;
                 item.label = cJSON_IsString(opt) && opt->valuestring ? opt->valuestring : "";
                 item.image_url = url->valuestring;
                 item.audio_url = cJSON_IsString(audio_url) && audio_url->valuestring ? audio_url->valuestring : "";
+                item.praise_audio_url = cJSON_IsString(praise_url) && praise_url->valuestring ? praise_url->valuestring : "";
                 ctx->items.push_back(std::move(item));
             }
             ESP_LOGI(TAG, "autism_session training_start scene=%s image_urls=%u session_id=%d",
@@ -1234,19 +1258,14 @@ static void HandleOneCommand(cJSON* root) {
                 InvalidateAutismTrainingChoiceUi();
                 ++g_autism_training_cmd_revision;
                 ctx->training_cmd_revision = g_autism_training_cmd_revision;
-                cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
-                std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
-                if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
-                    line = tts->valuestring;
-                }
-                SubmitRobotOpeningLine(
-                    line,
-                    std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u5b64\u72ec\u75c7\u65e5\u5e38\u8bad\u7ec3\u7684\u5f00\u573a\u767d\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u4e0d\u8981\u8ffd\u95ee\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u9009\u62e9\u56fe\u7247\u3002"))
-                );
+                cJSON* intro_audio = cJSON_GetObjectItem(session, "intro_audio");
+                const std::string intro_url =
+                    cJSON_IsString(intro_audio) && intro_audio->valuestring ? intro_audio->valuestring : "";
+                // 确定性本地外放开场白；开场白播完后再出选图界面，避免突兀。
                 auto* delay_arg = new IntroThenChoiceArg();
                 delay_arg->ctx = ctx;
-                delay_arg->delay_ms = EstimateIntroDelayMs(line);
-                BaseType_t tr_intro = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
+                delay_arg->intro_audio_url = intro_url;
+                BaseType_t tr_intro = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 8192, delay_arg, 3, nullptr);
                 if (tr_intro != pdPASS) {
                     ESP_LOGW(TAG, "autism_intro_wait task create failed");
                     delete ctx;
@@ -1261,16 +1280,12 @@ static void HandleOneCommand(cJSON* root) {
                 }
             }
         } else if (strcmp(k, "training_score") == 0) {
-            cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
-            std::string line;
-            if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
-                line = tts->valuestring;
-            }
-            if (!line.empty()) {
-                SubmitRobotOpeningLine(
-                    line,
-                    std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8bad\u7ec3\u7ed3\u679c\u6216\u7ed3\u675f\u64ad\u62a5\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u4e0d\u8981\u8ffd\u95ee\u3002"))
-                );
+            cJSON* intro_audio = cJSON_GetObjectItem(session, "intro_audio");
+            if (cJSON_IsString(intro_audio) && intro_audio->valuestring &&
+                strlen(intro_audio->valuestring) > 0) {
+                PlayRobotOggAsync(intro_audio->valuestring);
+            } else {
+                ESP_LOGW(TAG, "training_score: no intro_audio (server edge-tts/ffmpeg?)");
             }
         } else if (strcmp(k, "daily_plan") == 0) {
             StoreAutismDailyPlan(session);

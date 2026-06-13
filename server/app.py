@@ -4987,6 +4987,72 @@ def _autism_rewrite_local_image_url(url: str | None) -> str | None:
     return _autism_action_image_url(filename)
 
 
+def _autism_synthesize_ogg(text: str, audio_path: str) -> bool:
+    """edge-tts 合成中文 → 转 24k 单声道 OGG/Opus 落盘到 audio_path。成功返回 True。"""
+    text = (text or "").strip()
+    if not text:
+        return False
+    try:
+        import asyncio
+        import subprocess
+        import tempfile
+        import edge_tts
+        from xiaozhi_bridge import _ffmpeg_bin
+
+        ffmpeg_exe = _ffmpeg_bin()
+        if ffmpeg_exe is None:
+            app.logger.warning("autism tts ogg skipped: ffmpeg not found")
+            return False
+        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
+        fd_mp3, mp3 = tempfile.mkstemp(suffix=".mp3")
+        os.close(fd_mp3)
+        try:
+            async def _run() -> None:
+                comm = edge_tts.Communicate(
+                    text, os.getenv("XIAOZHI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
+                )
+                await comm.save(mp3)
+
+            asyncio.run(_run())
+            subprocess.run(
+                [
+                    ffmpeg_exe, "-y", "-i", mp3,
+                    "-c:a", "libopus", "-b:a", "24k", "-ar", "24000", "-ac", "1",
+                    audio_path,
+                ],
+                check=True,
+                capture_output=True,
+            )
+        finally:
+            try:
+                os.remove(mp3)
+            except OSError:
+                pass
+        return True
+    except Exception as e:
+        app.logger.warning("autism tts ogg failed: %s", e)
+        return False
+
+
+def _autism_tts_ogg_url(text: str) -> str | None:
+    """把任意中文文案（开场白 / 鼓励语）预合成成可外放的本地 OGG，返回公开 URL。
+
+    与图片标签音频走同一目录 / 路由（/autism/action-audio/<fn>），设备直接
+    PlaySound，不经 LLM / 麦克风 / 主动开场匹配，确定能播、内容固定。
+    文件名按文本 md5 缓存，相同文案复用同一文件。"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    audio_fn = "tts_" + hashlib.md5(text.encode("utf-8")).hexdigest()[:16] + ".ogg"
+    audio_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, audio_fn)
+    if os.path.isfile(audio_path):
+        return _autism_action_audio_url(audio_fn)
+    if _autism_synthesize_ogg(text, audio_path):
+        app.logger.info("autism tts ogg saved: %s", audio_path)
+        return _autism_action_audio_url(audio_fn)
+    return None
+
+
 def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
     """为图片生成同名 OGG 标签音频，如 害怕_xxxx.png -> 害怕_xxxx.ogg。"""
     label = (label or "").strip()
@@ -5006,47 +5072,10 @@ def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
     audio_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, audio_fn)
     if os.path.isfile(audio_path):
         return _autism_action_audio_url(audio_fn)
-    try:
-        import asyncio
-        import subprocess
-        import tempfile
-        import edge_tts
-        from xiaozhi_bridge import _ffmpeg_bin
-
-        ffmpeg_exe = _ffmpeg_bin()
-        if ffmpeg_exe is None:
-            app.logger.warning("autism label audio skipped: ffmpeg not found")
-            return None
-        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
-        fd_mp3, mp3 = tempfile.mkstemp(suffix=".mp3")
-        os.close(fd_mp3)
-        try:
-            async def _run() -> None:
-                comm = edge_tts.Communicate(
-                    label, os.getenv("XIAOZHI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
-                )
-                await comm.save(mp3)
-
-            asyncio.run(_run())
-            subprocess.run(
-                [
-                    ffmpeg_exe, "-y", "-i", mp3,
-                    "-c:a", "libopus", "-b:a", "24k", "-ar", "24000", "-ac", "1",
-                    audio_path,
-                ],
-                check=True,
-                capture_output=True,
-            )
-        finally:
-            try:
-                os.remove(mp3)
-            except OSError:
-                pass
+    if _autism_synthesize_ogg(label, audio_path):
         app.logger.info("autism label audio saved: %s", audio_path)
         return _autism_action_audio_url(audio_fn)
-    except Exception as e:
-        app.logger.warning("autism label audio failed: %s", e)
-        return None
+    return None
 
 
 def _autism_cached_url_is_usable(url: str | None) -> bool:
@@ -5362,60 +5391,65 @@ def _strip_pending_autism_training_start_from_device_queues(device_ids: list[str
         _esp32_cmd_queue[did] = kept
 
 
+def _autism_inject_scripted_audio(session: dict) -> None:
+    """为脚本化语音（开场白 / 鼓励语 / 打分总结）预生成确定性本地 OGG，写进下发 JSON。
+
+    设备拿到 intro_audio / praise_audio 后用 PlaySound 直接外放，不再走
+    listen/detect + opening-hint 匹配的聊天链路——那条链路依赖时序与精确字符串
+    匹配，麦克风一旦提前 VAD 触发就会变成 LLM 回应，孩子听不到该说的那句话。"""
+    sk = session.get("kind")
+    if sk == "training_start":
+        intro = str(session.get("tts_intro") or "").strip() or "我们一起来做一个练习吧"
+        url = _autism_tts_ogg_url(intro)
+        if url:
+            session["intro_audio"] = url
+        options = session.get("options") if isinstance(session.get("options"), list) else []
+        praise: dict[str, str] = {}
+        for i, opt in enumerate(options[:4]):
+            opt = str(opt or "").strip()
+            if not opt:
+                continue
+            purl = _autism_tts_ogg_url(f"真棒！你选了{opt}，做得很好！")
+            if purl:
+                praise[f"o{i}"] = purl
+        if praise:
+            session["praise_audio"] = praise
+    elif sk == "training_score":
+        score = str(session.get("tts_intro") or "").strip()
+        url = _autism_tts_ogg_url(score) if score else None
+        if url:
+            session["intro_audio"] = url
+    elif sk == "daily_plan":
+        slots = session.get("slots") if isinstance(session.get("slots"), list) else []
+        intro_audio: dict[str, str] = {}
+        for i, slot in enumerate(slots):
+            if not isinstance(slot, dict):
+                continue
+            tts = str(slot.get("tts") or "").strip()
+            if not tts:
+                continue
+            url = _autism_tts_ogg_url(tts)
+            if url:
+                intro_audio[f"s{i}"] = url
+        if intro_audio:
+            session["intro_audio"] = intro_audio
+
+
 def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:
     """把孤独症训练/日程 JSON 推入星星机器人长轮询命令队列。"""
+    sk = session.get("kind")
+    _autism_inject_scripted_audio(session)
     body = json.dumps(session, ensure_ascii=False)
     if len(body) > 32000:
         body = body[:32000]
     ids = _xingxing_device_ids_for_child(child_id)
     cmd_obj = {"action": "autism_session", "session_json": body}
-    opening = ""
-    hint_ctx = ""
-    sk = session.get("kind")
-    if sk == "training_start":
-        opening = str(session.get("tts_intro") or "").strip()
-        if not opening:
-            opening = "我们一起来做一个练习吧"
-        opening = (
-            opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
-        )[:500]
-        while "  " in opening:
-            opening = opening.replace("  ", " ")
-        hint_ctx = (
-            "这是自闭症/发育支持训练的开场提示。请只播放这句开场白，等待孩子回答；"
-            "不要把这句当成孩子输入来回应。"
-        )
-    elif sk == "training_score":
-        opening = str(session.get("tts_intro") or "").strip()
-        opening = (
-            opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
-        )[:500]
-        while "  " in opening:
-            opening = opening.replace("  ", " ")
-        hint_ctx = (
-            "这是自闭症日常训练结束后的打分总结。请只播放这段文字（含分数），不要扩展；"
-            "不要把这句当成孩子输入来回应。"
-        )
     with _esp32_cmd_lock:
         if sk == "daily_plan":
             _strip_pending_autism_daily_plan_from_device_queues(ids)
         elif sk == "training_start":
             _strip_pending_autism_training_start_from_device_queues(ids)
-        if opening:
-            try:
-                from xiaozhi_bridge import stash_xinvoke_hint
-            except Exception:
-                stash_xinvoke_hint = None
         for did in ids:
-            if opening and stash_xinvoke_hint is not None:
-                stash_xinvoke_hint(
-                    did,
-                    opening,
-                    hint_ctx or (
-                        "这是自闭症/发育支持训练的开场提示。请只播放这句开场白，等待孩子回答；"
-                        "不要把这句当成孩子输入来回应。"
-                    ),
-                )
             q = _esp32_cmd_queue.setdefault(did, deque())
             q.append(dict(cmd_obj))
         _esp32_cmd_lock.notify_all()
