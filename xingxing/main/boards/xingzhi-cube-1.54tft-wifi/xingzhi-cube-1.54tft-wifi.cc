@@ -429,6 +429,9 @@ private:
 
                 if (delta >= MPU6050_SHAKE_SWITCH_THRESHOLD) {
                     last_switch_us = now_us;
+                    if (adhd_autism_choice_shake_blocked()) {
+                        continue;
+                    }
                     board->power_save_timer_->WakeUp();
                     if (adhd_next_autism_choice()) {
                         ESP_LOGI(TAG, "MPU6050 shake -> autism Next(), delta=%d accel=(%d,%d,%d)",

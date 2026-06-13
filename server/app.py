@@ -2146,6 +2146,64 @@ def _latest_completed_anchor(period_type: str, now: datetime = None) -> datetime
     raise ValueError("period_type must be week, month or year")
 
 
+def _autism_need_summary_zh(created_at: str, label: str, voice_text: str) -> str:
+    """孩子主动选择需求：digest / Kimi 用单行中文描述。"""
+    lab = (label or "").strip() or "（未命名图片）"
+    vt = (voice_text or "").strip()
+    tshort = created_at.split(" ", 1)[1] if created_at and " " in created_at else (created_at or "")
+    if vt and vt != lab:
+        clip = vt[:200] + ("…" if len(vt) > 200 else "")
+        return f"{created_at} 孩子主动选择：{tshort} 选择了图片「{lab}」（说明：{clip}）"
+    return f"{created_at} 孩子主动选择：{tshort} 选择了图片「{lab}」"
+
+
+def _autism_training_event_summary_zh(ts: str, scene: str, phase: str, payload: dict | None) -> str:
+    """孤独症训练 / 计划表设备事件 → 单行中文（日报 / 周报 / Kimi 摘要）。"""
+    pl = payload if isinstance(payload, dict) else {}
+    kind = str(pl.get("kind") or "").strip()
+    source = str(pl.get("source") or "").strip()
+    slot = str(pl.get("slot_time") or "").strip()
+    label = str(pl.get("label") or "").strip()
+    focus = str(pl.get("focus_label") or "").strip()
+    intro_tts = str(pl.get("intro_tts") or "").strip()
+    timed_out = bool(pl.get("timed_out"))
+
+    is_plan = kind == "daily_plan" or source == "daily_plan" or scene == "daily_plan"
+    is_training_flow = source == "child_training" or kind in ("training_start", "training")
+
+    if phase == "intro_played":
+        body = intro_tts or focus or "（开场白）"
+        if is_plan:
+            slot_bit = f"时段 {slot}，" if slot else ""
+            return f"{ts} 计划表：{slot_bit}开场白内容为：{body}"
+        if is_training_flow:
+            return f"{ts} 日常训练开场白：{body}"
+        return f"{ts} 开场白（{scene}）：{body}"
+
+    if phase == "choice_timeout":
+        if is_plan:
+            slot_bit = f"时段 {slot}，" if slot else ""
+            return f"{ts} 计划表：{slot_bit}在黑屏等待后仍未选择图片，已播放鼓励提示语音"
+        if is_training_flow:
+            return f"{ts} 日常训练：在黑屏等待后仍未选择图片，已播放鼓励提示语音"
+        return f"{ts} 选图超时（场景 {scene}）：未选择图片，已播放鼓励提示语音"
+
+    if phase == "image_confirmed":
+        choice = label or "（未返回选项文字）"
+        if timed_out:
+            return f"{ts} 事件记录（{scene}）：{choice}"
+        if is_plan:
+            slot_bit = f"时段 {slot}，" if slot else ""
+            return f"{ts} 计划表：{slot_bit}孩子选择了图片「{choice}」"
+        if is_training_flow:
+            if focus:
+                return f"{ts} 日常训练（主题「{focus}」）：孩子选择了「{choice}」"
+            return f"{ts} 日常训练：孩子选择了「{choice}」"
+        return f"{ts} 选图确认（{scene}）：孩子选择了「{choice}」"
+
+    return f"{ts} 机器人事件（{scene} / {phase}）"
+
+
 def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_autism: bool = False):
     """聚合周期内数据供 Kimi 与 digest_json 存档。孤独症模式不含心率，以训练事件与家长笔记为主。"""
     if not for_autism:
@@ -2287,6 +2345,11 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_aut
                 "label": payload.get("label"),
                 "source": payload.get("source"),
                 "slot_time": payload.get("slot_time"),
+                "kind": payload.get("kind"),
+                "focus_label": payload.get("focus_label"),
+                "intro_tts": payload.get("intro_tts"),
+                "timed_out": payload.get("timed_out"),
+                "summary_zh": _autism_training_event_summary_zh(ts, scene, phase, payload),
             }
         )
 
@@ -2311,6 +2374,7 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_aut
                 "voice_text": voice_text,
                 "status": status,
                 "parent_confirmed_at": parent_confirmed_at,
+                "summary_zh": _autism_need_summary_zh(created_at or "", label or "", voice_text or ""),
             }
         )
 
@@ -2372,20 +2436,27 @@ def _build_weekly_kimi_user_prompt(child_name: str, week_start: str, week_end: s
     needs = digest.get("child_initiated_needs") or []
     lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
     for n in needs:
-        lines.append(
-            f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
+        nn = n if isinstance(n, dict) else {}
+        zh = nn.get("summary_zh") or _autism_need_summary_zh(
+            str(nn.get("timestamp") or ""),
+            str(nn.get("label") or ""),
+            str(nn.get("voice_text") or ""),
         )
+        lines.append(f"- {zh} 状态：{nn.get('status') or 'unknown'}")
     if not needs:
         lines.append("- （该周暂无孩子主动发起需求记录）")
 
     events = digest.get("autism_training_events") or []
     lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
     for e in events:
-        label = e.get("label") or "未记录选项"
-        slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
-        lines.append(
-            f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择：{label}"
+        ee = e if isinstance(e, dict) else {}
+        zh = ee.get("summary_zh") or _autism_training_event_summary_zh(
+            str(ee.get("timestamp") or ""),
+            str(ee.get("scene") or ""),
+            str(ee.get("phase") or ""),
+            ee,
         )
+        lines.append(f"- {zh}")
     if not events:
         lines.append("- （该周暂无训练或日常计划选择事件）")
 
@@ -2446,20 +2517,27 @@ def _build_period_kimi_user_prompt(
         needs = digest.get("child_initiated_needs") or []
         lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
         for n in needs:
-            lines.append(
-                f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
+            nn = n if isinstance(n, dict) else {}
+            zh = nn.get("summary_zh") or _autism_need_summary_zh(
+                str(nn.get("timestamp") or ""),
+                str(nn.get("label") or ""),
+                str(nn.get("voice_text") or ""),
             )
+            lines.append(f"- {zh} 状态：{nn.get('status') or 'unknown'}")
         if not needs:
             lines.append("- （该周期暂无孩子主动发起需求记录）")
 
         events = digest.get("autism_training_events") or []
         lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
         for e in events:
-            label = e.get("label") or "（无选项文字）"
-            slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
-            lines.append(
-                f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择/结果：{label}"
+            ee = e if isinstance(e, dict) else {}
+            zh = ee.get("summary_zh") or _autism_training_event_summary_zh(
+                str(ee.get("timestamp") or ""),
+                str(ee.get("scene") or ""),
+                str(ee.get("phase") or ""),
+                ee,
             )
+            lines.append(f"- {zh}")
         if not events:
             lines.append("- （该周期暂无训练或日常计划事件）")
 
@@ -2514,20 +2592,27 @@ def _build_period_kimi_user_prompt(
     needs = digest.get("child_initiated_needs") or []
     lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
     for n in needs:
-        lines.append(
-            f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
+        nn = n if isinstance(n, dict) else {}
+        zh = nn.get("summary_zh") or _autism_need_summary_zh(
+            str(nn.get("timestamp") or ""),
+            str(nn.get("label") or ""),
+            str(nn.get("voice_text") or ""),
         )
+        lines.append(f"- {zh} 状态：{nn.get('status') or 'unknown'}")
     if not needs:
         lines.append("- （该周期暂无孩子主动发起需求记录）")
 
     events = digest.get("autism_training_events") or []
     lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
     for e in events:
-        label = e.get("label") or "未记录选项"
-        slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
-        lines.append(
-            f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择：{label}"
+        ee = e if isinstance(e, dict) else {}
+        zh = ee.get("summary_zh") or _autism_training_event_summary_zh(
+            str(ee.get("timestamp") or ""),
+            str(ee.get("scene") or ""),
+            str(ee.get("phase") or ""),
+            ee,
         )
+        lines.append(f"- {zh}")
     if not events:
         lines.append("- （该周期暂无训练或日常计划选择事件）")
 
@@ -5473,6 +5558,10 @@ def _autism_inject_scripted_audio(session: dict) -> None:
                 praise[f"o{i}"] = purl
         if praise:
             session["praise_audio"] = praise
+        timeout_msg = "这次没有选到图片也没关系，下次我们再一起试试看，加油！"
+        ct_url = _autism_tts_ogg_url(timeout_msg)
+        if ct_url:
+            session["choice_timeout_audio"] = ct_url
     elif sk == "training_score":
         score = str(session.get("tts_intro") or "").strip()
         url = _autism_tts_ogg_url(score) if score else None
@@ -5481,17 +5570,34 @@ def _autism_inject_scripted_audio(session: dict) -> None:
     elif sk == "daily_plan":
         slots = session.get("slots") if isinstance(session.get("slots"), list) else []
         intro_audio: dict[str, str] = {}
+        praise_audio: dict[str, str] = {}
+        choice_timeout_audio: dict[str, str] = {}
+        timeout_msg = "这次没有选到图片也没关系，下次我们再一起试试看，加油！"
+        ct_slot_url = _autism_tts_ogg_url(timeout_msg)
         for i, slot in enumerate(slots):
             if not isinstance(slot, dict):
                 continue
             tts = str(slot.get("tts") or "").strip()
-            if not tts:
-                continue
-            url = _autism_tts_ogg_url(tts)
-            if url:
-                intro_audio[f"s{i}"] = url
+            if tts:
+                url = _autism_tts_ogg_url(tts)
+                if url:
+                    intro_audio[f"s{i}"] = url
+            if ct_slot_url:
+                choice_timeout_audio[f"s{i}"] = ct_slot_url
+            options = slot.get("options") if isinstance(slot.get("options"), list) else []
+            for j, opt in enumerate(options[:6]):
+                opt = str(opt or "").strip()
+                if not opt:
+                    continue
+                purl = _autism_tts_ogg_url(f"真棒！你选了{opt}，做得很好！")
+                if purl:
+                    praise_audio[f"s{i}_o{j}"] = purl
         if intro_audio:
             session["intro_audio"] = intro_audio
+        if praise_audio:
+            session["praise_audio"] = praise_audio
+        if choice_timeout_audio:
+            session["choice_timeout_audio"] = choice_timeout_audio
 
 
 def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:

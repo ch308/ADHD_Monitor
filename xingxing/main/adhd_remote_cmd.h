@@ -29,3 +29,6 @@ bool adhd_confirm_autism_choice(void);
 
 /// 切换到下一张训练/日常计划动态图片；返回 true 表示摇晃事件已被消费。
 bool adhd_next_autism_choice(void);
+
+/// 选图界面已进入「省电黑屏」时：摇晃不应唤醒或切图（仅 BOOT 唤醒），供 MPU 任务先判断。
+bool adhd_autism_choice_shake_blocked(void);

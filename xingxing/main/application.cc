@@ -1632,6 +1632,13 @@ void Application::SubmitChildTextInput(const std::string& text) {
 }
 
 bool Application::CanEnterSleepMode() {
+    // 孤独症选图 / 计划表全屏选图（含 60s 仅关屏黑屏等待）期间：不让板级 PowerSaveTimer
+    // 累计进入「省电睡眠」回调，避免与选图关屏逻辑竞态，且保持与 Path A 一致——
+    // 选图黑屏只灭背光/面板，不走 Application 休眠省电、不断 WiFi、不深睡。
+    if (visual_choice_mode_) {
+        return false;
+    }
+
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;
     }
