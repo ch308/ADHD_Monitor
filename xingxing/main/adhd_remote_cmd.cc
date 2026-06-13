@@ -73,7 +73,9 @@ struct AutismChoiceItem {
 
 struct AutismChoiceContext {
     bool active = false;
+    bool display_dimmed = false;
     int current_index = -1;
+    int activity_seq = 0;
     int generation = 0;
     int session_id = 0;
     /// 仅 daily_plan：与 StoreAutismDailyPlan 写入的 revision 一致，用于丢弃过期 intro。
@@ -213,6 +215,33 @@ static bool IsChoiceGenerationActive(int generation) {
     return active;
 }
 
+static void RestoreAutismChoiceBacklight() {
+    Backlight* bl = Board::GetInstance().GetBacklight();
+    if (bl != nullptr) {
+        bl->RestoreBrightness();
+    }
+}
+
+static void DimAutismChoiceBacklight() {
+    Backlight* bl = Board::GetInstance().GetBacklight();
+    if (bl != nullptr) {
+        bl->SetBrightness(0);
+    }
+}
+
+static void ShowAutismChoiceWaitingPrompt() {
+    auto* display = Board::GetInstance().GetDisplay();
+    if (display == nullptr) {
+        return;
+    }
+    auto* lvgl = dynamic_cast<LvglDisplay*>(display);
+    if (lvgl != nullptr) {
+        lvgl->SetPreviewImage(nullptr);
+    }
+    display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u7b49\u5f85\u4f60\u7684\u9009\u62e9"));
+    display->SetEmotion("relaxed");
+}
+
 static void VisualChoiceFallbackRestoreTask(void*) {
     vTaskDelay(pdMS_TO_TICKS(30000));
     bool any_active = false;
@@ -307,54 +336,6 @@ static bool PostAutismTrainingChoiceEvent(const AutismChoiceContext& ctx, int in
     return ok;
 }
 
-static bool PostAutismTrainingChoiceTimeoutEvent(const AutismChoiceContext& ctx) {
-    if (ctx.session_id <= 0 || ctx.source != "child_training") {
-        return false;
-    }
-    const std::string id = PathADeviceIdUpper();
-    if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
-        return false;
-    }
-    cJSON* root = cJSON_CreateObject();
-    if (!root) {
-        return false;
-    }
-    cJSON_AddStringToObject(root, "scene", ctx.scene.empty() ? "unknown" : ctx.scene.c_str());
-    cJSON_AddStringToObject(root, "phase", "choice_timeout");
-    cJSON_AddNumberToObject(root, "session_id", ctx.session_id);
-    cJSON* payload = cJSON_CreateObject();
-    if (payload != nullptr) {
-        cJSON_AddStringToObject(payload, "kind", ctx.kind.c_str());
-        cJSON_AddStringToObject(payload, "source", ctx.source.c_str());
-        cJSON_AddStringToObject(payload, "slot_time", ctx.slot_time.c_str());
-        cJSON_AddStringToObject(payload, "focus_label", ctx.focus_label.c_str());
-        cJSON_AddBoolToObject(payload, "timed_out", true);
-        cJSON* opts = cJSON_CreateArray();
-        if (opts != nullptr) {
-            for (const auto& item : ctx.items) {
-                cJSON_AddItemToArray(opts, cJSON_CreateString(item.label.c_str()));
-            }
-            cJSON_AddItemToObject(payload, "options", opts);
-        }
-        cJSON_AddItemToObject(root, "payload", payload);
-    }
-    char* out = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-    if (!out) {
-        return false;
-    }
-    std::string body(out);
-    cJSON_free(out);
-    std::string url = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
-                       std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/" + id +
-                       "/autism/training-event";
-    const bool ok = HttpPostJson(url, body);
-    if (!ok) {
-        ESP_LOGW(TAG, "autism training choice_timeout POST failed");
-    }
-    return ok;
-}
-
 static bool PostXiaozhiOpeningHint(const std::string& opening, const std::string& context) {
     const std::string id = PathADeviceIdUpper();
     if (id.size() < 4 || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0 || opening.empty()) {
@@ -395,7 +376,6 @@ void adhd_remote_cmd_start_default_proactive(void) {
     ));
     ESP_LOGI(TAG, "default proactive opening start");
     (void)PostXiaozhiOpeningHint(opening, context);
-    Application::GetInstance().SubmitChildTextInput(opening);
 }
 
 static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation) {
@@ -606,27 +586,6 @@ static int ParseHourMinuteToMinuteOfDay(const char* text) {
     return hh * 60 + mm;
 }
 
-/// Rough delay so cloud TTS for the intro can play before we show choice images.
-static int EstimateIntroDelayMs(const std::string& line) {
-    if (line.empty()) {
-        return 1500;
-    }
-    int n = 0;
-    for (unsigned char c : line) {
-        if ((c & 0xC0) != 0x80) {
-            ++n;
-        }
-    }
-    int ms = 1400 + n * 320;
-    if (ms < 2200) {
-        ms = 2200;
-    }
-    if (ms > 55000) {
-        ms = 55000;
-    }
-    return ms;
-}
-
 static void AutismImageSequenceTask(void* arg) {
     auto* urls = static_cast<std::vector<std::string>*>(arg);
     if (urls == nullptr) {
@@ -651,49 +610,61 @@ static void AutismChoiceSequenceTask(void* arg) {
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         g_choice_context = *ctx;
         g_choice_context.active = true;
-        g_choice_context.current_index = 0;
+        g_choice_context.display_dimmed = false;
+        g_choice_context.current_index = -1;
+        g_choice_context.activity_seq = 0;
         xSemaphoreGive(g_choice_mutex);
     }
-    const int64_t deadline_us = esp_timer_get_time() + 60LL * 1000LL * 1000LL;
-    bool first_shown = false;
-    bool user_finished = false;
-    while (esp_timer_get_time() < deadline_us) {
+    RestoreAutismChoiceBacklight();
+    ShowAutismChoiceWaitingPrompt();
+    int last_index = -1;
+    int last_activity_seq = 0;
+    int64_t last_activity_us = esp_timer_get_time();
+    while (true) {
         bool still_active = true;
-        int current_index = 0;
+        bool display_dimmed = false;
+        int current_index = -1;
+        int activity_seq = 0;
         if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
             still_active = g_choice_context.active && g_choice_context.generation == ctx->generation;
             current_index = g_choice_context.current_index;
+            activity_seq = g_choice_context.activity_seq;
+            display_dimmed = g_choice_context.display_dimmed;
             xSemaphoreGive(g_choice_mutex);
         }
         if (!still_active) {
-            user_finished = true;
             break;
         }
-        if (!first_shown && current_index >= 0 && current_index < static_cast<int>(ctx->items.size())) {
-            DownloadAndShowPreviewImage(ctx->items[current_index].image_url, ctx->generation);
-            ScheduleChoiceLabelAudio(ctx->generation, current_index, ctx->items[current_index].audio_url);
-            first_shown = true;
+        const int64_t now_us = esp_timer_get_time();
+        if (current_index != last_index) {
+            last_index = current_index;
+            last_activity_seq = activity_seq;
+            last_activity_us = now_us;
+            if (display_dimmed) {
+                RestoreAutismChoiceBacklight();
+                if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
+                        g_choice_context.display_dimmed = false;
+                    }
+                    xSemaphoreGive(g_choice_mutex);
+                }
+            }
+        } else if (activity_seq != last_activity_seq) {
+            last_activity_seq = activity_seq;
+            last_activity_us = now_us;
+        }
+        if (!display_dimmed && now_us - last_activity_us >= 30LL * 1000LL * 1000LL) {
+            DimAutismChoiceBacklight();
+            if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
+                    g_choice_context.display_dimmed = true;
+                }
+                xSemaphoreGive(g_choice_mutex);
+            }
+            ESP_LOGI(TAG, "autism choice idle dimmed scene=%s index=%d",
+                     ctx->scene.c_str(), current_index);
         }
         vTaskDelay(pdMS_TO_TICKS(250));
-    }
-    if (!user_finished) {
-        (void)PostAutismTrainingChoiceTimeoutEvent(*ctx);
-        if (ctx->source == "child_training") {
-            const std::string closing(reinterpret_cast<const char*>(
-                u8"\u65f6\u95f4\u5230\u4e86\uff0c\u6211\u4eec\u4e0b\u6b21\u518d\u73a9\u5427\u3002"));
-            Application::GetInstance().Schedule([closing]() {
-                Application::GetInstance().SubmitChildTextInput(closing);
-            });
-        }
-    }
-    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
-        if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
-            ESP_LOGI(TAG, "autism choice sequence timeout scene=%s", ctx->scene.c_str());
-            g_choice_context.active = false;
-            Application::GetInstance().SetVisualChoiceMode(false);
-            RestoreDefaultActionCards();
-        }
-        xSemaphoreGive(g_choice_mutex);
     }
     delete ctx;
     vTaskDelete(nullptr);
@@ -819,13 +790,10 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
         line,
         std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8ba1\u5212\u8868\u5230\u70b9\u89e6\u53d1\u7684\u4e3b\u52a8\u63d0\u95ee\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u9009\u62e9\u56fe\u7247\u6216\u8bed\u97f3\u56de\u7b54\u3002"))
     );
-    Application::GetInstance().Schedule([line]() {
-        Application::GetInstance().SubmitChildTextInput(line);
-    });
     if (plan_ctx != nullptr) {
         auto* delay_arg = new IntroThenChoiceArg();
         delay_arg->ctx = plan_ctx;
-        delay_arg->delay_ms = EstimateIntroDelayMs(line);
+        delay_arg->delay_ms = 500;
         BaseType_t tr = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
         if (tr != pdPASS) {
             ESP_LOGW(TAG, "autism_intro_wait task create failed");
@@ -1022,19 +990,31 @@ bool adhd_post_autism_need_event(const char* card_slug, const char* label, const
 bool adhd_confirm_autism_choice(void) {
     EnsureAutismChoiceMutex();
     AutismChoiceContext snapshot;
+    bool consumed_wake = false;
     int idx = -1;
     std::string label;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-        if (g_choice_context.active &&
-            g_choice_context.current_index >= 0 &&
-            g_choice_context.current_index < static_cast<int>(g_choice_context.items.size())) {
-            snapshot = g_choice_context;
-            idx = g_choice_context.current_index;
-            label = g_choice_context.items[idx].label;
-            g_choice_context.active = false;
-            g_choice_generation++;
+        if (g_choice_context.active) {
+            if (g_choice_context.display_dimmed) {
+                g_choice_context.display_dimmed = false;
+                ++g_choice_context.activity_seq;
+                consumed_wake = true;
+            } else if (g_choice_context.current_index < 0) {
+                ++g_choice_context.activity_seq;
+                consumed_wake = true;
+            } else if (g_choice_context.current_index < static_cast<int>(g_choice_context.items.size())) {
+                snapshot = g_choice_context;
+                idx = g_choice_context.current_index;
+                label = g_choice_context.items[idx].label;
+                g_choice_context.active = false;
+                g_choice_generation++;
+            }
         }
         xSemaphoreGive(g_choice_mutex);
+    }
+    if (consumed_wake) {
+        RestoreAutismChoiceBacklight();
+        return true;
     }
     if (idx < 0) {
         return false;
@@ -1064,6 +1044,8 @@ bool adhd_next_autism_choice(void) {
     int generation = 0;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (g_choice_context.active && !g_choice_context.items.empty()) {
+            g_choice_context.display_dimmed = false;
+            ++g_choice_context.activity_seq;
             next_idx = (g_choice_context.current_index + 1) %
                        static_cast<int>(g_choice_context.items.size());
             g_choice_context.current_index = next_idx;
@@ -1076,6 +1058,7 @@ bool adhd_next_autism_choice(void) {
     if (next_idx < 0 || url.empty()) {
         return false;
     }
+    RestoreAutismChoiceBacklight();
     auto* req = new ChoicePreviewRequest();
     req->url = url;
     req->audio_url = audio_url;
@@ -1210,17 +1193,9 @@ static void HandleOneCommand(cJSON* root) {
                 InvalidateAutismTrainingChoiceUi();
                 ++g_autism_training_cmd_revision;
                 ctx->training_cmd_revision = g_autism_training_cmd_revision;
-                cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
-                std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
-                if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
-                    line = tts->valuestring;
-                }
-                Application::GetInstance().Schedule([line]() {
-                    Application::GetInstance().SubmitChildTextInput(line);
-                });
                 auto* delay_arg = new IntroThenChoiceArg();
                 delay_arg->ctx = ctx;
-                delay_arg->delay_ms = EstimateIntroDelayMs(line);
+                delay_arg->delay_ms = 500;
                 BaseType_t tr_intro = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
                 if (tr_intro != pdPASS) {
                     ESP_LOGW(TAG, "autism_intro_wait task create failed");
