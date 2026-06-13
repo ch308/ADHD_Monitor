@@ -15,6 +15,7 @@
 
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <sdkconfig.h>
 
 #define TAG "XINGZHI_CUBE_1_54TFT_ML307"
 
@@ -45,7 +46,11 @@ private:
         rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
         rtc_gpio_set_level(GPIO_NUM_21, 1);
 
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+        power_save_timer_ = new PowerSaveTimer(-1, 60, -1);
+#else
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+#endif
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
             GetBacklight()->SetBrightness(1);

@@ -16,6 +16,7 @@
 #include "assets/lang_config.h"
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <sdkconfig.h>
 #include "cst816x.h"
 
 #define TAG "XINGZHI_METAL_1_54_WIFI"
@@ -45,7 +46,11 @@ private:
     }
 
     void InitializePowerSaveTimer() {
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+        power_save_timer_ = new PowerSaveTimer(-1, 60, -1);
+#else
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+#endif
         power_save_timer_->OnEnterSleepMode([this]() {
             ESP_LOGI(TAG, "Enabling sleep mode");
             display_->SetChatMessage("system", "");
