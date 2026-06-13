@@ -246,32 +246,6 @@ static void ShowAutismChoiceWaitingPrompt() {
     display->SetEmotion("happy");
 }
 
-static void VisualChoiceFallbackRestoreTask(void*) {
-    vTaskDelay(pdMS_TO_TICKS(30000));
-    bool any_active = false;
-    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        any_active = g_choice_context.active;
-        xSemaphoreGive(g_choice_mutex);
-    }
-    if (!any_active) {
-        ESP_LOGI(TAG, "visual choice fallback restore default action cards");
-        Application::GetInstance().SetVisualChoiceMode(false);
-        RestoreDefaultActionCards();
-    }
-    vTaskDelete(nullptr);
-}
-
-static void ScheduleVisualChoiceFallbackRestore() {
-    (void)xTaskCreate(
-        VisualChoiceFallbackRestoreTask,
-        "choice_restore",
-        3072,
-        nullptr,
-        2,
-        nullptr
-    );
-}
-
 static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url);
 
 struct ChoicePreviewRequest {
@@ -571,6 +545,39 @@ static void PlayRobotOggAsync(const std::string& url) {
     }
 }
 
+/// 日常训练确认后：全屏选图 UI 保持到鼓励 OGG 播完，再关 visual choice / 恢复动作卡片。
+/// `generation_marker` 为确认瞬间的 `g_choice_generation`；若期间被 Invalidate 覆盖会递增，此时不再关 UI（已由 Invalidate 处理）。
+struct PraiseThenCloseVisualArg {
+    std::string praise_url;
+    int generation_marker = 0;
+};
+
+static void PraiseThenCloseVisualChoiceTask(void* arg) {
+    auto* a = static_cast<PraiseThenCloseVisualArg*>(arg);
+    if (a == nullptr) {
+        vTaskDelete(nullptr);
+        return;
+    }
+    if (!a->praise_url.empty()) {
+        (void)DownloadAndPlayOggLabel(a->praise_url);
+        Application::GetInstance().GetAudioService().WaitForPlaybackQueueEmpty();
+        vTaskDelay(pdMS_TO_TICKS(400));
+    }
+    bool skip_close = false;
+    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+        if (g_choice_generation != a->generation_marker) {
+            skip_close = true;
+        }
+        xSemaphoreGive(g_choice_mutex);
+    }
+    if (!skip_close) {
+        Application::GetInstance().SetVisualChoiceMode(false);
+        RestoreDefaultActionCards();
+    }
+    delete a;
+    vTaskDelete(nullptr);
+}
+
 struct ChoiceLabelAudioRequest {
     int generation = 0;
     int index = -1;
@@ -695,7 +702,7 @@ static void AutismChoiceSequenceTask(void* arg) {
             last_activity_seq = activity_seq;
             last_activity_us = now_us;
         }
-        if (!display_dimmed && now_us - last_activity_us >= 30LL * 1000LL * 1000LL) {
+        if (!display_dimmed && now_us - last_activity_us >= 60LL * 1000LL * 1000LL) {
             DimAutismChoiceBacklight();
             if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 if (g_choice_context.active && g_choice_context.generation == ctx->generation) {
@@ -708,6 +715,8 @@ static void AutismChoiceSequenceTask(void* arg) {
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
+    // 选图会话结束：仅释放 ctx。日常训练确认后的关 UI 在鼓励播完后由 PraiseThenCloseVisualChoiceTask
+    // 执行；Invalidate 路径会自行 SetVisualChoiceMode(false)。
     delete ctx;
     vTaskDelete(nullptr);
 }
@@ -1046,6 +1055,7 @@ bool adhd_confirm_autism_choice(void) {
     bool consumed_wake = false;
     int idx = -1;
     std::string label;
+    int gen_after_confirm = 0;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (g_choice_context.active) {
             if (g_choice_context.display_dimmed) {
@@ -1061,6 +1071,7 @@ bool adhd_confirm_autism_choice(void) {
                 label = g_choice_context.items[idx].label;
                 g_choice_context.active = false;
                 g_choice_generation++;
+                gen_after_confirm = g_choice_generation;
             }
         }
         xSemaphoreGive(g_choice_mutex);
@@ -1076,18 +1087,30 @@ bool adhd_confirm_autism_choice(void) {
              snapshot.scene.c_str(), idx, label.c_str());
     (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
     if (snapshot.source == "child_training") {
-        // 鼓励语用服务端预生成的 OGG 确定性外放，不再经聊天链路（避免被当孩子输入追问）。
+        // 鼓励语：同步下载并入队播放后等队列排空，全屏选图保持到播完再关 UI。
         const std::string praise_url =
             (idx >= 0 && idx < static_cast<int>(snapshot.items.size()))
                 ? snapshot.items[idx].praise_audio_url
                 : std::string();
         if (!praise_url.empty()) {
-            PlayRobotOggAsync(praise_url);
+            auto* pa = new PraiseThenCloseVisualArg();
+            pa->praise_url = praise_url;
+            pa->generation_marker = gen_after_confirm;
+            if (xTaskCreate(PraiseThenCloseVisualChoiceTask, "praise_close", 8192, pa, 3, nullptr) != pdPASS) {
+                ESP_LOGW(TAG, "praise_close task create failed");
+                delete pa;
+                Application::GetInstance().SetVisualChoiceMode(false);
+                RestoreDefaultActionCards();
+            }
         } else {
             ESP_LOGW(TAG, "autism praise audio missing (server edge-tts/ffmpeg?) idx=%d", idx);
+            Application::GetInstance().SetVisualChoiceMode(false);
+            RestoreDefaultActionCards();
         }
+    } else {
+        Application::GetInstance().SetVisualChoiceMode(false);
+        RestoreDefaultActionCards();
     }
-    ScheduleVisualChoiceFallbackRestore();
     return true;
 }
 

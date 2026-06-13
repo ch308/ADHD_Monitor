@@ -88,7 +88,7 @@ void ActionCards::IdleDimTask(void* user_data) {
             last_activity_us = esp_timer_get_time();
         }
         if (!self->display_dimmed_ &&
-            esp_timer_get_time() - last_activity_us >= 30LL * 1000LL * 1000LL) {
+            esp_timer_get_time() - last_activity_us >= 60LL * 1000LL * 1000LL) {
             self->DimBacklight();
             self->display_dimmed_ = true;
             ESP_LOGI(TAG, "Action cards idle dimmed index=%d", self->index_);
