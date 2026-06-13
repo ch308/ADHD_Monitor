@@ -248,6 +248,7 @@ class TeacherAlertEvent {
     required this.startedAt,
     this.note,
     this.uploaded = false,
+    this.teacherBandNotified = false,
   });
 
   final String id;
@@ -259,6 +260,7 @@ class TeacherAlertEvent {
   final DateTime startedAt;
   final String? note;
   final bool uploaded;
+  final bool teacherBandNotified;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
@@ -270,20 +272,33 @@ class TeacherAlertEvent {
         'startedAt': startedAt.toIso8601String(),
         'note': note,
         'uploaded': uploaded,
+        'teacherBandNotified': teacherBandNotified,
       };
 
   factory TeacherAlertEvent.fromJson(Map<String, dynamic> json) {
     return TeacherAlertEvent(
       id: json['id']?.toString() ?? '',
-      studentId: json['studentId']?.toString() ?? '',
-      studentNameSnapshot: json['studentNameSnapshot']?.toString() ?? '学生',
-      eventType: json['eventType']?.toString() ?? 'highHeartRate',
+      studentId: (json['studentId'] ?? json['student_id'])?.toString() ?? '',
+      studentNameSnapshot:
+          (json['studentNameSnapshot'] ?? json['student_name_snapshot'])
+                  ?.toString() ??
+              '学生',
+      eventType:
+          (json['eventType'] ?? json['event_type'])?.toString() ?? 'highHeartRate',
       bpm: (json['bpm'] as num?)?.toInt(),
-      thresholdBpm: (json['thresholdBpm'] as num?)?.toInt(),
-      startedAt: DateTime.tryParse(json['startedAt']?.toString() ?? '') ??
+      thresholdBpm: (json['thresholdBpm'] ?? json['threshold_bpm']) is num
+          ? ((json['thresholdBpm'] ?? json['threshold_bpm']) as num).toInt()
+          : int.tryParse(
+              (json['thresholdBpm'] ?? json['threshold_bpm'])?.toString() ?? '',
+            ),
+      startedAt: DateTime.tryParse(
+            (json['startedAt'] ?? json['started_at'])?.toString() ?? '',
+          ) ??
           DateTime.now(),
       note: json['note']?.toString(),
       uploaded: json['uploaded'] as bool? ?? false,
+      teacherBandNotified:
+          (json['teacherBandNotified'] ?? json['teacher_band_notified']) == true,
     );
   }
 }

@@ -5,16 +5,12 @@ import json
 import re
 import threading
 import time
-import copy
 import hashlib
 import hmac
-import html
 import secrets
-import random
 from collections import deque
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote, unquote
-from flask import Flask, request, jsonify, Response, send_file, abort, has_request_context, redirect
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from openai import OpenAI
 
@@ -36,87 +32,6 @@ def server_time():
             "timezone_offset": int(offset.total_seconds() // 60),
         }
     )
-
-
-_AUTISM_LOCAL_IMAGE_STORE = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "action")
-)
-
-
-def _autism_normalize_action_image_filename(fn: str) -> str:
-    """修复 ESP32 直接请求中文路径时产生的 Latin-1 mojibake 文件名。"""
-    if not isinstance(fn, str) or not fn:
-        return ""
-    if "%" in fn:
-        try:
-            fn = unquote(fn)
-        except Exception:
-            pass
-    try:
-        repaired = fn.encode("latin-1").decode("utf-8")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        return fn
-    return repaired or fn
-
-
-def _autism_local_image_path_for_request(fn: str) -> str:
-    path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
-    if os.path.isfile(path):
-        return path
-
-    # 兼容历史中文文件名与新 ASCII 文件名之间的切换：cache key 前 8 位相同即可。
-    match = re.search(r"_([0-9a-fA-F]{8})\.png$", fn)
-    if not match or not os.path.isdir(_AUTISM_LOCAL_IMAGE_STORE):
-        return path
-    suffix = f"_{match.group(1).lower()}.png"
-    try:
-        for candidate in os.listdir(_AUTISM_LOCAL_IMAGE_STORE):
-            if candidate.lower().endswith(suffix):
-                candidate_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, candidate)
-                if os.path.isfile(candidate_path):
-                    app.logger.info("action-image served by hash fallback: %r -> %r", fn, candidate)
-                    return candidate_path
-    except Exception as e:
-        app.logger.warning("action-image hash fallback failed: %s", e)
-    return path
-
-
-@app.route("/autism/action-images/<fn>", methods=["GET"])
-def autism_action_image_public(fn: str):
-    """未配置腾讯云 COS 时，240×240 PNG 落盘于此，供星星机器人通过 HTTP 拉取。"""
-    raw_fn = fn
-    fn = _autism_normalize_action_image_filename(fn)
-    if fn != raw_fn:
-        app.logger.info("action-image repaired filename mojibake: %r -> %r", raw_fn, fn)
-    if not fn or ".." in fn or "/" in fn or "\\" in fn:
-        app.logger.warning("action-image reject (bad name): %r", fn)
-        abort(404)
-    if not re.match(r"^[\w\u4e00-\u9fff\-.]+\.png$", fn):
-        app.logger.warning("action-image reject (regex): %r", fn)
-        abort(404)
-    path = _autism_local_image_path_for_request(fn)
-    if not os.path.isfile(path):
-        app.logger.warning("action-image 404 (file missing on disk): %s", path)
-        abort(404)
-    return send_file(path, mimetype="image/png")
-
-
-@app.route("/autism/action-audio/<fn>", methods=["GET"])
-def autism_action_audio_public(fn: str):
-    """动态训练图片对应的本地 OGG 标签音频。"""
-    raw_fn = fn
-    fn = _autism_normalize_action_image_filename(fn)
-    if fn != raw_fn:
-        app.logger.info("action-audio repaired filename mojibake: %r -> %r", raw_fn, fn)
-    if not fn or ".." in fn or "/" in fn or "\\" in fn:
-        abort(404)
-    if not re.match(r"^[\w\u4e00-\u9fff\-.]+\.ogg$", fn):
-        abort(404)
-    path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
-    if not os.path.isfile(path):
-        abort(404)
-    return send_file(path, mimetype="audio/ogg")
-
 
 try:
     from flask_sock import Sock
@@ -472,115 +387,12 @@ def init_db():
         )
         """
     )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS autism_child_needs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            child_id INTEGER NOT NULL,
-            device_id TEXT,
-            card_slug TEXT,
-            label TEXT,
-            voice_text TEXT,
-            created_at TEXT NOT NULL,
-            parent_confirmed_at TEXT,
-            status TEXT NOT NULL DEFAULT 'pending'
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS autism_training_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            child_id INTEGER NOT NULL,
-            scene_id TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS autism_daily_plans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            child_id INTEGER NOT NULL,
-            plan_json TEXT NOT NULL,
-            images_json TEXT,
-            created_at TEXT NOT NULL,
-            applied_at TEXT
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS autism_training_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            child_id INTEGER NOT NULL,
-            device_id TEXT,
-            scene TEXT NOT NULL,
-            phase TEXT NOT NULL,
-            payload_json TEXT,
-            ts TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    cursor.execute("PRAGMA table_info(autism_training_events)")
-    _ev_cols = {row[1] for row in cursor.fetchall()}
-    if "session_id" not in _ev_cols:
-        cursor.execute("ALTER TABLE autism_training_events ADD COLUMN session_id INTEGER")
-
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS autism_image_cache (
-            cache_key TEXT PRIMARY KEY,
-            label_zh TEXT NOT NULL,
-            cos_key TEXT NOT NULL,
-            public_url TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    cursor.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_autism_image_cache_label_zh
-        ON autism_image_cache(label_zh)
-        """
-    )
     conn.commit()
     conn.close()
     print("✅ 数据库 adhd_data.db 初始化成功")
 
 # 启动时执行初始化
 init_db()
-
-
-def _session_id_from_json(raw):
-    """JSON 里的 session_id 可能是 int / str / float；bool 拒绝。"""
-    if raw is None or isinstance(raw, bool):
-        return None
-    try:
-        return int(raw)
-    except (TypeError, ValueError):
-        return None
-
-
-def _autism_payload_is_daily_plan_slot(payload, scene: str) -> bool:
-    if (scene or "").strip() == "daily_plan":
-        return True
-    if not isinstance(payload, dict):
-        return False
-    return payload.get("kind") == "daily_plan" or payload.get("source") == "daily_plan"
-
-
-def _autism_payload_is_app_child_training(payload, scene: str) -> bool:
-    """App 下发的场景跟选训练（单次预设），不含时间表 daily_plan。"""
-    if _autism_payload_is_daily_plan_slot(payload, scene):
-        return False
-    if not isinstance(payload, dict):
-        return False
-    return (payload.get("source") or "") == "child_training" or (payload.get("kind") or "") == "training_start"
 
 
 def _default_status():
@@ -908,7 +720,7 @@ def _build_child_skill(profile, updated_at=None):
         intro_parts.append("我有这些小特点：" + "，".join(traits) + "。")
     if note:
         intro_parts.append(f"家人还希望你记住：{note}。")
-    intro_parts.append("你可以温柔地问问我今天的感受。")
+    intro_parts.append("你可以温柔地问问我今天的感受，也可以帮爸爸妈妈更懂我。")
     support_hints = []
     if personality:
         support_hints.append(f"沟通时先照顾我的性格特点：{personality}。")
@@ -995,186 +807,6 @@ def _read_child_profile_row(cursor, child_id):
     }
 
 
-def _child_profile_category_is_autism(cursor, child_id: int) -> bool:
-    """与 App `ChildCondition` / profile.category 一致：孤独症孩子走训练向报告，不含心率。"""
-    row = _read_child_profile_row(cursor, child_id)
-    if not row:
-        return False
-    profile = row.get("profile") or {}
-    cat = str(profile.get("category") or profile.get("categoryLabel") or "").strip()
-    if not cat:
-        return False
-    low = cat.lower()
-    if "孤独" in cat or "自闭" in cat or "谱系" in cat:
-        return True
-    if "asd" in low or "autism" in low:
-        return True
-    return False
-
-
-def _skill_list_append_unique(items, value, limit=12):
-    if not isinstance(items, list):
-        items = []
-    text = _compact_text(value, 60)
-    if not text:
-        return items[-limit:]
-    existing = []
-    for item in items:
-        if isinstance(item, dict):
-            existing.append(_compact_text(item.get("label") or item.get("text"), 60))
-        else:
-            existing.append(_compact_text(item, 60))
-    if text not in existing:
-        items.append(text)
-    return items[-limit:]
-
-
-def _skill_fact_append_unique(items, fact, limit=30):
-    if not isinstance(items, list):
-        items = []
-    label = _compact_text((fact or {}).get("label"), 60)
-    kind = _compact_text((fact or {}).get("kind"), 40)
-    source = _compact_text((fact or {}).get("source"), 40)
-    if not label:
-        return items[-limit:]
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        if (
-            _compact_text(item.get("label"), 60) == label
-            and _compact_text(item.get("kind"), 40) == kind
-            and _compact_text(item.get("source"), 40) == source
-        ):
-            item["count"] = int(item.get("count") or 1) + 1
-            item["lastSeenAt"] = fact.get("lastSeenAt")
-            return items[-limit:]
-    items.append(fact)
-    return items[-limit:]
-
-
-def _refresh_skill_text_from_learned_facts(skill):
-    base = skill.get("baseSummary")
-    if not base:
-        base = skill.get("summary") or skill.get("selfIntroduction") or ""
-        skill["baseSummary"] = base
-    base_intro = skill.get("baseSelfIntroduction")
-    if not base_intro:
-        base_intro = skill.get("selfIntroduction") or base
-        skill["baseSelfIntroduction"] = base_intro
-
-    needs = skill.get("childInitiatedNeeds") if isinstance(skill.get("childInitiatedNeeds"), list) else []
-    prefs = skill.get("observedPreferences") if isinstance(skill.get("observedPreferences"), list) else []
-    daily = skill.get("dailyPlanPreferences") if isinstance(skill.get("dailyPlanPreferences"), list) else []
-    training = skill.get("trainingInsights") if isinstance(skill.get("trainingInsights"), list) else []
-
-    learned_parts = []
-    if needs:
-        learned_parts.append("孩子曾主动表达：" + "、".join(str(x) for x in needs[-5:]) + "。")
-    if prefs:
-        learned_parts.append("近期观察到的偏好/选择：" + "、".join(str(x) for x in prefs[-8:]) + "。")
-    if daily:
-        learned_parts.append("日常计划中常见选择：" + "、".join(str(x) for x in daily[-6:]) + "。")
-    if training:
-        learned_parts.append("训练中出现过的选择：" + "、".join(str(x) for x in training[-6:]) + "。")
-
-    learned = " ".join(learned_parts)
-    skill["learnedSummary"] = learned
-    skill["summary"] = (base + (" " + learned if learned else "")).strip()
-    skill["selfIntroduction"] = (base_intro + (" " + learned if learned else "")).strip()
-
-    support_hints = skill.get("supportHints") if isinstance(skill.get("supportHints"), list) else []
-    if prefs:
-        hint = "沟通或设计选择时，可优先参考已观察到的偏好：" + "、".join(str(x) for x in prefs[-5:]) + "。"
-        support_hints = _skill_list_append_unique(support_hints, hint, limit=10)
-    if needs:
-        hint = "孩子已经能通过星星主动表达部分需求，家长可及时回应并复述需求词。"
-        support_hints = _skill_list_append_unique(support_hints, hint, limit=10)
-    skill["supportHints"] = support_hints
-
-    qq = skill.get("quickQuestions") if isinstance(skill.get("quickQuestions"), list) else []
-    qq = _skill_list_append_unique(qq, "最近孩子更常选择什么？", limit=4)
-    skill["quickQuestions"] = qq[:4]
-
-
-def _enrich_child_skill_from_autism_event(cursor, child_id, *, kind, label, source="", scene="", ts=None, payload=None):
-    label = _compact_text(label, 60)
-    if not label:
-        return
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    ts = ts or now
-    row = _read_child_profile_row(cursor, child_id)
-    if row:
-        profile = row["profile"]
-        skill = row["skill"] or _build_child_skill(row["profile"], now)
-        updated_by = row.get("updated_by_user_id")
-    else:
-        profile, skill = _child_profile_default(child_id, "孩子")
-        updated_by = None
-
-    kind = _compact_text(kind, 40) or "autism_event"
-    source = _compact_text(source, 40)
-    scene = _compact_text(scene, 60)
-    fact = {
-        "kind": kind,
-        "label": label,
-        "source": source,
-        "scene": scene,
-        "lastSeenAt": ts,
-        "count": 1,
-    }
-    if isinstance(payload, dict):
-        slot_time = _compact_text(payload.get("slot_time"), 20)
-        if slot_time:
-            fact["slotTime"] = slot_time
-
-    skill["eventFacts"] = _skill_fact_append_unique(skill.get("eventFacts"), fact, limit=40)
-
-    if kind == "child_initiated_need":
-        skill["childInitiatedNeeds"] = _skill_list_append_unique(
-            skill.get("childInitiatedNeeds"), label, limit=12
-        )
-    elif source == "daily_plan" or scene == "daily_plan":
-        skill["dailyPlanPreferences"] = _skill_list_append_unique(
-            skill.get("dailyPlanPreferences"), label, limit=12
-        )
-        skill["observedPreferences"] = _skill_list_append_unique(
-            skill.get("observedPreferences"), label, limit=16
-        )
-    else:
-        skill["trainingInsights"] = _skill_list_append_unique(
-            skill.get("trainingInsights"), label, limit=12
-        )
-        skill["observedPreferences"] = _skill_list_append_unique(
-            skill.get("observedPreferences"), label, limit=16
-        )
-
-    skill["lastAutismEventAt"] = ts
-    skill["updatedAt"] = now
-    _refresh_skill_text_from_learned_facts(skill)
-
-    profile["childId"] = child_id
-    profile.setdefault("updatedAt", now)
-    cursor.execute(
-        """
-        INSERT INTO child_profiles
-        (child_id, profile_json, skill_json, updated_at, updated_by_user_id)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(child_id) DO UPDATE SET
-            profile_json = excluded.profile_json,
-            skill_json = excluded.skill_json,
-            updated_at = excluded.updated_at,
-            updated_by_user_id = child_profiles.updated_by_user_id
-        """,
-        (
-            child_id,
-            json.dumps(profile, ensure_ascii=False),
-            json.dumps(skill, ensure_ascii=False),
-            now,
-            updated_by,
-        ),
-    )
-
-
 def _recent_child_skill_context(cursor, child_id):
     cursor.execute(
         """
@@ -1218,14 +850,8 @@ def _fixed_child_skill_answer(question, profile, skill, context):
     interests = _compact_text(profile.get("interests"), 80)
     personality = _compact_text(profile.get("personality"), 80)
     support_hints = skill.get("supportHints") if isinstance(skill.get("supportHints"), list) else []
-    observed_preferences = skill.get("observedPreferences") if isinstance(skill.get("observedPreferences"), list) else []
-    child_needs = skill.get("childInitiatedNeeds") if isinstance(skill.get("childInitiatedNeeds"), list) else []
     latest_hr = (context.get("latestHeartRate") or {}).get("bpm")
     latest_obs = _compact_text((context.get("latestObservation") or {}).get("observation"), 80)
-    if any(key in q for key in ("喜欢", "偏好", "选择", "爱吃", "爱玩")) and observed_preferences:
-        return f"最近我常选择：{'、'.join(str(x) for x in observed_preferences[-8:])}。这些可以先当作线索，继续观察我是不是稳定喜欢。"
-    if any(key in q for key in ("需要", "需求", "主动", "想要")) and child_needs:
-        return f"我已经通过星星主动表达过：{'、'.join(str(x) for x in child_needs[-6:])}。家长可以及时回应，并帮我复述出来。"
     if any(key in q for key in ("介绍", "自己", "你是谁", "自我")):
         return skill.get("selfIntroduction") or _build_child_skill(profile).get("selfIntroduction")
     if any(key in q for key in ("感觉", "最近", "今天", "心情")):
@@ -1272,12 +898,6 @@ def fetch_kimi_child_skill_answer(question, profile, skill, context):
         {
             "conversationStyle": skill.get("conversationStyle"),
             "supportHints": skill.get("supportHints"),
-            "observedPreferences": skill.get("observedPreferences"),
-            "childInitiatedNeeds": skill.get("childInitiatedNeeds"),
-            "trainingInsights": skill.get("trainingInsights"),
-            "dailyPlanPreferences": skill.get("dailyPlanPreferences"),
-            "learnedSummary": skill.get("learnedSummary"),
-            "eventFacts": skill.get("eventFacts"),
             "optimizedFromProfileAt": skill.get("optimizedFromProfileAt"),
         },
         ensure_ascii=False,
@@ -1951,29 +1571,15 @@ def footprint_today():
     try:
         conn = sqlite3.connect("adhd_data.db")
         cursor = conn.cursor()
-        is_autism = _child_profile_category_is_autism(cursor, cid)
-
-        if is_autism:
-            cursor.execute(
-                """
-                SELECT id, timestamp, bpm, observation, ai_advice, condition_type
-                FROM parent_logs
-                WHERE child_id = ? AND timestamp LIKE ?
-                  AND LOWER(COALESCE(condition_type, '')) = 'autism'
-                ORDER BY id ASC
-                """,
-                (cid, prefix),
-            )
-        else:
-            cursor.execute(
-                """
-                SELECT id, timestamp, bpm, observation, ai_advice, condition_type
-                FROM parent_logs
-                WHERE child_id = ? AND timestamp LIKE ?
-                ORDER BY id ASC
-                """,
-                (cid, prefix),
-            )
+        cursor.execute(
+            """
+            SELECT id, timestamp, bpm, observation, ai_advice, condition_type
+            FROM parent_logs
+            WHERE child_id = ? AND timestamp LIKE ?
+            ORDER BY id ASC
+            """,
+            (cid, prefix),
+        )
         rows = cursor.fetchall()
 
         logs_out = []
@@ -1982,19 +1588,9 @@ def footprint_today():
         for row in rows:
             _id, ts, bpm, obs, advice, cond = row
             cond = (cond or "adhd").lower()
-            if is_autism:
-                trend_code, trend_label, avg_b, avg_a, nb, na = (
-                    "unknown",
-                    "（孤独症向记录不对比心率）",
-                    None,
-                    None,
-                    0,
-                    0,
-                )
-            else:
-                trend_code, trend_label, avg_b, avg_a, nb, na = _trend_after_advice(
-                    cursor, ts, cid
-                )
+            trend_code, trend_label, avg_b, avg_a, nb, na = _trend_after_advice(
+                cursor, ts, cid
+            )
             summary[trend_code] = summary.get(trend_code, 0) + 1
 
             logs_out.append(
@@ -2016,57 +1612,6 @@ def footprint_today():
                 }
             )
 
-        cursor.execute(
-            """
-            SELECT id, device_id, scene, phase, payload_json, ts, created_at
-            FROM autism_training_events
-            WHERE child_id = ? AND ts LIKE ?
-            ORDER BY id ASC
-            """,
-            (cid, prefix),
-        )
-        autism_events = []
-        for eid, device_id, scene, phase, payload_json, ts, created_at in cursor.fetchall():
-            try:
-                payload = json.loads(payload_json or "{}")
-            except Exception:
-                payload = {}
-            autism_events.append(
-                {
-                    "id": eid,
-                    "device_id": device_id,
-                    "scene": scene,
-                    "phase": phase,
-                    "payload": payload,
-                    "ts": ts,
-                    "created_at": created_at,
-                }
-            )
-
-        cursor.execute(
-            """
-            SELECT id, device_id, card_slug, label, voice_text, created_at, status, parent_confirmed_at
-            FROM autism_child_needs
-            WHERE child_id = ? AND created_at LIKE ?
-            ORDER BY id ASC
-            """,
-            (cid, prefix),
-        )
-        child_initiated_needs = []
-        for nid, device_id, card_slug, label, voice_text, created_at, status, parent_confirmed_at in cursor.fetchall():
-            child_initiated_needs.append(
-                {
-                    "id": nid,
-                    "device_id": device_id,
-                    "card_slug": card_slug,
-                    "label": label,
-                    "voice_text": voice_text,
-                    "created_at": created_at,
-                    "status": status,
-                    "parent_confirmed_at": parent_confirmed_at,
-                }
-            )
-
         conn.close()
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -2075,14 +1620,9 @@ def footprint_today():
         {
             "child_id": cid,
             "date": date_str,
-            "report_focus": "autism" if is_autism else "adhd",
             "log_count": len(logs_out),
-            "training_event_count": len(autism_events),
-            "child_need_count": len(child_initiated_needs),
             "trend_summary": summary,
             "logs": logs_out,
-            "autism_training_events": autism_events,
-            "child_initiated_needs": child_initiated_needs,
         }
     ), 200
 
@@ -2165,105 +1705,83 @@ def _latest_completed_anchor(period_type: str, now: datetime = None) -> datetime
     raise ValueError("period_type must be week, month or year")
 
 
-def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_autism: bool = False):
-    """聚合周期内数据供 Kimi 与 digest_json 存档。孤独症模式不含心率，以训练事件与家长笔记为主。"""
-    if not for_autism:
-        cursor.execute(
-            """
-            SELECT COUNT(*), AVG(bpm), MIN(bpm), MAX(bpm), SUM(is_alert)
-            FROM heart_rate_history
-            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-            """,
-            (child_id, t_lo, t_hi),
-        )
-        hrow = cursor.fetchone()
-        heart_n = int(hrow[0] or 0)
-        heart_avg = float(hrow[1]) if hrow[1] is not None else None
-        heart_min = float(hrow[2]) if hrow[2] is not None else None
-        heart_max = float(hrow[3]) if hrow[3] is not None else None
-        alert_sum = int(hrow[4] or 0)
+def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int):
+    """聚合本周心率与家长记录，供 Kimi 与 digest_json 存档。"""
+    cursor.execute(
+        """
+        SELECT COUNT(*), AVG(bpm), MIN(bpm), MAX(bpm), SUM(is_alert)
+        FROM heart_rate_history
+        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+        """,
+        (child_id, t_lo, t_hi),
+    )
+    hrow = cursor.fetchone()
+    heart_n = int(hrow[0] or 0)
+    heart_avg = float(hrow[1]) if hrow[1] is not None else None
+    heart_min = float(hrow[2]) if hrow[2] is not None else None
+    heart_max = float(hrow[3]) if hrow[3] is not None else None
+    alert_sum = int(hrow[4] or 0)
 
-        cursor.execute(
-            """
-            SELECT substr(timestamp, 1, 13) AS bucket,
-                   AVG(bpm) AS avgb,
-                   AVG(is_alert * 1.0) AS ar,
-                   COUNT(*) AS n
-            FROM heart_rate_history
-            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-            GROUP BY bucket
-            ORDER BY ar DESC, avgb DESC
-            LIMIT 12
-            """,
-            (child_id, t_lo, t_hi),
+    cursor.execute(
+        """
+        SELECT substr(timestamp, 1, 13) AS bucket,
+               AVG(bpm) AS avgb,
+               AVG(is_alert * 1.0) AS ar,
+               COUNT(*) AS n
+        FROM heart_rate_history
+        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+        GROUP BY bucket
+        ORDER BY ar DESC, avgb DESC
+        LIMIT 12
+        """,
+        (child_id, t_lo, t_hi),
+    )
+    hourly_stress = []
+    for bucket, avgb, ar, n in cursor.fetchall():
+        hourly_stress.append(
+            {
+                "bucket": bucket,
+                "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
+                "alert_rate": round(float(ar), 3) if ar is not None else None,
+                "n": int(n),
+            }
         )
-        hourly_stress = []
-        for bucket, avgb, ar, n in cursor.fetchall():
-            hourly_stress.append(
-                {
-                    "bucket": bucket,
-                    "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
-                    "alert_rate": round(float(ar), 3) if ar is not None else None,
-                    "n": int(n),
-                }
-            )
 
-        cursor.execute(
-            """
-            SELECT date(timestamp) AS d,
-                   AVG(bpm) AS avgb,
-                   AVG(is_alert * 1.0) AS ar,
-                   COUNT(*) AS n
-            FROM heart_rate_history
-            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-            GROUP BY d
-            ORDER BY d
-            """,
-            (child_id, t_lo, t_hi),
+    cursor.execute(
+        """
+        SELECT date(timestamp) AS d,
+               AVG(bpm) AS avgb,
+               AVG(is_alert * 1.0) AS ar,
+               COUNT(*) AS n
+        FROM heart_rate_history
+        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+        GROUP BY d
+        ORDER BY d
+        """,
+        (child_id, t_lo, t_hi),
+    )
+    daily = []
+    for d, avgb, ar, n in cursor.fetchall():
+        daily.append(
+            {
+                "date": d,
+                "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
+                "alert_rate": round(float(ar), 3) if ar is not None else None,
+                "n": int(n),
+            }
         )
-        daily = []
-        for d, avgb, ar, n in cursor.fetchall():
-            daily.append(
-                {
-                    "date": d,
-                    "avg_bpm": round(float(avgb), 1) if avgb is not None else None,
-                    "alert_rate": round(float(ar), 3) if ar is not None else None,
-                    "n": int(n),
-                }
-            )
-    else:
-        heart_n = 0
-        heart_avg = heart_min = heart_max = None
-        alert_sum = 0
-        hourly_stress = []
-        daily = []
 
-    log_limit = 60 if for_autism else 40
-    if for_autism:
-        cursor.execute(
-            """
-            SELECT timestamp, bpm, observation, ai_advice,
-                   COALESCE(condition_type, 'autism') AS ctype
-            FROM parent_logs
-            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-                  AND LOWER(COALESCE(condition_type, '')) = 'autism'
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (child_id, t_lo, t_hi, log_limit),
-        )
-    else:
-        cursor.execute(
-            """
-            SELECT timestamp, bpm, observation, ai_advice,
-                   COALESCE(condition_type, 'adhd') AS ctype
-            FROM parent_logs
-            WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-            ORDER BY timestamp DESC
-            LIMIT ?
-            """,
-            (child_id, t_lo, t_hi, log_limit),
-        )
+    cursor.execute(
+        """
+        SELECT timestamp, bpm, observation, ai_advice,
+               COALESCE(condition_type, 'adhd') AS ctype
+        FROM parent_logs
+        WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
+        ORDER BY timestamp DESC
+        LIMIT 40
+        """,
+        (child_id, t_lo, t_hi),
+    )
     log_rows = list(cursor.fetchall())
     log_rows.reverse()
     logs = []
@@ -2277,64 +1795,11 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_aut
                 "observation": obs_s,
                 "ai_advice_snippet": adv_s,
                 "condition_type": ctype,
-                "condition_label": _condition_label(str(ctype).lower()),
-            }
-        )
-
-    autism_limit = 400 if for_autism else 80
-    cursor.execute(
-        """
-        SELECT ts, scene, phase, payload_json
-        FROM autism_training_events
-        WHERE child_id = ? AND ts >= ? AND ts <= ?
-        ORDER BY ts ASC
-        LIMIT ?
-        """,
-        (child_id, t_lo, t_hi, autism_limit),
-    )
-    autism_events = []
-    for ts, scene, phase, payload_json in cursor.fetchall():
-        try:
-            payload = json.loads(payload_json or "{}")
-        except Exception:
-            payload = {}
-        autism_events.append(
-            {
-                "timestamp": ts,
-                "scene": scene,
-                "phase": phase,
-                "label": payload.get("label"),
-                "source": payload.get("source"),
-                "slot_time": payload.get("slot_time"),
-            }
-        )
-
-    needs_limit = 120 if for_autism else 80
-    cursor.execute(
-        """
-        SELECT created_at, card_slug, label, voice_text, status, parent_confirmed_at
-        FROM autism_child_needs
-        WHERE child_id = ? AND created_at >= ? AND created_at <= ?
-        ORDER BY created_at ASC
-        LIMIT ?
-        """,
-        (child_id, t_lo, t_hi, needs_limit),
-    )
-    child_initiated_needs = []
-    for created_at, card_slug, label, voice_text, status, parent_confirmed_at in cursor.fetchall():
-        child_initiated_needs.append(
-            {
-                "timestamp": created_at,
-                "card_slug": card_slug,
-                "label": label,
-                "voice_text": voice_text,
-                "status": status,
-                "parent_confirmed_at": parent_confirmed_at,
+                "condition_label": _condition_label(ctype.lower()),
             }
         )
 
     return {
-        "report_focus": "autism" if for_autism else "adhd",
         "heart_sample_count": heart_n,
         "heart_avg_bpm": round(heart_avg, 1) if heart_avg is not None else None,
         "heart_min_bpm": round(heart_min, 1) if heart_min is not None else None,
@@ -2343,8 +1808,6 @@ def _collect_week_digest(cursor, t_lo: str, t_hi: str, child_id: int, *, for_aut
         "hourly_stress_ranked": hourly_stress,
         "daily_heart": daily,
         "parent_logs": logs,
-        "autism_training_events": autism_events,
-        "child_initiated_needs": child_initiated_needs,
     }
 
 
@@ -2388,26 +1851,6 @@ def _build_weekly_kimi_user_prompt(child_name: str, week_start: str, week_end: s
         lines.append("")
         lines.append("（本周家长记录较多，上文仅纳入最近 40 条；统计仍以全量数据在库为准。）")
 
-    needs = digest.get("child_initiated_needs") or []
-    lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
-    for n in needs:
-        lines.append(
-            f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
-        )
-    if not needs:
-        lines.append("- （该周暂无孩子主动发起需求记录）")
-
-    events = digest.get("autism_training_events") or []
-    lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
-    for e in events:
-        label = e.get("label") or "未记录选项"
-        slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
-        lines.append(
-            f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择：{label}"
-        )
-    if not events:
-        lines.append("- （该周暂无训练或日常计划选择事件）")
-
     lines += [
         "",
         "【写作要求】",
@@ -2426,8 +1869,6 @@ def _build_period_kimi_user_prompt(
     period_start: str,
     period_end: str,
     digest: dict,
-    *,
-    for_autism: bool = False,
 ) -> str:
     report_label = _PERIOD_LABELS.get(period_type, "报告")
     range_label = _PERIOD_RANGE_LABELS.get(period_type, "一段时间")
@@ -2441,57 +1882,6 @@ def _build_period_kimi_user_prompt(
         "month": "全文约 500～900 字，分 3～5 段",
         "year": "全文约 700～1200 字，分 4～6 段",
     }.get(period_type, "全文分段自然")
-
-    if for_autism:
-        lines = [
-            f"请根据以下「{range_label}摘要」（孤独症支持向，不含手环心率），给家长写一份中文「AI {report_label}」。",
-            "",
-            f"【统计周期】{period_start} 至 {period_end}",
-            f"【孩子称呼】{child_name}（文中可直接用此称呼）",
-            "",
-            "【数据说明】本档案为孤独症谱系支持向：摘要中仅含「星星机器人训练/日常计划事件」、"
-            "「家长笔记（孤独症类）」与「孩子主动发起需求」。请勿推断或描述心率、BPM、手环采样等（本周期无此类数据）。",
-        ]
-        logs = digest.get("parent_logs") or []
-        lines += ["", f"【家长笔记（孤独症类）】共 {len(logs)} 条"]
-        for p in logs:
-            lines.append(f"- {p['timestamp']} 观察：{p['observation']}")
-            adv = (p.get("ai_advice_snippet") or "").strip()
-            if adv:
-                lines.append(f"  当时建议摘要：{adv}")
-        if not logs:
-            lines.append("- （该周期暂无此类家长笔记）")
-
-        needs = digest.get("child_initiated_needs") or []
-        lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
-        for n in needs:
-            lines.append(
-                f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
-            )
-        if not needs:
-            lines.append("- （该周期暂无孩子主动发起需求记录）")
-
-        events = digest.get("autism_training_events") or []
-        lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
-        for e in events:
-            label = e.get("label") or "（无选项文字）"
-            slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
-            lines.append(
-                f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择/结果：{label}"
-            )
-        if not events:
-            lines.append("- （该周期暂无训练或日常计划事件）")
-
-        lines += [
-            "",
-            "【写作要求】",
-            "1. 用自然、亲切的第二人称写给家长；不要医学诊断，不要替代就医。",
-            "2. 围绕训练互动、日常计划执行、孩子主动表达与家长笔记，归纳规律、亮点与可改进处；不要编造心率或生理数据。",
-            f"3. {suggestion_hint}",
-            "4. 对自闭症谱系支持保持温和、具体、非标签化表达。",
-            f"5. {length_hint}，不要用 Markdown 标题符号，不要输出 JSON。",
-        ]
-        return "\n".join(lines)
 
     lines = [
         f"请根据以下「{range_label}数据摘要」，给家长写一份中文「AI {report_label}」。",
@@ -2530,26 +1920,6 @@ def _build_period_kimi_user_prompt(
         )
         lines.append(f"  当时 AI 建议摘要：{p['ai_advice_snippet']}")
 
-    needs = digest.get("child_initiated_needs") or []
-    lines += ["", f"【孩子主动发起需求】共 {len(needs)} 条"]
-    for n in needs:
-        lines.append(
-            f"- {n['timestamp']} 孩子选择：{n.get('label') or '未记录'} 状态：{n.get('status') or 'unknown'}"
-        )
-    if not needs:
-        lines.append("- （该周期暂无孩子主动发起需求记录）")
-
-    events = digest.get("autism_training_events") or []
-    lines += ["", f"【孤独症训练 / 日常计划事件】共 {len(events)} 条"]
-    for e in events:
-        label = e.get("label") or "未记录选项"
-        slot = f" 时间={e.get('slot_time')}" if e.get("slot_time") else ""
-        lines.append(
-            f"- {e['timestamp']} scene={e['scene']} phase={e['phase']}{slot} 选择：{label}"
-        )
-    if not events:
-        lines.append("- （该周期暂无训练或日常计划选择事件）")
-
     lines += [
         "",
         "【写作要求】",
@@ -2587,24 +1957,14 @@ def fetch_kimi_weekly_report(user_prompt: str) -> str:
         raise
 
 
-def fetch_kimi_period_report(
-    period_type: str, user_prompt: str, *, for_autism: bool = False
-) -> str:
+def fetch_kimi_period_report(period_type: str, user_prompt: str) -> str:
     """调用 Kimi 生成周/月/年周期报告。"""
     report_label = _PERIOD_LABELS.get(period_type, "报告")
-    if for_autism:
-        system = (
-            "你是儿童发育与特殊教育领域的资深顾问，擅长自闭症谱系的沟通、情绪与结构化支持。"
-            f"你仅根据「孤独症训练/日常计划事件」与家长文字笔记撰写「{report_label}」，"
-            "不要描述或推断心率、手环采样、BPM 等（本场景不存在此类数据）。"
-            "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
-        )
-    else:
-        system = (
-            "你是儿童发育与特殊教育领域的资深顾问，熟悉 ADHD 与自闭症谱系的居家与学校适应支持。"
-            f"你根据家长端设备采集的心率与家长文字记录，撰写「{report_label}」帮助家长看见规律与下一步。"
-            "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
-        )
+    system = (
+        "你是儿童发育与特殊教育领域的资深顾问，熟悉 ADHD 与自闭症谱系的居家与学校适应支持。"
+        f"你根据家长端设备采集的心率与家长文字记录，撰写「{report_label}」帮助家长看见规律与下一步。"
+        "语气专业、温暖、具体。严禁医学诊断与面诊替代。数据不足时要明确说明，不编造趋势。"
+    )
     model = (
         os.getenv("PERIOD_REPORT_MODEL")
         or os.getenv("WEEKLY_REPORT_MODEL")
@@ -2681,27 +2041,14 @@ def generate_period_report(
             }
 
     t_lo, t_hi = _period_sql_bounds(period_start, period_end)
-    for_autism = _child_profile_category_is_autism(cursor, child_id)
-    digest = _collect_week_digest(cursor, t_lo, t_hi, child_id, for_autism=for_autism)
-    row_name = _read_child_profile_row(cursor, child_id)
+    digest = _collect_week_digest(cursor, t_lo, t_hi, child_id)
     conn.close()
 
-    child_name = "孩子"
-    if row_name:
-        nick = (row_name.get("nickname") or "").strip()
-        if nick:
-            child_name = nick
-    if not child_name or child_name == "孩子":
-        child_name = (os.getenv("CHILD_DISPLAY_NAME") or "孩子").strip() or "孩子"
+    child_name = (os.getenv("CHILD_DISPLAY_NAME") or "孩子").strip() or "孩子"
     user_prompt = _build_period_kimi_user_prompt(
-        period_type,
-        child_name,
-        period_start,
-        period_end,
-        digest,
-        for_autism=for_autism,
+        period_type, child_name, period_start, period_end, digest
     )
-    summary = fetch_kimi_period_report(period_type, user_prompt, for_autism=for_autism)
+    summary = fetch_kimi_period_report(period_type, user_prompt)
     if not summary or len(summary) < 40:
         raise RuntimeError("Kimi 返回内容过短，未写入报告表")
 
@@ -2922,51 +2269,17 @@ def reports_status():
     t_lo, t_hi = _period_sql_bounds(cur_start, cur_end)
     conn = sqlite3.connect("adhd_data.db")
     cursor = conn.cursor()
-    is_autism = _child_profile_category_is_autism(cursor, cid)
 
-    if is_autism:
-        cursor.execute(
-            """
-            SELECT COUNT(*) FROM (
-                SELECT substr(ts, 1, 10) AS d FROM autism_training_events
-                WHERE child_id = ? AND ts >= ? AND ts <= ?
-                UNION
-                SELECT substr(created_at, 1, 10) AS d FROM autism_child_needs
-                WHERE child_id = ? AND created_at >= ? AND created_at <= ?
-                UNION
-                SELECT substr(timestamp, 1, 10) AS d FROM parent_logs
-                WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-                  AND LOWER(COALESCE(condition_type, '')) = 'autism'
-            ) AS active_days
-            """,
-            (cid, t_lo, t_hi, cid, t_lo, t_hi, cid, t_lo, t_hi),
-        )
-        days_collected = int(cursor.fetchone()[0] or 0)
-        cursor.execute(
-            """
-            SELECT
-              (SELECT COUNT(*) FROM autism_training_events
-               WHERE child_id = ? AND ts >= ? AND ts <= ?)
-            + (SELECT COUNT(*) FROM autism_child_needs
-               WHERE child_id = ? AND created_at >= ? AND created_at <= ?)
-            + (SELECT COUNT(*) FROM parent_logs
-               WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-                 AND LOWER(COALESCE(condition_type, '')) = 'autism')
-            """,
-            (cid, t_lo, t_hi, cid, t_lo, t_hi, cid, t_lo, t_hi),
-        )
-        log_count = int(cursor.fetchone()[0] or 0)
-    else:
-        cursor.execute(
-            "SELECT COUNT(DISTINCT date(timestamp)) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
-            (cid, t_lo, t_hi),
-        )
-        days_collected = cursor.fetchone()[0] or 0
-        cursor.execute(
-            "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
-            (cid, t_lo, t_hi),
-        )
-        log_count = cursor.fetchone()[0] or 0
+    cursor.execute(
+        "SELECT COUNT(DISTINCT date(timestamp)) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
+        (cid, t_lo, t_hi),
+    )
+    days_collected = cursor.fetchone()[0] or 0
+    cursor.execute(
+        "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
+        (cid, t_lo, t_hi),
+    )
+    log_count = cursor.fetchone()[0] or 0
 
     current_period = {
         "start": cur_start,
@@ -2992,37 +2305,20 @@ def reports_status():
         last_report_id = existing[0]
     else:
         lt_lo, lt_hi = _period_sql_bounds(last_start, last_end)
-        if is_autism:
-            cursor.execute(
-                """
-                SELECT
-                  (SELECT COUNT(*) FROM autism_training_events
-                   WHERE child_id = ? AND ts >= ? AND ts <= ?)
-                + (SELECT COUNT(*) FROM autism_child_needs
-                   WHERE child_id = ? AND created_at >= ? AND created_at <= ?)
-                + (SELECT COUNT(*) FROM parent_logs
-                   WHERE child_id = ? AND timestamp >= ? AND timestamp <= ?
-                     AND LOWER(COALESCE(condition_type, '')) = 'autism')
-                """,
-                (cid, lt_lo, lt_hi, cid, lt_lo, lt_hi, cid, lt_lo, lt_hi),
-            )
-            has_touch = (cursor.fetchone()[0] or 0) > 0
-            last_status = "ready" if has_touch else "no_data"
+        cursor.execute(
+            "SELECT COUNT(*) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
+            (cid, lt_lo, lt_hi),
+        )
+        has_data = (cursor.fetchone()[0] or 0) > 0
+        cursor.execute(
+            "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
+            (cid, lt_lo, lt_hi),
+        )
+        has_logs = (cursor.fetchone()[0] or 0) > 0
+        if has_data or has_logs:
+            last_status = "ready"
         else:
-            cursor.execute(
-                "SELECT COUNT(*) FROM heart_rate_history WHERE child_id=? AND timestamp>=? AND timestamp<=? AND bpm>0",
-                (cid, lt_lo, lt_hi),
-            )
-            has_data = (cursor.fetchone()[0] or 0) > 0
-            cursor.execute(
-                "SELECT COUNT(*) FROM parent_logs WHERE child_id=? AND timestamp>=? AND timestamp<=?",
-                (cid, lt_lo, lt_hi),
-            )
-            has_logs = (cursor.fetchone()[0] or 0) > 0
-            if has_data or has_logs:
-                last_status = "ready"
-            else:
-                last_status = "no_data"
+            last_status = "no_data"
         last_report_id = None
 
     conn.close()
@@ -3038,7 +2334,6 @@ def reports_status():
         "child_id": cid,
         "period_type": period_type,
         "period_label": _PERIOD_LABELS[period_type],
-        "report_focus": "autism" if is_autism else "adhd",
         "current_period": current_period,
         "last_period": last_period,
     }), 200
@@ -3409,23 +2704,6 @@ def my_child_profile_put(child_id):
     if not cursor.fetchone():
         conn.close()
         return jsonify({"status": "error", "message": "child not found"}), 404
-    existing_row = _read_child_profile_row(cursor, child_id)
-    if existing_row and isinstance(existing_row.get("skill"), dict):
-        old_skill = existing_row["skill"]
-        for key in (
-            "observedPreferences",
-            "childInitiatedNeeds",
-            "trainingInsights",
-            "dailyPlanPreferences",
-            "eventFacts",
-            "learnedSummary",
-            "lastAutismEventAt",
-        ):
-            if key in old_skill:
-                skill[key] = old_skill[key]
-        if skill.get("eventFacts"):
-            _refresh_skill_text_from_learned_facts(skill)
-            skill["updatedAt"] = now
     if nickname:
         cursor.execute("UPDATE children SET nickname = ? WHERE id = ?", (nickname, child_id))
     cursor.execute(
@@ -3451,898 +2729,6 @@ def my_child_profile_put(child_id):
     row = _read_child_profile_row(cursor, child_id)
     conn.close()
     return jsonify({"status": "ok", **row}), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/needs/pending", methods=["GET"])
-def autism_needs_pending(child_id):
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    cursor.execute(
-        """
-        SELECT id, device_id, card_slug, label, voice_text, created_at, status
-        FROM autism_child_needs
-        WHERE child_id = ? AND status = 'pending'
-        ORDER BY id DESC
-        LIMIT 50
-        """,
-        (child_id,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    items = [
-        {
-            "id": r[0],
-            "device_id": r[1],
-            "card_slug": r[2],
-            "label": r[3],
-            "voice_text": r[4],
-            "created_at": r[5],
-            "status": r[6],
-        }
-        for r in rows
-    ]
-    return jsonify({"status": "ok", "items": items}), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/needs/<int:need_id>/confirm", methods=["POST"])
-def autism_need_confirm(child_id, need_id):
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    cursor.execute(
-        """
-        UPDATE autism_child_needs
-        SET status = 'confirmed', parent_confirmed_at = ?
-        WHERE id = ? AND child_id = ? AND status = 'pending'
-        """,
-        (now, need_id, child_id),
-    )
-    conn.commit()
-    n = cursor.rowcount
-    conn.close()
-    if not n:
-        return jsonify({"status": "error", "message": "not found or already confirmed"}), 404
-    return jsonify({"status": "ok", "id": need_id}), 200
-
-
-def _autism_followup_options_for_choice(
-    scene: str,
-    label: str,
-    focus_label: str = "",
-    previous_options: list[str] | None = None,
-) -> list[str]:
-    label = (label or "").strip()
-    focus = (focus_label or "").strip()
-    target = focus if label == "都不是" and focus else label
-    scene = (scene or "").strip()
-    pools = {
-        "害怕": ["很大的声音", "黑黑的房间", "陌生的人", "突然靠近的小动物", "看起来很高的地方"],
-        "难过": ["玩具坏了", "想妈妈了", "朋友不一起玩", "被别人说了不喜欢的话", "想要的东西没有了"],
-        "生气": ["玩具被拿走", "别人插队了", "声音太吵了", "事情没有按计划来", "有人碰了你的东西"],
-        "开心": ["喜欢的玩具", "好吃的点心", "妈妈抱抱", "一起玩游戏", "完成了一件事"],
-    }
-    candidates = list(pools.get(target) or [])
-    if not candidates:
-        candidates = [
-            f"和{target or label}有关的事情",
-            "很大的声音",
-            "陌生的人",
-            "想休息一下",
-            "不知道怎么说",
-        ]
-    used = {str(x or "").strip() for x in (previous_options or [])}
-    candidates = [x for x in candidates if x not in used and x != "都不是"] or [
-        x for x in (pools.get(target) or []) if x != "都不是"
-    ] or candidates
-    first_two = random.sample(candidates, k=min(2, len(candidates)))
-    while len(first_two) < 2:
-        first_two.append("不知道怎么说")
-    return [first_two[0], first_two[1], "都不是"]
-
-
-def _autism_daily_plan_alternative_options(question: str, previous_options: list[str] | None = None) -> list[str]:
-    """计划表里选“都不是”时，围绕原计划问题换一组选项。"""
-    q = (question or "").strip()
-    used = {str(x or "").strip() for x in (previous_options or [])}
-    if any(k in q for k in ("饭", "吃", "菜", "点心", "早餐", "午餐", "晚餐")):
-        candidates = ["粥", "鸡蛋", "水果", "汤", "面包", "牛奶"]
-    elif any(k in q for k in ("鞋", "衣", "穿", "颜色")):
-        candidates = ["黄色", "绿色", "白色", "黑色", "小花", "星星"]
-    elif any(k in q for k in ("玩", "游戏", "起床后")):
-        candidates = ["画画", "看书", "唱歌", "玩车", "拼图", "贴纸"]
-    elif any(k in q for k in ("午睡", "睡", "起床")):
-        candidates = ["抱抱", "喝水", "再等一下", "上厕所", "听故事"]
-    else:
-        candidates = ["换一个选择", "大人帮我选", "再想一想", "稍等一下", "休息一下"]
-    candidates = [x for x in candidates if x not in used]
-    while len(candidates) < 2:
-        candidates.append("再想一想")
-    return [candidates[0], candidates[1], "都不是"]
-
-
-def _autism_followup_images_for_options(options: list[str], scene: str, previous_label: str) -> dict[str, str | None]:
-    images: dict[str, str | None] = {}
-    for i, opt in enumerate(options):
-        if opt == "都不是":
-            images[f"o{i}"] = _autism_none_of_above_image_url()
-            continue
-        else:
-            prompt = _autism_option_icon_prompt(
-                opt,
-                f"延续训练场景：{scene}。孩子刚选择了：{previous_label}。",
-            )
-        images[f"o{i}"] = _autism_square_image_url_cached(opt, prompt)
-    return images
-
-
-def _autism_option_image_url(opt: str, context: str) -> str | None:
-    if (opt or "").strip() == "都不是":
-        return _autism_none_of_above_image_url()
-    return _autism_square_image_url_cached(
-        chinese_label=opt,
-        prompt_core_zh=_autism_option_icon_prompt(opt, context),
-    )
-
-
-def _autism_option_image_url_lookup(opt: str, context: str) -> str | None:
-    if (opt or "").strip() == "都不是":
-        return _autism_none_of_above_image_url()
-    return _autism_square_image_url_lookup_cached(
-        prompt_core_zh=_autism_option_icon_prompt(opt, context),
-        chinese_label=opt,
-    )
-
-
-def _autism_audio_for_options(options: list[str], images: dict[str, str | None], prefix: str = "o") -> dict[str, str | None]:
-    audio: dict[str, str | None] = {}
-    for i, opt in enumerate(options):
-        key = f"{prefix}{i}"
-        audio[key] = _autism_label_audio_url(opt, images.get(key))
-    return audio
-
-
-def _training_start_enqueue_background(child_id: int, sid: int, payload: dict) -> None:
-    """TTS 注入 + 设备队列写入；在独立线程中运行，HTTP 已先返回 202。
-
-    payload 为已在请求线程中 deepcopy 的快照，勿与请求对象共享可变引用。"""
-    session = {"session_id": sid, **payload}
-    try:
-        with app.app_context():
-            queued = _enqueue_autism_session_for_child(child_id, session)
-            st = "sent" if queued else "queued_no_device"
-            now2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            conn2 = sqlite3.connect("adhd_data.db")
-            cur2 = conn2.cursor()
-            cur2.execute(
-                """
-                UPDATE autism_training_sessions SET status = ?, updated_at = ?
-                WHERE id = ? AND child_id = ?
-                """,
-                (st, now2, sid, child_id),
-            )
-            conn2.commit()
-            conn2.close()
-            app.logger.info(
-                "training/start async done session_id=%s child=%s status=%s devices=%d",
-                sid,
-                child_id,
-                st,
-                len(queued),
-            )
-    except Exception:
-        app.logger.exception("training/start async enqueue failed session_id=%s child=%s", sid, child_id)
-        try:
-            nowe = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            conn3 = sqlite3.connect("adhd_data.db")
-            c3 = conn3.cursor()
-            c3.execute(
-                """
-                UPDATE autism_training_sessions SET status = ?, updated_at = ?
-                WHERE id = ? AND child_id = ?
-                """,
-                ("enqueue_failed", nowe, sid, child_id),
-            )
-            conn3.commit()
-            conn3.close()
-        except Exception:
-            app.logger.exception(
-                "training/start could not persist enqueue_failed session_id=%s", sid
-            )
-
-
-@app.route("/my/children/<int:child_id>/autism/training/start", methods=["POST"])
-def autism_training_start(child_id):
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    scene_id = (data.get("scene_id") or "preference_choice").strip()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    options = data.get("options") or []
-    if not isinstance(options, list):
-        options = []
-    options = [str(x).strip() for x in options if str(x).strip()]
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    provided_images = data.get("images") if isinstance(data.get("images"), dict) else {}
-    images: dict[str, str | None] = {}
-    for i, opt in enumerate(options):
-        key = f"o{i}"
-        u = provided_images.get(key)
-        # App 传来的本地兜底图 URL 可能指向已被清理的文件（迁服务器时只搬了 DB，
-        # 没搬 server/action/*.png），原样下发会让星星机器人拉图 404。本地 URL
-        # 必须校验磁盘文件，文件缺失则忽略并走重新生成。
-        if isinstance(u, str) and u.startswith("http") and _autism_cached_url_is_usable(u):
-            images[key] = u
-        else:
-            images[key] = _autism_option_image_url(opt, f"训练场景：{scene_id}")
-    audio = _autism_audio_for_options(options, images)
-    payload = {
-        "kind": "training_start",
-        "scene_id": scene_id,
-        "options": options,
-        "images": images,
-        "audio": audio,
-        "follow_up": bool(data.get("follow_up")),
-        "tts_intro": (data.get("tts_intro") or "").strip(),
-    }
-    cursor.execute(
-        """
-        INSERT INTO autism_training_sessions
-        (child_id, scene_id, payload_json, status, created_at, updated_at)
-        VALUES (?, ?, ?, 'queued', ?, ?)
-        """,
-        (child_id, scene_id, json.dumps(payload, ensure_ascii=False), now, now),
-    )
-    sid = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    preview_ids = _xingxing_device_ids_for_child(child_id)
-    threading.Thread(
-        target=_training_start_enqueue_background,
-        args=(child_id, sid, copy.deepcopy(payload)),
-        daemon=True,
-        name=f"training_start_{sid}",
-    ).start()
-    app.logger.info(
-        "training/start accepted 202 session_id=%s child=%s scene=%s option_count=%d "
-        "(TTS inject + device enqueue in background thread)",
-        sid,
-        child_id,
-        scene_id,
-        len(options),
-    )
-    return jsonify(
-        {
-            "status": "accepted",
-            "session_id": sid,
-            "queued_devices": preview_ids,
-            "enqueue_pending": True,
-            "message": "会话已创建，语音合成与入队正在后台进行，数秒至数十秒内星星将收到指令。",
-        }
-    ), 202
-
-
-@app.route("/my/children/<int:child_id>/autism/training/assets", methods=["POST"])
-def autism_training_assets(child_id):
-    """预生成孩子训练场景所需图片，只写缓存/存储，不下发设备。"""
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    scenes = data.get("scenes") or []
-    if not isinstance(scenes, list) or not scenes:
-        return jsonify({"status": "error", "message": "scenes required"}), 400
-
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    conn.close()
-
-    prepared: dict[str, dict[str, str | None]] = {}
-    expected = 0
-    ready = 0
-    for raw in scenes[:5]:
-        if not isinstance(raw, dict):
-            continue
-        scene_id = (raw.get("scene_id") or "").strip() or "preference_choice"
-        tts_intro = (raw.get("tts_intro") or "").strip()
-        options = raw.get("options") or []
-        if not isinstance(options, list):
-            options = []
-        clean_options = [str(x).strip() for x in options if str(x).strip()]
-        scene_images: dict[str, str | None] = {}
-        for i, opt in enumerate(clean_options[:4]):
-            expected += 1
-            key = f"o{i}"
-            url = _autism_option_image_url(opt, f"训练场景：{scene_id}。引导语：{tts_intro}")
-            scene_images[key] = url
-            if url:
-                ready += 1
-        prepared[scene_id] = scene_images
-
-    return jsonify(
-        {
-            "status": "ok",
-            "images": prepared,
-            "image_count": ready,
-            "expected_count": expected,
-            "ready_count": ready,
-            "all_ready": expected > 0 and ready == expected,
-        }
-    ), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/training/assets/check", methods=["POST"])
-def autism_training_assets_check(child_id):
-    """只检查训练图片是否已有缓存；不调用智谱、不生成新图。"""
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    scenes = data.get("scenes") or []
-    if not isinstance(scenes, list) or not scenes:
-        return jsonify({"status": "error", "message": "scenes required"}), 400
-
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    conn.close()
-
-    prepared: dict[str, dict[str, str | None]] = {}
-    expected = 0
-    ready = 0
-    for raw in scenes[:5]:
-        if not isinstance(raw, dict):
-            continue
-        scene_id = (raw.get("scene_id") or "").strip() or "preference_choice"
-        tts_intro = (raw.get("tts_intro") or "").strip()
-        options = raw.get("options") or []
-        if not isinstance(options, list):
-            options = []
-        clean_options = [str(x).strip() for x in options if str(x).strip()]
-        scene_images: dict[str, str | None] = {}
-        for i, opt in enumerate(clean_options[:4]):
-            expected += 1
-            key = f"o{i}"
-            url = _autism_option_image_url_lookup(opt, f"训练场景：{scene_id}。引导语：{tts_intro}")
-            scene_images[key] = url
-            if url:
-                ready += 1
-        prepared[scene_id] = scene_images
-
-    return jsonify(
-        {
-            "status": "ok",
-            "images": prepared,
-            "expected_count": expected,
-            "ready_count": ready,
-            "all_ready": expected > 0 and ready == expected,
-        }
-    ), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/training/status", methods=["GET"])
-def autism_training_status(child_id):
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    sid = request.args.get("session_id", type=int)
-    if not sid:
-        return jsonify({"status": "error", "message": "session_id required"}), 400
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    cursor.execute(
-        """
-        SELECT id, scene_id, payload_json, status, created_at, updated_at
-        FROM autism_training_sessions WHERE id = ? AND child_id = ?
-        """,
-        (sid, child_id),
-    )
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return jsonify({"status": "error", "message": "not found"}), 404
-    return jsonify(
-        {
-            "status": "ok",
-            "session": {
-                "id": row[0],
-                "scene_id": row[1],
-                "payload": json.loads(row[2] or "{}"),
-                "state": row[3],
-                "created_at": row[4],
-                "updated_at": row[5],
-            },
-        }
-    ), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/daily-plan", methods=["POST"])
-def autism_daily_plan(child_id):
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    default_slots = [
-        {
-            "time": "07:00",
-            "tts": "早上7点，起床啦，你喜欢穿什么颜色的鞋子？",
-            "options": ["红色鞋子", "蓝色鞋子"],
-        },
-        {
-            "time": "11:00",
-            "tts": "中午11点，该吃中饭啦，你想吃什么？",
-            "options": ["米饭", "面条", "饺子"],
-        },
-        {
-            "time": "13:00",
-            "tts": "下午1点，该午睡咯",
-            "options": ["好的", "不好"],
-        },
-        {
-            "time": "14:00",
-            "tts": "下午2点，该起床咯，起床后你想玩什么",
-            "options": ["搭积木", "滑梯", "拍皮球"],
-        },
-        {
-            "time": "18:00",
-            "tts": "晚上6点，到了吃晚饭的时候啦，你喜欢吃什么菜",
-            "options": ["青菜", "胡萝卜", "肉"],
-        },
-    ]
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-
-    data = request.json or {}
-    raw_slots = data.get("slots")
-    slots = []
-    if isinstance(raw_slots, list):
-        for i, raw in enumerate(raw_slots[:5]):
-            if not isinstance(raw, dict):
-                continue
-            fallback = default_slots[i] if i < len(default_slots) else default_slots[-1]
-            time_text = str(raw.get("time") or fallback["time"]).strip()[:8]
-            tts = str(raw.get("tts") or fallback["tts"]).strip()[:300]
-            raw_options = raw.get("options")
-            options = []
-            if isinstance(raw_options, list):
-                for opt in raw_options[:4]:
-                    s = str(opt or "").strip()
-                    if s:
-                        options.append(s[:40])
-            if not options:
-                options = list(fallback["options"])
-            slots.append({"time": time_text, "tts": tts, "options": options})
-    if len(slots) != 5:
-        slots = default_slots
-
-    provided_images = data.get("images") if isinstance(data.get("images"), dict) else {}
-    images: dict[str, str | None] = {}
-    for i, slot in enumerate(slots):
-        for j, opt in enumerate(slot["options"]):
-            key = f"s{i}_o{j}"
-            u = provided_images.get(key)
-            if isinstance(u, str) and u.startswith("http") and _autism_cached_url_is_usable(u):
-                images[key] = u
-            else:
-                images[key] = _autism_option_image_url(opt, f"计划表话术：{slot['tts']}")
-    audio: dict[str, str | None] = {}
-    for i, slot in enumerate(slots):
-        for j, opt in enumerate(slot["options"]):
-            key = f"s{i}_o{j}"
-            audio[key] = _autism_label_audio_url(opt, images.get(key))
-    # 新计划覆盖旧计划：先清库中该孩子历史计划，再写入当前版本。
-    cursor.execute("DELETE FROM autism_daily_plans WHERE child_id = ?", (child_id,))
-    cursor.execute(
-        """
-        INSERT INTO autism_daily_plans (child_id, plan_json, images_json, created_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (
-            child_id,
-            json.dumps(slots, ensure_ascii=False),
-            json.dumps(images, ensure_ascii=False),
-            now,
-        ),
-    )
-    pid = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    session = {"kind": "daily_plan", "plan_id": pid, "slots": slots, "images": images, "audio": audio}
-    queued = _enqueue_autism_session_for_child(child_id, session)
-    return jsonify(
-        {"status": "ok", "plan_id": pid, "queued_devices": queued, "images": images}
-    ), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/daily-plan/assets", methods=["POST"])
-def autism_daily_plan_assets(child_id):
-    """预生成计划表图片，只写缓存/存储，不下发设备。"""
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    raw_slots = data.get("slots") or []
-    if not isinstance(raw_slots, list) or not raw_slots:
-        return jsonify({"status": "error", "message": "slots required"}), 400
-
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    conn.close()
-
-    images: dict[str, str | None] = {}
-    count = 0
-    for i, raw in enumerate(raw_slots[:5]):
-        if not isinstance(raw, dict):
-            continue
-        tts = str(raw.get("tts") or "").strip()[:300]
-        options = raw.get("options") or []
-        if not isinstance(options, list):
-            options = []
-        for j, opt_raw in enumerate(options[:4]):
-            opt = str(opt_raw or "").strip()[:40]
-            if not opt:
-                continue
-            key = f"s{i}_o{j}"
-            url = _autism_option_image_url(opt, f"计划表话术：{tts}")
-            images[key] = url
-            if url:
-                count += 1
-    return jsonify({"status": "ok", "images": images, "image_count": count}), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/daily-plan/assets/check", methods=["POST"])
-def autism_daily_plan_assets_check(child_id):
-    """只检查计划表图片是否已有缓存；不调用智谱、不生成新图。"""
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    raw_slots = data.get("slots") or []
-    if not isinstance(raw_slots, list) or not raw_slots:
-        return jsonify({"status": "error", "message": "slots required"}), 400
-
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    conn.close()
-
-    images: dict[str, str | None] = {}
-    expected = 0
-    ready = 0
-    for i, raw in enumerate(raw_slots[:5]):
-        if not isinstance(raw, dict):
-            continue
-        tts = str(raw.get("tts") or "").strip()[:300]
-        options = raw.get("options") or []
-        if not isinstance(options, list):
-            options = []
-        for j, opt_raw in enumerate(options[:4]):
-            opt = str(opt_raw or "").strip()[:40]
-            if not opt:
-                continue
-            expected += 1
-            key = f"s{i}_o{j}"
-            url = _autism_option_image_url_lookup(opt, f"计划表话术：{tts}")
-            images[key] = url
-            if url:
-                ready += 1
-    return jsonify(
-        {
-            "status": "ok",
-            "images": images,
-            "expected_count": expected,
-            "ready_count": ready,
-            "all_ready": expected > 0 and ready == expected,
-        }
-    ), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/images", methods=["POST"])
-def autism_images_one(child_id):
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    prompt = (data.get("prompt") or "").strip()
-    if not prompt:
-        return jsonify({"status": "error", "message": "prompt required"}), 400
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    conn.close()
-    label = (prompt[:80] or "配图").strip() or "配图"
-    url = _autism_square_image_url_cached(chinese_label=label, prompt_core_zh=prompt)
-    if url:
-        return jsonify({"status": "ok", "url": url}), 200
-    return jsonify({"status": "error", "message": "image generation failed"}), 502
-
-
-@app.route("/device/<device_id>/autism/need-event", methods=["POST"])
-def device_autism_need_event(device_id):
-    """星星机器人上报「孩子需求确认」事件（无需登录，凭已绑定 device 校验）。"""
-    device_id = _normalize_device_id(device_id)
-    if not _ESP32_DEVICE_ID_RE.match(device_id):
-        return jsonify({"status": "error", "message": "invalid device_id"}), 400
-    info = _get_esp32_device(device_id)
-    if not info or info.get("child_id") is None:
-        return jsonify({"status": "error", "message": "device not bound"}), 404
-    child_id = int(info["child_id"])
-    data = request.json or {}
-    slug = (data.get("card_slug") or "").strip()
-    label = (data.get("label") or "").strip()
-    voice = (data.get("voice_text") or label).strip()
-    if not label:
-        return jsonify({"status": "error", "message": "label required"}), 400
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO autism_child_needs
-        (child_id, device_id, card_slug, label, voice_text, created_at, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'pending')
-        """,
-        (child_id, device_id, slug or None, label, voice, now),
-    )
-    nid = cursor.lastrowid
-    _enrich_child_skill_from_autism_event(
-        cursor,
-        child_id,
-        kind="child_initiated_need",
-        label=label,
-        source="child_initiated",
-        scene=slug or "need",
-        ts=now,
-        payload={"voice_text": voice},
-    )
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "ok", "need_id": nid, "child_id": child_id}), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/events/training", methods=["POST"])
-def autism_events_training(child_id):
-    """家长端或脚本上报训练阶段事件（与设备上报 schema 对齐）。"""
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    data = request.json or {}
-    scene = (data.get("scene") or "").strip() or "unknown"
-    phase = (data.get("phase") or "").strip() or "unknown"
-    payload = data.get("payload")
-    ts = (data.get("ts") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    pj = json.dumps(payload, ensure_ascii=False) if payload is not None else "{}"
-    sid_i = _session_id_from_json(data.get("session_id"))
-    cursor.execute(
-        """
-        INSERT INTO autism_training_events
-        (child_id, device_id, scene, phase, payload_json, ts, created_at, session_id)
-        VALUES (?, NULL, ?, ?, ?, ?, ?, ?)
-        """,
-        (child_id, scene, phase, pj, ts, now, sid_i),
-    )
-    eid = cursor.lastrowid
-    if phase == "image_confirmed" and isinstance(payload, dict):
-        _enrich_child_skill_from_autism_event(
-            cursor,
-            child_id,
-            kind="training_choice",
-            label=payload.get("label"),
-            source=payload.get("source") or "parent_training_event",
-            scene=scene,
-            ts=ts,
-            payload=payload,
-        )
-    if sid_i is not None:
-        cursor.execute(
-            """
-            UPDATE autism_training_sessions SET status = ?, updated_at = ?
-            WHERE id = ? AND child_id = ?
-            """,
-            (f"phase:{phase}", now, sid_i, child_id),
-        )
-    conn.commit()
-    conn.close()
-    return jsonify({"status": "ok", "event_id": eid}), 200
-
-
-@app.route("/my/children/<int:child_id>/autism/events/training", methods=["GET"])
-def autism_events_training_list(child_id):
-    """家长端增量拉取训练/日常计划事件，用于手机震动提示与报告数据展示。"""
-    user = _get_request_user()
-    if not user:
-        return jsonify({"status": "error", "message": "unauthorized"}), 401
-    after_id = request.args.get("after_id", default=0, type=int) or 0
-    limit = min(max(request.args.get("limit", default=30, type=int) or 30, 1), 100)
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    if not _user_can_access_child(cursor, user["id"], child_id):
-        conn.close()
-        return jsonify({"status": "error", "message": "forbidden"}), 403
-    cursor.execute(
-        """
-        SELECT id, device_id, scene, phase, payload_json, ts, created_at, session_id
-        FROM autism_training_events
-        WHERE child_id = ? AND id > ?
-        ORDER BY id ASC
-        LIMIT ?
-        """,
-        (child_id, after_id, limit),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    items = []
-    for row in rows:
-        eid = row[0]
-        device_id = row[1]
-        scene = row[2]
-        phase = row[3]
-        payload_json = row[4]
-        ts = row[5]
-        created_at = row[6]
-        session_id_ev = row[7] if len(row) > 7 else None
-        try:
-            payload = json.loads(payload_json or "{}")
-        except Exception:
-            payload = {}
-        items.append(
-            {
-                "id": eid,
-                "device_id": device_id,
-                "scene": scene,
-                "phase": phase,
-                "payload": payload,
-                "ts": ts,
-                "created_at": created_at,
-                "session_id": session_id_ev,
-            }
-        )
-    return jsonify({"status": "ok", "items": items}), 200
-
-
-@app.route("/device/<device_id>/autism/training-event", methods=["POST"])
-def device_autism_training_event(device_id):
-    """星星机器人上报训练阶段 / 完成事件。"""
-    device_id = _normalize_device_id(device_id)
-    if not _ESP32_DEVICE_ID_RE.match(device_id):
-        return jsonify({"status": "error", "message": "invalid device_id"}), 400
-    info = _get_esp32_device(device_id)
-    if not info or info.get("child_id") is None:
-        return jsonify({"status": "error", "message": "device not bound"}), 404
-    child_id = int(info["child_id"])
-    data = request.json or {}
-    scene = (data.get("scene") or "").strip() or "unknown"
-    phase = (data.get("phase") or "").strip() or "unknown"
-    payload = data.get("payload")
-    ts = (data.get("ts") or "").strip() or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sid_i = _session_id_from_json(data.get("session_id"))
-    pj = json.dumps(payload, ensure_ascii=False) if payload is not None else "{}"
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO autism_training_events
-        (child_id, device_id, scene, phase, payload_json, ts, created_at, session_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (child_id, device_id, scene, phase, pj, ts, now, sid_i),
-    )
-    eid = cursor.lastrowid
-    if phase == "image_confirmed" and isinstance(payload, dict):
-        _enrich_child_skill_from_autism_event(
-            cursor,
-            child_id,
-            kind="training_choice",
-            label=payload.get("label"),
-            source=payload.get("source") or "device_training_event",
-            scene=scene,
-            ts=ts,
-            payload=payload,
-        )
-    if sid_i is not None:
-        cursor.execute(
-            """
-            UPDATE autism_training_sessions SET status = ?, updated_at = ?
-            WHERE id = ? AND child_id = ?
-            """,
-            (f"phase:{phase}", now, sid_i, child_id),
-        )
-    conn.commit()
-    conn.close()
-
-    if phase == "image_confirmed" and isinstance(payload, dict):
-        app_training = (
-            sid_i is not None
-            and _autism_payload_is_app_child_training(payload, scene)
-        )
-        # 单次预设日常训练：不在云端排队追问/换组图；鼓励与结束语由固件 TTS。
-        if app_training:
-            return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
-        label = str(payload.get("label") or "").strip()
-        if label:
-            payload_kind = str(payload.get("kind") or "").strip()
-            payload_source = str(payload.get("source") or "").strip()
-            focus_label = str(payload.get("focus_label") or "").strip()
-            previous_options = payload.get("options") if isinstance(payload.get("options"), list) else []
-            is_daily_plan_choice = (
-                payload_kind == "daily_plan"
-                or payload_source == "daily_plan"
-                or scene == "daily_plan"
-            )
-            if is_daily_plan_choice and label != "都不是":
-                return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
-            if is_daily_plan_choice:
-                options = _autism_daily_plan_alternative_options(focus_label, previous_options)
-                image_context = focus_label or "计划表"
-                tts_intro = "好，我们换一组继续看。你更想选哪个？"
-            else:
-                if label != "都不是":
-                    focus_label = label
-                options = _autism_followup_options_for_choice(scene, label, focus_label, previous_options)
-                image_context = focus_label or label
-                if label == "都不是":
-                    tts_intro = "好，我们换一组继续看。哪个更像呢？"
-                else:
-                    tts_intro = f"我们看看，是什么让你觉得{label}？"
-            images = _autism_followup_images_for_options(options, scene, image_context)
-            audio = _autism_audio_for_options(options, images)
-            followup = {
-                "kind": "training_start",
-                "scene_id": scene or "follow_up",
-                "focus_label": focus_label,
-                "options": options,
-                "images": images,
-                "audio": audio,
-                "follow_up": True,
-                "tts_intro": tts_intro,
-            }
-            queued = _enqueue_autism_session_for_child(child_id, followup)
-            app.logger.info(
-                "autism follow-up queued child=%s scene=%s label=%s targets=%s options=%s",
-                child_id, scene, label, queued, options,
-            )
-    return jsonify({"status": "ok", "event_id": eid, "child_id": child_id}), 200
 
 
 @app.route("/my/children/<int:child_id>/skill", methods=["GET"])
@@ -4807,32 +3193,18 @@ def _get_esp32_device(device_id: str):
     }
 
 
-def _esp32_device_role(kind: str | None) -> str:
-    """Normalize stored kind strings into the three ESP32 roles we support."""
-    k = (kind or "").strip().lower()
-    if not k:
-        return "unknown"
-    if k == "xingxing" or "autism" in k or "孤独" in k:
-        return "autism_star"
-    if k == "xiaozhi" or "xiaozhi-esp32-2.2.4" in k or "adhd-star" in k or "多动" in k:
-        return "adhd_star"
-    if "esp32-s3-lcd-1.47b" in k or "lcd" in k or "plush" in k or "毛绒" in k:
-        return "plush"
-    return "unknown"
-
-
 def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
-    """挑出该孩子绑定的多动症星星机器人 device_id 列表。
+    """挑出该孩子绑定的 xiaozhi 星星机器人 device_id 列表。
 
-    三类 ESP32 设备**绝对不能搞混**：
+    用户名下两类设备**绝对不能搞混**：
 
       * 毛绒球 `ESP32-S3-LCD-1.47B`：固件 announce 写 `kind='esp32-s3-lcd-1.47B'`，
         Flutter 端 bind 时不带 kind。它走 LED 呼吸命令，**不能**收到 `xiaozhi_invoke_chat`。
-      * 多动症星星机器人 `xiaozhi-esp32-2.2.4`：用于 submit_log 后的主动陪聊。
-      * 孤独症星星机器人 `xingxing`：只用于孤独症训练 / 计划表视觉选择。
+      * 星星机器人 `xiaozhi-esp32-2.2.4`：固件 announce 写 `kind='xiaozhi'`，
+        Flutter 端 bind 时也写 `kind='xiaozhi'`。这才是我们要 TTS 的对象。
 
     选择策略（按优先级）：
-      1) 严格：`kind` 归一化为 `adhd_star` —— 99% 的情况落在这里。
+      1) 严格：`kind LIKE '%xiaozhi%'` —— 99% 的情况落在这里。
       2) 仅当严格命中为 0 行时，回退到 `kind IS NULL` 的"裸 bind"行。这种行
          只可能出现在「Flutter 已 bind 但设备从未 announce 过」的极端情况下，
          不会含毛绒球（毛绒球只要正常上电就一定有 `esp32-s3-lcd-...` 字面值）。
@@ -4862,19 +3234,31 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
         )
         return []
 
-    strict = [r[0] for r in rows if _esp32_device_role(r[1]) == "adhd_star"]
+    # 已知的"绝对不是 xiaozhi"的 kind 关键词 —— 命中即排除，绝不回退。
+    NON_XIAOZHI_HINTS = ("lcd", "plush", "毛绒")
+
+    def _is_plush(kind_val: str | None) -> bool:
+        if not kind_val:
+            return False
+        k = str(kind_val).lower()
+        return any(hint in k for hint in NON_XIAOZHI_HINTS)
+
+    strict = [r[0] for r in rows if r[1] and "xiaozhi" in str(r[1]).lower()]
     if strict:
         return strict
 
     # 仅在严格无命中时，回退到「绑定了但 announce 从未上送 kind」的行；明确
     # 已写为毛绒球家族字面值的行不会被纳入。
-    relaxed = [r[0] for r in rows if _esp32_device_role(r[1]) == "unknown"]
+    relaxed = [
+        r[0] for r in rows
+        if (r[1] is None or str(r[1]).strip() == "") and not _is_plush(r[1])
+    ]
     if relaxed:
         app.logger.warning(
             "xiaozhi target lookup: no strict kind=xiaozhi match for child_id=%s; "
             "falling back to %d device(s) with NULL kind: %s (all rows=%s). "
-            "If you actually have an ADHD xiaozhi bound, power-cycle it once so its "
-            "announce writes kind='xiaozhi-esp32-2.2.4'.",
+            "If you actually have a xiaozhi bound, power-cycle it once so its "
+            "announce writes kind='xiaozhi'.",
             child_id, len(relaxed), relaxed,
             [(r[0], r[1]) for r in rows],
         )
@@ -4888,784 +3272,6 @@ def _xiaozhi_device_ids_for_child(child_id: int) -> list[str]:
         child_id, len(rows), [(r[0], r[1]) for r in rows],
     )
     return []
-
-
-def _xingxing_device_ids_for_child(child_id: int) -> list[str]:
-    """挑出该孩子绑定的孤独症星星机器人 device_id 列表。"""
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT device_id, kind FROM esp32_devices
-        WHERE child_id = ?
-        ORDER BY last_seen_at DESC
-        """,
-        (child_id,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    ids = [r[0] for r in rows if _esp32_device_role(r[1]) == "autism_star"]
-    if not ids:
-        app.logger.warning(
-            "xingxing target lookup: child_id=%s has no bound autism xingxing device. rows=%s",
-            child_id, [(r[0], r[1]) for r in rows],
-        )
-    return ids
-
-
-# 智谱文生图：统一追加扁平矢量儿童图标风格；输出经 240×240 中心裁剪后先备份到本地
-# server/action 目录，再上传腾讯云 COS `action/`，并以完整 prompt 哈希缓存避免重复生成。
-# 与 assets/action 下手工参考图对齐：minimalist + soft pastel + solid bg + bold lines + no text；
-# 仍保留「底部留白条供服务端叠字、单主体约 80%」等约束，避免破坏裁切与标签逻辑。
-_IMAGE_STYLE_SUFFIX_ZHIPU = (
-    " A minimalist 2D flat vector icon, cute style, child-friendly, soft pastel colors, "
-    "solid clean background; prefer a soft warm peach or pale apricot-orange fill as the default mood "
-    "(still flat and simple, not textured), unless a slightly different pastel would keep the subject clearer. "
-    "Bold clean lines, no complex details, no text. "
-    "One clear focal subject only; very large and centered, filling about 80 percent of the square; "
-    "simple recognizable shapes, no photorealism, no tiny facial detail. "
-    "Leave a clean empty label band at the bottom for overlay text; "
-    "do not generate any letters, numbers, watermark, or signature. "
-    "Perfect square composition. --ar 1:1"
-)
-
-
-def _autism_option_icon_prompt(label: str, context: str = "") -> str:
-    """给训练/计划表选项生图的统一 prompt：重点只画选项本身，避免被整句上下文带偏。"""
-    clean_label = _compact_text(label, 40)
-    clean_context = _compact_text(context, 120)
-    if clean_context:
-        return (
-            f"只画一个清晰可识别的「{clean_label}」儿童选择卡片图标。"
-            f"主体必须是：{clean_label}。"
-            f"上下文仅供理解，不要画上下文里的其他物品或人物：{clean_context}。"
-            "单一主体，居中，主体占画面至少80%，正方形构图，背景是治愈色淡淡的橙色。"
-            "底部预留干净标签区域，不要自己写任何文字。"
-        )
-    return (
-        f"只画一个清晰可识别的「{clean_label}」儿童选择卡片图标。"
-        f"主体必须是：{clean_label}。单一主体，居中，主体占画面至少80%，"
-        "正方形构图，背景是治愈色淡淡的橙色。底部预留干净标签区域，不要自己写任何文字。"
-    )
-
-
-def _autism_public_base_url() -> str:
-    """星星拉图的绝对 URL 前缀（设备侧需可访问）。未设置时默认本机端口。"""
-    configured = os.getenv("FLASK_PUBLIC_BASE_URL") or os.getenv("AUTISM_IMAGE_PUBLIC_BASE")
-    if configured:
-        return configured.rstrip("/")
-    if has_request_context():
-        # 不能把 127.0.0.1 下发给 ESP32；优先沿用手机访问 Flask 的 Host/IP。
-        return request.host_url.rstrip("/")
-    return "http://127.0.0.1:11760"
-
-
-def _autism_action_image_url(filename: str) -> str:
-    return f"{_autism_public_base_url()}/autism/action-images/{quote(filename, safe='')}"
-
-
-def _autism_action_audio_url(filename: str) -> str:
-    return f"{_autism_public_base_url()}/autism/action-audio/{quote(filename, safe='')}"
-
-
-def _http_download_bytes(url: str, timeout: int = 90) -> bytes | None:
-    try:
-        import requests as req_lib
-
-        r = req_lib.get(url, timeout=timeout)
-        if r.status_code != 200 or not r.content:
-            app.logger.warning("download image %s -> %s", url[:120], r.status_code)
-            return None
-        return r.content
-    except Exception as e:
-        app.logger.warning("download image error: %s", e)
-        return None
-
-
-def _autism_label_font(size: int):
-    from PIL import ImageFont
-
-    candidates = [
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-        "/usr/share/fonts/truetype/arphic/ukai.ttc",
-        "C:/Windows/Fonts/msyh.ttc",
-        "C:/Windows/Fonts/simhei.ttf",
-        "C:/Windows/Fonts/simsun.ttc",
-    ]
-    for path in candidates:
-        try:
-            if os.path.isfile(path):
-                return ImageFont.truetype(path, size=size)
-        except Exception:
-            continue
-    return ImageFont.load_default()
-
-
-def _png_bytes_240_square(raw: bytes, label: str = "") -> bytes | None:
-    """将智谱返回图裁成 240×240，并在底部用服务端字体叠加中文标签。"""
-    try:
-        from io import BytesIO
-
-        from PIL import Image, ImageDraw
-
-        im = Image.open(BytesIO(raw))
-        im = im.convert("RGBA")
-        w, h = im.size
-        if w <= 0 or h <= 0:
-            return None
-        side = min(w, h)
-        left = (w - side) // 2
-        top = (h - side) // 2
-        im = im.crop((left, top, left + side, top + side))
-        im = im.resize((240, 240), Image.Resampling.LANCZOS)
-
-        clean_label = (label or "").strip()
-        if clean_label:
-            band_h = 34
-            draw = ImageDraw.Draw(im)
-            draw.rectangle((0, 240 - band_h, 240, 240), fill=(255, 238, 216, 255))
-            font_size = 24 if len(clean_label) <= 4 else 20
-            font = _autism_label_font(font_size)
-            bbox = draw.textbbox((0, 0), clean_label, font=font)
-            tw = bbox[2] - bbox[0]
-            th = bbox[3] - bbox[1]
-            x = max(0, (240 - tw) // 2)
-            y = 240 - band_h + max(0, (band_h - th) // 2) - 2
-            draw.text((x, y), clean_label, fill=(0, 0, 0, 255), font=font)
-
-        buf = BytesIO()
-        im.save(buf, format="PNG", optimize=True)
-        return buf.getvalue()
-    except Exception as e:
-        app.logger.warning("autism image 240 resize error: %s", e)
-        return None
-
-
-def _autism_none_of_above_image_url() -> str | None:
-    """确定性生成“都不是”选择卡，避免文生图漏画红叉。"""
-    label = "都不是"
-    short = hashlib.sha256(b"autism-none-of-above-red-cross-v2").hexdigest()[:8]
-    filename = f"{label}_{short}.png"
-    local_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, filename)
-    if os.path.isfile(local_path):
-        return _autism_action_image_url(filename)
-    try:
-        from PIL import Image, ImageDraw
-
-        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
-        im = Image.new("RGBA", (240, 240), (255, 238, 216, 255))
-        draw = ImageDraw.Draw(im)
-        band_h = 34
-
-        draw.ellipse((42, 24, 198, 180), fill=(255, 255, 255, 255), outline=(210, 130, 92, 255), width=6)
-        draw.line((78, 62, 162, 146), fill=(220, 20, 20, 255), width=18)
-        draw.line((162, 62, 78, 146), fill=(220, 20, 20, 255), width=18)
-
-        draw.rectangle((0, 240 - band_h, 240, 240), fill=(255, 238, 216, 255))
-        font = _autism_label_font(24)
-        bbox = draw.textbbox((0, 0), label, font=font)
-        tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        draw.text(((240 - tw) // 2, 240 - band_h + (band_h - th) // 2 - 2), label, fill=(0, 0, 0, 255), font=font)
-
-        im.save(local_path, format="PNG", optimize=True)
-        app.logger.info("autism none-of-above image saved: %s", local_path)
-        return _autism_action_image_url(filename)
-    except Exception as e:
-        app.logger.warning("autism none-of-above image failed: %s", e)
-        return None
-
-
-def _zhipu_raw_image_temp_url(full_prompt: str) -> str | None:
-    """调用智谱 CogView，返回临时 URL（未裁切）。"""
-    key = (os.getenv("GLM_API_KEY") or "").strip()
-    if not key:
-        return None
-    try:
-        import requests as req_lib
-
-        body = {
-            "model": "cogview-3-flash",
-            "prompt": (full_prompt or "")[:1800],
-            "size": "1024x1024",
-        }
-        r = req_lib.post(
-            "https://open.bigmodel.cn/api/paas/v4/images/generations",
-            headers={
-                "Authorization": f"Bearer {key}",
-                "Content-Type": "application/json",
-            },
-            json=body,
-            timeout=120,
-        )
-        if r.status_code != 200:
-            app.logger.warning("zhipu image %s: %s", r.status_code, r.text[:500])
-            return None
-        data = r.json()
-        arr = data.get("data") or []
-        if not arr:
-            return None
-        u = (arr[0] or {}).get("url")
-        return u if isinstance(u, str) and u.startswith("http") else None
-    except Exception as e:
-        app.logger.warning("zhipu image error: %s", e)
-        return None
-
-
-def _cos_put_action_png(object_key: str, png_bytes: bytes) -> str | None:
-    """上传到腾讯云 COS，返回可公网访问的 URL；未配置密钥时返回 None。"""
-    sid = (os.getenv("TENCENT_COS_SECRET_ID") or "").strip()
-    sk = (os.getenv("TENCENT_COS_SECRET_KEY") or "").strip()
-    region = (os.getenv("TENCENT_COS_REGION") or "").strip()
-    bucket = (os.getenv("TENCENT_COS_BUCKET") or "").strip()
-    if not (sid and sk and region and bucket):
-        return None
-    try:
-        from qcloud_cos import CosConfig
-        from qcloud_cos import CosS3Client
-    except ImportError:
-        app.logger.warning("cos-python-sdk-v5 not installed; pip install cos-python-sdk-v5")
-        return None
-    try:
-        cfg = CosConfig(Region=region, SecretId=sid, SecretKey=sk, Scheme="https")
-        client = CosS3Client(cfg)
-        client.put_object(
-            Bucket=bucket,
-            Body=png_bytes,
-            Key=object_key,
-            ContentType="image/png",
-        )
-    except Exception as e:
-        app.logger.warning("COS put_object failed: %s", e)
-        return None
-    base = (os.getenv("TENCENT_COS_PUBLIC_URL_BASE") or "").rstrip("/")
-    if base:
-        return f"{base}/{object_key}"
-    return f"https://{bucket}.cos.{region}.myqcloud.com/{object_key}"
-
-
-def _autism_image_cache_key(prompt_core_zh: str, fallback_label: str = "配图") -> tuple[str, str]:
-    core = " ".join((prompt_core_zh or "").strip().split())
-    if not core:
-        core = " ".join((fallback_label or "配图").split()) or "配图"
-    full_prompt = core + _IMAGE_STYLE_SUFFIX_ZHIPU
-    if len(full_prompt) > 2000:
-        full_prompt = full_prompt[:2000]
-    return hashlib.sha256(full_prompt.encode("utf-8")).hexdigest(), full_prompt
-
-
-def _autism_local_image_url_by_label(label: str) -> str | None:
-    """兜底：DB 记录缺失时，按 server/action 文件名包含中文标签来找已有备份图。"""
-    label = (label or "").strip()
-    if not label:
-        return None
-    try:
-        if not os.path.isdir(_AUTISM_LOCAL_IMAGE_STORE):
-            return None
-        candidates = []
-        for fn in os.listdir(_AUTISM_LOCAL_IMAGE_STORE):
-            if not fn.lower().endswith(".png"):
-                continue
-            if label in fn:
-                path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn)
-                candidates.append((os.path.getmtime(path), fn))
-        if not candidates:
-            return None
-        candidates.sort(reverse=True)
-        return _autism_action_image_url(candidates[0][1])
-    except Exception as e:
-        app.logger.warning("autism image local lookup by label failed: %s", e)
-        return None
-
-
-def _autism_rewrite_local_image_url(url: str | None) -> str | None:
-    if not isinstance(url, str) or not url:
-        return None
-    marker = "/autism/action-images/"
-    pos = url.find(marker)
-    if pos < 0:
-        return url
-    filename = _autism_normalize_action_image_filename(url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0])
-    return _autism_action_image_url(filename)
-
-
-def _autism_synthesize_ogg(text: str, audio_path: str) -> bool:
-    """edge-tts 合成中文 → 转 24k 单声道 OGG/Opus 落盘到 audio_path。成功返回 True。"""
-    text = (text or "").strip()
-    if not text:
-        return False
-    try:
-        import asyncio
-        import subprocess
-        import tempfile
-        import edge_tts
-        from xiaozhi_bridge import _ffmpeg_bin
-
-        ffmpeg_exe = _ffmpeg_bin()
-        if ffmpeg_exe is None:
-            app.logger.warning("autism tts ogg skipped: ffmpeg not found")
-            return False
-        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
-        fd_mp3, mp3 = tempfile.mkstemp(suffix=".mp3")
-        os.close(fd_mp3)
-        try:
-            async def _run() -> None:
-                comm = edge_tts.Communicate(
-                    text, os.getenv("XIAOZHI_TTS_VOICE", "zh-CN-XiaoxiaoNeural")
-                )
-                await comm.save(mp3)
-
-            asyncio.run(_run())
-            subprocess.run(
-                [
-                    ffmpeg_exe, "-y", "-i", mp3,
-                    "-c:a", "libopus", "-b:a", "24k", "-ar", "24000", "-ac", "1",
-                    audio_path,
-                ],
-                check=True,
-                capture_output=True,
-            )
-        finally:
-            try:
-                os.remove(mp3)
-            except OSError:
-                pass
-        return True
-    except Exception as e:
-        app.logger.warning("autism tts ogg failed: %s", e)
-        return False
-
-
-def _autism_tts_ogg_url(text: str) -> str | None:
-    """把任意中文文案（开场白 / 鼓励语）预合成成可外放的本地 OGG，返回公开 URL。
-
-    与图片标签音频走同一目录 / 路由（/autism/action-audio/<fn>），设备直接
-    PlaySound，不经 LLM / 麦克风 / 主动开场匹配，确定能播、内容固定。
-    文件名按文本 md5 缓存，相同文案复用同一文件。"""
-    text = (text or "").strip()
-    if not text:
-        return None
-    audio_fn = "tts_" + hashlib.md5(text.encode("utf-8")).hexdigest()[:16] + ".ogg"
-    audio_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, audio_fn)
-    if os.path.isfile(audio_path):
-        return _autism_action_audio_url(audio_fn)
-    if _autism_synthesize_ogg(text, audio_path):
-        app.logger.info("autism tts ogg saved: %s", audio_path)
-        return _autism_action_audio_url(audio_fn)
-    return None
-
-
-def _autism_label_audio_url(label: str, image_url: str | None) -> str | None:
-    """为图片生成同名 OGG 标签音频，如 害怕_xxxx.png -> 害怕_xxxx.ogg。"""
-    label = (label or "").strip()
-    if not label or not isinstance(image_url, str):
-        return None
-    marker = "/autism/action-images/"
-    pos = image_url.find(marker)
-    if pos < 0:
-        return None
-    image_fn = image_url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0]
-    image_fn = _autism_normalize_action_image_filename(image_fn)
-    if not image_fn.lower().endswith(".png"):
-        return None
-    audio_fn = image_fn[:-4] + ".ogg"
-    if ".." in audio_fn or "/" in audio_fn or "\\" in audio_fn:
-        return None
-    audio_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, audio_fn)
-    if os.path.isfile(audio_path):
-        return _autism_action_audio_url(audio_fn)
-    if _autism_synthesize_ogg(label, audio_path):
-        app.logger.info("autism label audio saved: %s", audio_path)
-        return _autism_action_audio_url(audio_fn)
-    return None
-
-
-def _autism_cached_url_is_usable(url: str | None) -> bool:
-    """缓存命中的 URL 是否真的可拉取。
-
-    仅本地兜底图（/autism/action-images/<fn>）需要校验磁盘文件是否存在——
-    DB 记录在、文件却被迁移/清理掉时，星星机器人会拿到 404。COS/CDN 等远程
-    URL 无法在此廉价校验，按可用处理。
-    """
-    if not isinstance(url, str) or not url:
-        return False
-    marker = "/autism/action-images/"
-    pos = url.find(marker)
-    if pos < 0:
-        return True  # 远程 URL（如腾讯云 COS），无法本地校验，视为可用
-    fn = _autism_normalize_action_image_filename(
-        url[pos + len(marker):].split("?", 1)[0].split("#", 1)[0]
-    )
-    if not fn or ".." in fn or "/" in fn or "\\" in fn:
-        return False
-    return os.path.isfile(os.path.join(_AUTISM_LOCAL_IMAGE_STORE, fn))
-
-
-def _prune_stale_autism_image_cache() -> None:
-    """启动自检：删除所有指向缺失本地文件的图片缓存记录。
-
-    迁服务器时常只搬了 adhd_data.db、没搬 server/action/*.png，导致 DB 命中却
-    404。开机时一次性清掉这些死记录，之后首次用到会重新生成（需配 GLM_API_KEY）。
-    COS/CDN 等远程 URL 无法廉价校验，保留不动。
-    """
-    try:
-        conn = sqlite3.connect("adhd_data.db")
-        cursor = conn.cursor()
-        cursor.execute("SELECT cache_key, public_url FROM autism_image_cache")
-        rows = cursor.fetchall()
-        stale_keys = [
-            ck for ck, url in rows if not _autism_cached_url_is_usable(url)
-        ]
-        if stale_keys:
-            cursor.executemany(
-                "DELETE FROM autism_image_cache WHERE cache_key = ?",
-                [(ck,) for ck in stale_keys],
-            )
-            conn.commit()
-        conn.close()
-        if stale_keys:
-            print(
-                f"⚠️  图片缓存自检：清理 {len(stale_keys)}/{len(rows)} 条指向缺失"
-                f"本地文件的记录（store={_AUTISM_LOCAL_IMAGE_STORE}）"
-            )
-        else:
-            print(f"✅ 图片缓存自检：{len(rows)} 条记录均有效")
-    except sqlite3.OperationalError:
-        # autism_image_cache 表尚未创建（首次启动）等情况，忽略即可。
-        pass
-    except Exception as e:
-        print(f"图片缓存自检失败（忽略，不影响启动）：{e}")
-
-
-_prune_stale_autism_image_cache()
-
-
-def _autism_square_image_url_lookup_cached(prompt_core_zh: str, chinese_label: str = "") -> str | None:
-    """只查询已缓存的 240x240 图片 URL；不会调用智谱生成新图。"""
-    ck, full_prompt = _autism_image_cache_key(prompt_core_zh, chinese_label or "配图")
-    app.logger.info("ZHIPU_IMAGE_PROMPT_CHECK label=%s prompt=%s", chinese_label, full_prompt)
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT public_url FROM autism_image_cache WHERE cache_key = ?",
-        (ck,),
-    )
-    row = cursor.fetchone()
-    if row and row[0]:
-        cached = _autism_rewrite_local_image_url(row[0])
-        if _autism_cached_url_is_usable(cached):
-            conn.close()
-            return cached
-    label = (chinese_label or "").strip()
-    if label:
-        cursor.execute(
-            """
-            SELECT public_url FROM autism_image_cache
-            WHERE label_zh = ?
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            (label,),
-        )
-        row = cursor.fetchone()
-    conn.close()
-    if row and row[0]:
-        cached = _autism_rewrite_local_image_url(row[0])
-        if _autism_cached_url_is_usable(cached):
-            return cached
-    return _autism_local_image_url_by_label(label)
-
-
-def _autism_square_image_url_cached(chinese_label: str, prompt_core_zh: str) -> str | None:
-    """按完整 prompt（含固定英文风格）做缓存；中文 label 用于 COS/本地文件名。
-
-    环境变量（腾讯云）：
-      TENCENT_COS_SECRET_ID / TENCENT_COS_SECRET_KEY / TENCENT_COS_REGION / TENCENT_COS_BUCKET
-      TENCENT_COS_ACTION_PREFIX  默认 action  （对象键前缀，即 action/xxx.png）
-      TENCENT_COS_PUBLIC_URL_BASE  可选，CDN 或自定义域名，须不含末尾 /
-    公网访问 Flask 本地兜底图：
-      FLASK_PUBLIC_BASE_URL 或 AUTISM_IMAGE_PUBLIC_BASE（含端口），默认 http://127.0.0.1:11760
-    """
-    label = (chinese_label or "").strip() or "配图"
-    ck, full_prompt = _autism_image_cache_key(prompt_core_zh, label)
-    app.logger.info("ZHIPU_IMAGE_PROMPT label=%s prompt=%s", label, full_prompt)
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT public_url FROM autism_image_cache WHERE cache_key = ?",
-        (ck,),
-    )
-    row = cursor.fetchone()
-    if row and row[0]:
-        cached = _autism_rewrite_local_image_url(row[0])
-        if _autism_cached_url_is_usable(cached):
-            conn.close()
-            return cached
-        # DB 有记录但本地文件已丢失：删掉死记录，落到下面重新生成。
-        app.logger.warning(
-            "autism image cache stale (file missing), regenerating: %s", cached
-        )
-        try:
-            cursor.execute(
-                "DELETE FROM autism_image_cache WHERE cache_key = ?", (ck,)
-            )
-            conn.commit()
-        except Exception as e:
-            app.logger.warning("autism image cache cleanup failed: %s", e)
-    conn.close()
-
-    tmp_url = _zhipu_raw_image_temp_url(full_prompt)
-    if not tmp_url:
-        return None
-    raw = _http_download_bytes(tmp_url)
-    if not raw:
-        return None
-    png = _png_bytes_240_square(raw, label)
-    if not png:
-        return None
-
-    short = ck[:8]
-    # ESP32 HTTP client may send non-ASCII path bytes without percent-encoding.
-    # Keep generated local filenames ASCII-only so image URLs are robust.
-    stem = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff._-]+", "_", label).strip("._")[:60] or "img"
-    filename = f"{stem}_{short}.png"
-    prefix = (os.getenv("TENCENT_COS_ACTION_PREFIX") or "action").strip("/").strip() or "action"
-    cos_object_key = f"{prefix}/{filename}"
-
-    # 无论是否配置腾讯云 COS，都先在 server/action 落一份本地备份，满足"先备份、可复用"。
-    try:
-        os.makedirs(_AUTISM_LOCAL_IMAGE_STORE, exist_ok=True)
-        local_path = os.path.join(_AUTISM_LOCAL_IMAGE_STORE, filename)
-        with open(local_path, "wb") as f:
-            f.write(png)
-        app.logger.info("autism image backup saved: %s", local_path)
-    except Exception as e:
-        app.logger.warning("autism image local backup failed: %s", e)
-
-    public_url = _cos_put_action_png(cos_object_key, png)
-    stored_cos_key = cos_object_key
-    if not public_url:
-        public_url = _autism_action_image_url(filename)
-        stored_cos_key = f"local:{filename}"
-        app.logger.info("autism image served locally (configure COS for Tencent Cloud): %s", filename)
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """
-            INSERT INTO autism_image_cache (cache_key, label_zh, cos_key, public_url, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (ck, label, stored_cos_key, public_url, now),
-        )
-        conn.commit()
-    except sqlite3.IntegrityError:
-        conn.rollback()
-        cursor.execute(
-            "SELECT public_url FROM autism_image_cache WHERE cache_key = ?",
-            (ck,),
-        )
-        row2 = cursor.fetchone()
-        if row2 and row2[0]:
-            public_url = _autism_rewrite_local_image_url(row2[0])
-    finally:
-        conn.close()
-    return public_url
-
-
-@app.route("/diag/glm-image", methods=["GET"])
-def diag_glm_image():
-    """快速自检智谱生图全链路：Key 是否生效、智谱是否返图、240×240 裁切、落盘/COS。
-
-    用法（浏览器或 curl 即可）：
-      GET /diag/glm-image                 用默认提示词「起床」
-      GET /diag/glm-image?prompt=洗手&label=洗手
-    返回 JSON，逐步标注每一环节成功与否，方便定位失败点。
-    """
-    label = (request.args.get("label") or request.args.get("prompt") or "起床").strip()
-    core = (request.args.get("prompt") or label).strip()
-
-    key = (os.getenv("GLM_API_KEY") or "").strip()
-    steps: dict = {
-        "glm_api_key_present": bool(key),
-        "glm_api_key_len": len(key),
-        "glm_endpoint": "https://open.bigmodel.cn/api/paas/v4/images/generations",
-        "model": "cogview-3-flash",
-        "cos_configured": all(
-            (os.getenv(k) or "").strip()
-            for k in (
-                "TENCENT_COS_SECRET_ID",
-                "TENCENT_COS_SECRET_KEY",
-                "TENCENT_COS_REGION",
-                "TENCENT_COS_BUCKET",
-            )
-        ),
-        "local_store_dir": _AUTISM_LOCAL_IMAGE_STORE,
-    }
-    if not key:
-        steps["error"] = "GLM_API_KEY 未设置（运行 Flask 的这个进程读不到）。请在启动 app 的同一个 shell 里 set/export GLM_API_KEY 后重启。"
-        return jsonify({"ok": False, **steps}), 200
-
-    full_prompt = " ".join(core.split()) + _IMAGE_STYLE_SUFFIX_ZHIPU
-    steps["full_prompt"] = full_prompt
-
-    tmp_url = _zhipu_raw_image_temp_url(full_prompt)
-    steps["zhipu_returned_url"] = bool(tmp_url)
-    if tmp_url:
-        steps["zhipu_temp_url_head"] = tmp_url[:120]
-    if not tmp_url:
-        steps["error"] = "智谱未返回图片 URL：多半是 Key 无效/欠费/被限流，或网络到 open.bigmodel.cn 不通。看 Flask 控制台里 'zhipu image ...' 的报错行。"
-        return jsonify({"ok": False, **steps}), 200
-
-    raw = _http_download_bytes(tmp_url)
-    steps["downloaded_bytes"] = len(raw) if raw else 0
-    if not raw:
-        steps["error"] = "拿到智谱临时 URL 但下载图片失败（临时 URL 可能过期或网络不通）。"
-        return jsonify({"ok": False, **steps}), 200
-
-    png = _png_bytes_240_square(raw, label)
-    steps["png_240_bytes"] = len(png) if png else 0
-    if not png:
-        steps["error"] = "240×240 裁切失败：检查 Pillow 是否已安装（pip install Pillow）。"
-        return jsonify({"ok": False, **steps}), 200
-
-    public_url = _autism_square_image_url_cached(label, core)
-    steps["public_url"] = public_url
-    steps["cached_and_backed_up"] = bool(public_url)
-    return jsonify({"ok": bool(public_url), **steps}), 200
-
-
-def _strip_pending_autism_daily_plan_from_device_queues(device_ids: list[str]) -> None:
-    """从星星命令队列中移除尚未下发的旧「日常计划表」会话，避免多次下发时堆积或乱序。
-
-    须在持有 `_esp32_cmd_lock` 时调用。"""
-    for did in device_ids:
-        q = _esp32_cmd_queue.get(did)
-        if not q:
-            continue
-        kept: deque = deque()
-        while q:
-            cmd = q.popleft()
-            if cmd.get("action") != "autism_session":
-                kept.append(cmd)
-                continue
-            raw = cmd.get("session_json")
-            if not isinstance(raw, str):
-                kept.append(cmd)
-                continue
-            try:
-                sj = json.loads(raw[:32000])
-            except Exception:
-                sj = {}
-            if isinstance(sj, dict) and sj.get("kind") == "daily_plan":
-                continue
-            kept.append(cmd)
-        _esp32_cmd_queue[did] = kept
-
-
-def _strip_pending_autism_training_start_from_device_queues(device_ids: list[str]) -> None:
-    """移除尚未下发的旧「日常训练开始」会话，避免家长多次下发在队列与单包批量里堆积。
-
-    须在持有 `_esp32_cmd_lock` 时调用。"""
-    for did in device_ids:
-        q = _esp32_cmd_queue.get(did)
-        if not q:
-            continue
-        kept: deque = deque()
-        while q:
-            cmd = q.popleft()
-            if cmd.get("action") != "autism_session":
-                kept.append(cmd)
-                continue
-            raw = cmd.get("session_json")
-            if not isinstance(raw, str):
-                kept.append(cmd)
-                continue
-            try:
-                sj = json.loads(raw[:32000])
-            except Exception:
-                sj = {}
-            if isinstance(sj, dict) and sj.get("kind") == "training_start":
-                continue
-            kept.append(cmd)
-        _esp32_cmd_queue[did] = kept
-
-
-def _autism_inject_scripted_audio(session: dict) -> None:
-    """为脚本化语音（开场白 / 鼓励语 / 打分总结）预生成确定性本地 OGG，写进下发 JSON。
-
-    设备拿到 intro_audio / praise_audio 后用 PlaySound 直接外放，不再走
-    listen/detect + opening-hint 匹配的聊天链路——那条链路依赖时序与精确字符串
-    匹配，麦克风一旦提前 VAD 触发就会变成 LLM 回应，孩子听不到该说的那句话。"""
-    sk = session.get("kind")
-    if sk == "training_start":
-        intro = str(session.get("tts_intro") or "").strip() or "我们一起来做一个练习吧"
-        url = _autism_tts_ogg_url(intro)
-        if url:
-            session["intro_audio"] = url
-        options = session.get("options") if isinstance(session.get("options"), list) else []
-        praise: dict[str, str] = {}
-        for i, opt in enumerate(options[:4]):
-            opt = str(opt or "").strip()
-            if not opt:
-                continue
-            purl = _autism_tts_ogg_url(f"真棒！你选了{opt}，做得很好！")
-            if purl:
-                praise[f"o{i}"] = purl
-        if praise:
-            session["praise_audio"] = praise
-    elif sk == "training_score":
-        score = str(session.get("tts_intro") or "").strip()
-        url = _autism_tts_ogg_url(score) if score else None
-        if url:
-            session["intro_audio"] = url
-    elif sk == "daily_plan":
-        slots = session.get("slots") if isinstance(session.get("slots"), list) else []
-        intro_audio: dict[str, str] = {}
-        for i, slot in enumerate(slots):
-            if not isinstance(slot, dict):
-                continue
-            tts = str(slot.get("tts") or "").strip()
-            if not tts:
-                continue
-            url = _autism_tts_ogg_url(tts)
-            if url:
-                intro_audio[f"s{i}"] = url
-        if intro_audio:
-            session["intro_audio"] = intro_audio
-
-
-def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:
-    """把孤独症训练/日程 JSON 推入星星机器人长轮询命令队列。"""
-    sk = session.get("kind")
-    t0 = time.perf_counter()
-    _autism_inject_scripted_audio(session)
-    inject_ms = (time.perf_counter() - t0) * 1000.0
-    app.logger.info(
-        "autism_session inject_scripted_audio kind=%s took_ms=%.0f (edge-tts/ffmpeg 慢时家长会感觉「下发卡住」)",
-        sk,
-        inject_ms,
-    )
-    body = json.dumps(session, ensure_ascii=False)
-    if len(body) > 32000:
-        body = body[:32000]
-    ids = _xingxing_device_ids_for_child(child_id)
-    cmd_obj = {"action": "autism_session", "session_json": body}
-    with _esp32_cmd_lock:
-        if sk == "daily_plan":
-            _strip_pending_autism_daily_plan_from_device_queues(ids)
-        elif sk == "training_start":
-            _strip_pending_autism_training_start_from_device_queues(ids)
-        for did in ids:
-            q = _esp32_cmd_queue.setdefault(did, deque())
-            q.append(dict(cmd_obj))
-        _esp32_cmd_lock.notify_all()
-    return ids
 
 
 def _enqueue_xiaozhi_for_child(child_id: int, observation: str, advice: str, condition_type: str = "") -> None:
@@ -5955,7 +3561,6 @@ _ESP32_ALLOWED_ACTIONS = {
     "xiaozhi_abort",
     "sdcard_audio_start",
     "sdcard_audio_stop",
-    "autism_session",
 }
 
 
@@ -6006,287 +3611,7 @@ def _validate_cmd_payload(action: str, payload: dict) -> tuple[bool, str]:
         payload["folder"] = folder
     if action == "sdcard_audio_stop":
         pass
-    if action == "autism_session":
-        sj = payload.get("session_json")
-        if not isinstance(sj, str) or not sj.strip():
-            return False, "session_json must be a non-empty string"
-        if len(sj) > 64000:
-            return False, "session_json too long (max 64000)"
-        payload["session_json"] = sj.strip()
     return True, ""
-
-
-def _device_bind_admin_secret() -> str:
-    return (
-        (os.getenv("DEVICE_BIND_ADMIN_TOKEN") or "").strip()
-        or (os.getenv("ESP32_BIND_ADMIN_TOKEN") or "").strip()
-        or (os.getenv("WEEKLY_REPORT_SECRET") or "").strip()
-    )
-
-
-def _device_bind_admin_authorized() -> bool:
-    secret = _device_bind_admin_secret()
-    if not secret:
-        return False
-    supplied = (
-        (request.args.get("token") or "").strip()
-        or (request.form.get("token") or "").strip()
-        or (request.headers.get("X-Device-Bind-Admin-Token") or "").strip()
-    )
-    return hmac.compare_digest(supplied, secret)
-
-
-def _device_kind_label(kind: str | None) -> str:
-    role = _esp32_device_role(kind)
-    if role == "plush":
-        return "毛绒球"
-    if role == "adhd_star":
-        return "多动症星星机器人"
-    if role == "autism_star":
-        return "孤独症星星机器人"
-    return "未标记设备"
-
-
-def _device_bind_admin_redirect(message: str):
-    token = (request.form.get("token") or request.args.get("token") or "").strip()
-    msg = quote(message, safe="")
-    if token:
-        return redirect(f"/admin/device-bindings?token={quote(token, safe='')}&msg={msg}")
-    return redirect(f"/admin/device-bindings?msg={msg}")
-
-
-@app.route("/admin/device-bindings", methods=["GET", "POST"])
-def admin_device_bindings():
-    """管理三类 ESP32 设备与孩子的绑定关系。"""
-    if not _device_bind_admin_secret():
-        return Response(
-            "DEVICE_BIND_ADMIN_TOKEN is not configured. "
-            "Set it in the server environment before using this admin page.",
-            status=503,
-            mimetype="text/plain; charset=utf-8",
-        )
-    if not _device_bind_admin_authorized():
-        return Response(
-            "Unauthorized. Open /admin/device-bindings?token=<DEVICE_BIND_ADMIN_TOKEN>.",
-            status=401,
-            mimetype="text/plain; charset=utf-8",
-        )
-
-    conn = sqlite3.connect("adhd_data.db")
-    cursor = conn.cursor()
-
-    if request.method == "POST":
-        action = (request.form.get("action") or "").strip()
-        device_id = _normalize_device_id(request.form.get("device_id") or "")
-        if not _ESP32_DEVICE_ID_RE.match(device_id):
-            conn.close()
-            return _device_bind_admin_redirect("设备 ID 无效")
-        now = _now_str()
-        if action == "unbind":
-            cursor.execute(
-                """
-                UPDATE esp32_devices
-                SET child_id = NULL, bound_by_user_id = NULL, last_seen_at = ?
-                WHERE device_id = ?
-                """,
-                (now, device_id),
-            )
-            conn.commit()
-            conn.close()
-            return _device_bind_admin_redirect(f"已解绑 {device_id}")
-        if action in ("bind", "create_bind"):
-            try:
-                child_id = int(request.form.get("child_id") or 0)
-            except (TypeError, ValueError):
-                conn.close()
-                return _device_bind_admin_redirect("孩子 ID 无效")
-            cursor.execute("SELECT id FROM children WHERE id = ?", (child_id,))
-            if cursor.fetchone() is None:
-                conn.close()
-                return _device_bind_admin_redirect("孩子不存在")
-            kind = (request.form.get("kind") or "").strip() or None
-            cursor.execute(
-                "SELECT user_id FROM child_members WHERE child_id = ? ORDER BY id ASC LIMIT 1",
-                (child_id,),
-            )
-            member = cursor.fetchone()
-            bound_by_user_id = member[0] if member else None
-            cursor.execute("SELECT id FROM esp32_devices WHERE device_id = ?", (device_id,))
-            row = cursor.fetchone()
-            if row is None:
-                cursor.execute(
-                    """
-                    INSERT INTO esp32_devices
-                        (device_id, kind, child_id, bound_by_user_id, first_seen_at, last_seen_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                    (device_id, kind, child_id, bound_by_user_id, now, now),
-                )
-            else:
-                cursor.execute(
-                    """
-                    UPDATE esp32_devices
-                    SET kind = COALESCE(?, kind),
-                        child_id = ?,
-                        bound_by_user_id = ?,
-                        last_seen_at = ?
-                    WHERE device_id = ?
-                    """,
-                    (kind, child_id, bound_by_user_id, now, device_id),
-                )
-            conn.commit()
-            conn.close()
-            return _device_bind_admin_redirect(f"已绑定 {device_id} 到孩子 {child_id}")
-        conn.close()
-        return _device_bind_admin_redirect("未知操作")
-
-    cursor.execute(
-        """
-        SELECT c.id, c.nickname,
-               GROUP_CONCAT(COALESCE(u.display_name, u.username), ', ')
-        FROM children c
-        LEFT JOIN child_members m ON m.child_id = c.id
-        LEFT JOIN users u ON u.id = m.user_id
-        GROUP BY c.id, c.nickname
-        ORDER BY c.id ASC
-        """
-    )
-    children = cursor.fetchall()
-    cursor.execute(
-        """
-        SELECT e.device_id, e.kind, e.child_id, c.nickname,
-               e.bound_by_user_id, COALESCE(u.display_name, u.username),
-               e.first_seen_at, e.last_seen_at
-        FROM esp32_devices e
-        LEFT JOIN children c ON c.id = e.child_id
-        LEFT JOIN users u ON u.id = e.bound_by_user_id
-        ORDER BY e.last_seen_at DESC
-        """
-    )
-    devices = cursor.fetchall()
-    conn.close()
-
-    token = html.escape((request.args.get("token") or "").strip(), quote=True)
-    msg = html.escape((request.args.get("msg") or "").strip())
-
-    def child_options(selected=None) -> str:
-        out = []
-        for cid, nick, members in children:
-            label = f"{cid} - {nick or '未命名孩子'}"
-            if members:
-                label += f"（{members}）"
-            sel = " selected" if selected is not None and int(selected) == int(cid) else ""
-            out.append(f'<option value="{cid}"{sel}>{html.escape(label)}</option>')
-        return "".join(out)
-
-    kind_options = [
-        ("esp32-s3-lcd-1.47B", "毛绒球（ESP32-S3-LCD-1.47B 目录）"),
-        ("xiaozhi-esp32-2.2.4", "多动症星星机器人（xiaozhi-esp32-2.2.4 目录）"),
-        ("xingxing", "孤独症星星机器人（xingxing 目录）"),
-        ("", "保持原 kind / 未标记"),
-    ]
-
-    def kind_select(current: str | None) -> str:
-        cur = (current or "").strip()
-        role = _esp32_device_role(cur)
-        if role == "plush":
-            selected_value = "esp32-s3-lcd-1.47B"
-        elif role == "adhd_star":
-            selected_value = "xiaozhi-esp32-2.2.4"
-        elif role == "autism_star":
-            selected_value = "xingxing"
-        else:
-            selected_value = cur
-        opts = []
-        for val, label in kind_options:
-            sel = " selected" if val == selected_value else ""
-            opts.append(
-                f'<option value="{html.escape(val, quote=True)}"{sel}>{html.escape(label)}</option>'
-            )
-        return "".join(opts)
-
-    rows = []
-    for device_id, kind, child_id, child_nick, bound_uid, bound_user, first_seen, last_seen in devices:
-        did = html.escape(device_id or "", quote=True)
-        kind_raw = html.escape(kind or "")
-        kind_label = html.escape(_device_kind_label(kind))
-        child_text = "未绑定" if child_id is None else f"{child_id} - {child_nick or '未命名孩子'}"
-        child_text = html.escape(child_text)
-        bound_user_text = html.escape(bound_user or "")
-        rows.append(
-            f"""
-            <tr>
-              <td><code>{did}</code></td>
-              <td>{kind_label}<br><small>{kind_raw}</small></td>
-              <td>{child_text}<br><small>{bound_user_text}</small></td>
-              <td><small>first: {html.escape(first_seen or '')}<br>last: {html.escape(last_seen or '')}</small></td>
-              <td>
-                <form method="post" class="inline">
-                  <input type="hidden" name="token" value="{token}">
-                  <input type="hidden" name="action" value="bind">
-                  <input type="hidden" name="device_id" value="{did}">
-                  <select name="child_id">{child_options(child_id)}</select>
-                  <select name="kind">{kind_select(kind)}</select>
-                  <button type="submit">绑定/改绑</button>
-                </form>
-                <form method="post" class="inline">
-                  <input type="hidden" name="token" value="{token}">
-                  <input type="hidden" name="action" value="unbind">
-                  <input type="hidden" name="device_id" value="{did}">
-                  <button type="submit" class="danger">解绑</button>
-                </form>
-              </td>
-            </tr>
-            """
-        )
-
-    body = f"""<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>设备绑定管理</title>
-  <style>
-    body {{ font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; background:#f7f7f8; color:#1f2937; }}
-    h1 {{ margin-bottom: 8px; }}
-    .card {{ background:white; border:1px solid #e5e7eb; border-radius:12px; padding:16px; margin:16px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }}
-    table {{ width:100%; border-collapse:collapse; background:white; }}
-    th, td {{ border-bottom:1px solid #e5e7eb; padding:10px; text-align:left; vertical-align:top; }}
-    th {{ background:#f3f4f6; }}
-    select, input {{ padding:6px; margin:3px 4px 3px 0; }}
-    button {{ padding:6px 10px; border:0; border-radius:7px; background:#2563eb; color:white; cursor:pointer; }}
-    button.danger {{ background:#dc2626; }}
-    form.inline {{ display:inline-block; margin:2px 6px 2px 0; }}
-    .msg {{ background:#ecfdf5; border:1px solid #a7f3d0; padding:10px; border-radius:8px; }}
-    small {{ color:#6b7280; }}
-    code {{ font-weight:700; }}
-  </style>
-</head>
-<body>
-  <h1>设备绑定管理</h1>
-  <p>管理三类 ESP32 设备与孩子之间的绑定关系：毛绒球、多动症星星机器人、孤独症星星机器人。</p>
-  {f'<div class="msg">{msg}</div>' if msg else ''}
-  <div class="card">
-    <h2>手动添加/绑定设备</h2>
-    <form method="post">
-      <input type="hidden" name="token" value="{token}">
-      <input type="hidden" name="action" value="create_bind">
-      <input name="device_id" placeholder="例如 8FDAD94C" required>
-      <select name="child_id">{child_options()}</select>
-      <select name="kind">{kind_select('esp32-s3-lcd-1.47B')}</select>
-      <button type="submit">创建并绑定</button>
-    </form>
-  </div>
-  <div class="card">
-    <h2>当前设备</h2>
-    <table>
-      <thead><tr><th>Device ID</th><th>类型</th><th>绑定孩子</th><th>在线时间</th><th>操作</th></tr></thead>
-      <tbody>{''.join(rows) or '<tr><td colspan="5">暂无设备</td></tr>'}</tbody>
-    </table>
-  </div>
-</body>
-</html>"""
-    return Response(body, mimetype="text/html; charset=utf-8")
 
 
 @app.route("/device/<device_id>/cmd", methods=["GET", "POST"])
@@ -6375,38 +3700,6 @@ def esp32_cmd(device_id: str):
                 # 204 No Content：ESP32 立刻发下一轮
                 return Response(status=204)
             _esp32_cmd_lock.wait(timeout=remaining)
-
-
-@app.route("/device/<device_id>/xiaozhi/opening-hint", methods=["POST"])
-def esp32_xiaozhi_opening_hint(device_id: str):
-    """设备本地定时事件触发前，预置 xiaozhi 主动开场 hint。
-
-    计划表到点由 ESP32 本地调度触发，服务器没有机会提前 stash opening。
-    设备先 POST 这条 hint，再发送 listen/detect 文本，xiaozhi_bridge 就会只播
-    opening，不会把这句主动问题当成孩子输入交给 Kimi。
-    """
-    device_id = _normalize_device_id(device_id)
-    if not _ESP32_DEVICE_ID_RE.match(device_id):
-        return jsonify({"status": "error", "message": "invalid device_id"}), 400
-    data = request.json or {}
-    opening = str(data.get("opening_line") or "").strip()
-    if not opening:
-        return jsonify({"status": "error", "message": "opening_line required"}), 400
-    opening = (
-        opening.replace("\\", "").replace('"', "").replace("\r", " ").replace("\n", " ")
-    )[:500]
-    while "  " in opening:
-        opening = opening.replace("  ", " ")
-    context = str(data.get("context") or "").strip()[:8000]
-    try:
-        from xiaozhi_bridge import stash_xinvoke_hint
-
-        stash_xinvoke_hint(device_id, opening, context)
-    except Exception as e:
-        app.logger.warning("xiaozhi opening-hint stash failed: %s", e)
-        return jsonify({"status": "error", "message": "stash failed"}), 500
-    app.logger.info("xiaozhi opening-hint stashed device=%s len=%d", device_id, len(opening))
-    return jsonify({"status": "ok"}), 200
 
 
 if __name__ == '__main__':

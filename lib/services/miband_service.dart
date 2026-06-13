@@ -144,6 +144,11 @@ class MiBand6Auth {
   /// 本地阈值（仅做 UI 颜色提示，不替代云端判定）。
   final int localAlertBpm;
 
+  /// 是否允许BLE服务在心率notify时自动触发一次短震（写 2A06=1），提醒用户「手环侧心率过高」。
+  /// 默认关闭：家长版与教师版的学生手环都只负责把心率发给APP
+  /// 需要提醒教师手环时，教师端业务层显示调用 [vibrateBandForTest] 即可（写 2A06=1 + 2A46=「学生名字 + 心率过高」）。
+  final bool enableAutoBandAlert = false;
+
   /// 批量上报间隔。
   final Duration uploadInterval;
 
@@ -392,13 +397,12 @@ class MiBand6Auth {
       } catch (e) {
         debugPrint('MiBand6Auth: primary private handshake failed -> $e');
         try {
-          if (_hasLegacyAuthChar(services) && _hasHuami2021ChunkedPair(services)) {
-            _setStage(
-                MiBandStage.authenticating, message: '旧式校验未通过，正在尝试新协议…');
+          if (_hasLegacyAuthChar(services) &&
+              _hasHuami2021ChunkedPair(services)) {
+            _setStage(MiBandStage.authenticating, message: '旧式校验未通过，正在尝试新协议…');
             await _runHuami2021Handshake(services, hex);
           } else {
-            _setStage(
-                MiBandStage.authenticating, message: '新协议握手失败，正在尝试旧式校验…');
+            _setStage(MiBandStage.authenticating, message: '新协议握手失败，正在尝试旧式校验…');
             await _runMiBand6Handshake(services, hex);
           }
           _authenticated = true;
@@ -484,8 +488,7 @@ class MiBand6Auth {
       if (status.value.stage == MiBandStage.hrSubscribed) {
         _setStage(
           MiBandStage.awaitingBroadcast,
-          message:
-              '已连接但 15 秒内未收到心率。手环侧可能未开启「运动心率广播」。',
+          message: '已连接但 15 秒内未收到心率。手环侧可能未开启「运动心率广播」。',
         );
       }
     });
@@ -557,7 +560,8 @@ class MiBand6Auth {
   void _scheduleReconnect() {
     if (_userInitiatedDisconnect) return;
     if (_autoReconnectPaused) {
-      debugPrint('MiBand6Auth: reconnect skipped (paused for ESP provisioning).');
+      debugPrint(
+          'MiBand6Auth: reconnect skipped (paused for ESP provisioning).');
       return;
     }
     if (_device == null) return;
@@ -808,8 +812,8 @@ class MiBand6Auth {
     debugPrint('MiBand6Auth: send step1 (register key).');
     await authChar.write(step1, withoutResponse: _authWriteWithoutResponse);
 
-    final ok = await completer.future
-        .timeout(authTimeout, onTimeout: () => false);
+    final ok =
+        await completer.future.timeout(authTimeout, onTimeout: () => false);
 
     await _authSub?.cancel();
     _authSub = null;
@@ -964,15 +968,15 @@ class MiBand6Auth {
     final alertText = _resolveBandNewAlertText(newAlertMessage);
     final ch = await _ensureChunkedV3WriteChar();
     if (ch == null) {
-      debugPrint(
-          'MiBand6Auth: chunked-v3 write char (0x0016) not found, '
+      debugPrint('MiBand6Auth: chunked-v3 write char (0x0016) not found, '
           'using NEW_ALERT/Immediate Alert only.');
     }
 
     bool anyOk = false;
     try {
       for (var i = 0; i < times; i++) {
-        final startOk = await _writeFindDevice(ch, true, incomingCallText: alertText);
+        final startOk =
+            await _writeFindDevice(ch, true, incomingCallText: alertText);
         if (startOk) anyOk = true;
         await Future<void>.delayed(on);
         await _writeFindDevice(ch, false);
@@ -999,9 +1003,11 @@ class MiBand6Auth {
     final alertText = _resolveBandNewAlertText(newAlertMessage);
     final ch = await _ensureChunkedV3WriteChar();
     if (ch == null) {
-      debugPrint('MiBand6Auth: chunked-v3 write char not found; using NEW_ALERT only.');
+      debugPrint(
+          'MiBand6Auth: chunked-v3 write char not found; using NEW_ALERT only.');
     }
-    final startOk = await _writeFindDevice(ch, true, incomingCallText: alertText);
+    final startOk =
+        await _writeFindDevice(ch, true, incomingCallText: alertText);
     if (!startOk) return false;
     await Future<void>.delayed(duration);
     await _writeFindDevice(ch, false);
@@ -1013,8 +1019,7 @@ class MiBand6Auth {
   Future<bool> _pulseImmediateAlertLevel(bool start) async {
     final ch = _alertChar ?? await _ensureAlertCharacteristic();
     if (ch == null) return false;
-    final noResp =
-        ch.properties.writeWithoutResponse && !ch.properties.write;
+    final noResp = ch.properties.writeWithoutResponse && !ch.properties.write;
     try {
       if (start) {
         try {
@@ -1038,8 +1043,7 @@ class MiBand6Auth {
   Future<bool> _pulseIncomingCallNotification(String name) async {
     final ch = _newAlertChar ?? await _ensureNewAlertCharacteristic();
     if (ch == null) return false;
-    final noResp =
-        ch.properties.writeWithoutResponse && !ch.properties.write;
+    final noResp = ch.properties.writeWithoutResponse && !ch.properties.write;
     final body = <int>[
       0x03, // AlertCategory.IncomingCall
       0x01, // numAlerts
@@ -1109,9 +1113,8 @@ class MiBand6Auth {
     //   3) FEE0/0x0016 chunked-v3 端点 0x000d（ZeppOS 兜底）
     bool anyOk = false;
     if (start) {
-      final label = _clampBandAlertUtf8(incomingCallText.trim().isEmpty
-          ? '提醒'
-          : incomingCallText.trim());
+      final label = _clampBandAlertUtf8(
+          incomingCallText.trim().isEmpty ? '提醒' : incomingCallText.trim());
       anyOk = await _pulseIncomingCallNotification(label) || anyOk;
     } else {
       // 收尾以 ALERT_LEVEL_NONE 停掉来电震动。
@@ -1133,7 +1136,8 @@ class MiBand6Auth {
             endpoint: 0x000d,
             payload: payload,
           );
-          await ch.write(pkt, withoutResponse: ch.properties.writeWithoutResponse);
+          await ch.write(pkt,
+              withoutResponse: ch.properties.writeWithoutResponse);
         }
         anyOk = true;
       } catch (e) {
@@ -1195,8 +1199,7 @@ class MiBand6Auth {
         if (id.startsWith('00000016-') &&
             (c.properties.write || c.properties.writeWithoutResponse)) {
           candidate = c;
-          debugPrint(
-              'MiBand6Auth: chunked-v3 write char located: '
+          debugPrint('MiBand6Auth: chunked-v3 write char located: '
               '${c.uuid.str} under service ${s.uuid.str}');
           break;
         }
@@ -1223,8 +1226,7 @@ class MiBand6Auth {
         if (id.startsWith('00000017-') &&
             (c.properties.notify || c.properties.indicate)) {
           candidate = c;
-          debugPrint(
-              'MiBand6Auth: chunked-v3 read char located: '
+          debugPrint('MiBand6Auth: chunked-v3 read char located: '
               '${c.uuid.str} under service ${s.uuid.str}');
           break;
         }
@@ -1250,7 +1252,8 @@ class MiBand6Auth {
         try {
           await ch.write(<int>[0x04], withoutResponse: noResp);
         } catch (e) {
-          debugPrint('MiBand6Auth: legacy alert 0x04 failed, trying 0x02 -> $e');
+          debugPrint(
+              'MiBand6Auth: legacy alert 0x04 failed, trying 0x02 -> $e');
           await ch.write(<int>[0x02], withoutResponse: noResp);
         }
         await Future<void>.delayed(on);
@@ -1307,7 +1310,8 @@ class MiBand6Auth {
           final id = c.uuid.str.toLowerCase();
           // 128-bit FEE1 characteristic e.g. 00000012-0000-3512-2118-0009af100700
           if (id.length >= 36 && id[8] == '-') {
-            detectedFee1Base = id.substring(8); // "-0000-3512-2118-0009af100700"
+            detectedFee1Base =
+                id.substring(8); // "-0000-3512-2118-0009af100700"
             break;
           }
         }
@@ -1320,8 +1324,13 @@ class MiBand6Auth {
 
     // Known Huami stress / wellness characteristic short IDs under FEE1
     const knownStressShorts = [
-      '0000000d', '0000000e', '0000000f',
-      '00000011', '00000012', '00000013', '00000020',
+      '0000000d',
+      '0000000e',
+      '0000000f',
+      '00000011',
+      '00000012',
+      '00000013',
+      '00000020',
     ];
     for (final s in knownStressShorts) {
       candidates.add('$s$fee1Base');
@@ -1402,15 +1411,14 @@ class MiBand6Auth {
   /// [skipUntil] is used after a stale-char reset to continue probing from
   /// the characteristic *after* the one that previously produced false matches.
   Future<BluetoothCharacteristic?> _autoDiscoverStressChar(
-      List<BluetoothService> services,
-      String? skipUntil) async {
+      List<BluetoothService> services, String? skipUntil) async {
     // Service-level UUIDs we should never probe.
     const skipServices = <String>{
       '1800', '1801', '180a', '180f', // generic access, device info, battery
-      '1802',  // Immediate Alert
-      '180d',  // Heart Rate — already handled
-      '1811',  // Alert Notification Service — 2a46 is New Alert, not stress
-      '1812',  // Human Interface Device
+      '1802', // Immediate Alert
+      '180d', // Heart Rate — already handled
+      '1811', // Alert Notification Service — 2a46 is New Alert, not stress
+      '1812', // Human Interface Device
     };
     // Characteristic-level UUIDs we should never probe for stress data.
     const skipChars = <String>{
@@ -1434,12 +1442,18 @@ class MiBand6Auth {
       // (00000009-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
       if (id.length >= 8 && id.substring(0, 8) == '00000009') return true;
       // Skip FEDx vendor-specific housekeeping chars
-      if (id == 'fedd' || id == 'fede' || id == 'fedf' ||
-          id == 'fed0' || id == 'fed1' || id == 'fed2' || id == 'fed3') {
+      if (id == 'fedd' ||
+          id == 'fede' ||
+          id == 'fedf' ||
+          id == 'fed0' ||
+          id == 'fed1' ||
+          id == 'fed2' ||
+          id == 'fed3') {
         return true;
       }
       // Skip the 0xfec1 proprietary characteristic
-      if (id.length >= 42 && id.substring(0, 36) == '0000fec1-0000-3512-2118-0009af100700') {
+      if (id.length >= 42 &&
+          id.substring(0, 36) == '0000fec1-0000-3512-2118-0009af100700') {
         return true;
       }
       return false;
@@ -1461,8 +1475,7 @@ class MiBand6Auth {
 
         try {
           final raw = await c.read();
-          debugPrint(
-              'MiBand6Auth: auto-probe char $id raw=${_hexDump(raw)}');
+          debugPrint('MiBand6Auth: auto-probe char $id raw=${_hexDump(raw)}');
           final parsed = _parseStressValue(raw);
           if (parsed != null) {
             debugPrint(
@@ -1470,8 +1483,7 @@ class MiBand6Auth {
             return c;
           }
         } catch (e) {
-          debugPrint(
-              'MiBand6Auth: auto-probe read error for $id: $e');
+          debugPrint('MiBand6Auth: auto-probe read error for $id: $e');
         }
       }
     }
@@ -1479,7 +1491,9 @@ class MiBand6Auth {
   }
 
   String _hexDump(List<int> bytes) {
-    return bytes.map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}').join(' ');
+    return bytes
+        .map((b) => '0x${b.toRadixString(16).padLeft(2, '0')}')
+        .join(' ');
   }
 
   Future<void> _onStressNotify(List<int> value) async {
@@ -1498,8 +1512,7 @@ class MiBand6Auth {
       _stressStaleCount++;
       if (_stressStaleCount >= 12) {
         final staleId = _stressChar?.uuid.str ?? 'unknown';
-        debugPrint(
-            'MiBand6Auth: stress value stuck at $stress for 60 s, '
+        debugPrint('MiBand6Auth: stress value stuck at $stress for 60 s, '
             'char $staleId is stale; re-running auto-discovery past it.');
         _stressPollTimer?.cancel();
         _stressPollTimer = null;
@@ -1517,7 +1530,8 @@ class MiBand6Auth {
             if (next != null) {
               await _startStressPolling(next);
             } else {
-              debugPrint('MiBand6Auth: no further stress candidate found after stale reset.');
+              debugPrint(
+                  'MiBand6Auth: no further stress candidate found after stale reset.');
             }
           } catch (e) {
             debugPrint('MiBand6Auth: stale-recovery discover error -> $e');
@@ -1604,22 +1618,23 @@ class MiBand6Auth {
     _noBroadcastTimer = null;
     _streaming = true;
     // 心率超标时自动触发手环震动（防抖：同一条告警期只震一次）
-    if (sample.isAlert &&
+    if (enableAutoBandAlert &&
+        sample.isAlert &&
         (_lastAutoVibrationAt == null ||
             now.difference(_lastAutoVibrationAt!) >
                 const Duration(seconds: 30))) {
       _lastAutoVibrationAt = now;
       final subject = bandAlertSubjectName?.trim();
-      final autoMsg = (subject == null || subject.isEmpty)
-          ? '心率偏高'
-          : '$subject 心率偏高';
+      final autoMsg =
+          (subject == null || subject.isEmpty) ? '心率偏高' : '$subject 心率偏高';
       unawaited(vibrateBandForTest(
         times: 2,
         on: const Duration(milliseconds: 400),
         newAlertMessage: autoMsg,
       ).then((ok) {
         if (!ok) {
-          debugPrint('MiBand6Auth: auto-vibration failed (band may be disconnected)');
+          debugPrint(
+              'MiBand6Auth: auto-vibration failed (band may be disconnected)');
         }
       }));
     }
@@ -1667,9 +1682,20 @@ class MiBand6Auth {
   /// 厂家广播名常常为空（尤其在低耗模式或刚断开后），仅靠名字易漏；
   /// 用 OUI 兜底比 `id.contains('MI')` 准确得多。
   static const Set<String> _knownXiaomiHuamiOuis = <String>{
-    'C8B021', 'EA3B1F', 'D5FB3E', 'F4980F', 'C45BBE', 'D58E7A',
-    'E0CA3C', 'F8AE8F', 'F0846E', 'F4F95B', 'D40C4A', 'C09F05',
-    '885A92', '2C415A',
+    'C8B021',
+    'EA3B1F',
+    'D5FB3E',
+    'F4980F',
+    'C45BBE',
+    'D58E7A',
+    'E0CA3C',
+    'F8AE8F',
+    'F0846E',
+    'F4F95B',
+    'D40C4A',
+    'C09F05',
+    '885A92',
+    '2C415A',
   };
 
   bool _looksLikeMiBand(BluetoothDevice d) {

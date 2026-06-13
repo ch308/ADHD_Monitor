@@ -103,7 +103,7 @@ class _ChildSkillPageState extends State<ChildSkillPage>
   void _greetOnce() {
     if (_greeted) return;
     _greeted = true;
-    unawaited(_speakCute('hi，我亲爱的爸爸妈妈'));
+    unawaited(_speakCute('hi，我亲爱的伙伴'));
   }
 
   Future<void> _loadSkill() async {

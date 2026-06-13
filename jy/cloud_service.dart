@@ -190,8 +190,7 @@ class CloudService {
           )
           .timeout(timeout);
       if (r.statusCode >= 200 && r.statusCode < 300) {
-        debugPrint(
-            'CloudService: bound esp32 $deviceId → child $childIdToBind');
+        debugPrint('CloudService: bound esp32 $deviceId → child $childIdToBind');
         return true;
       }
       debugPrint('CloudService: bind esp32 failed ${r.statusCode}: ${r.body}');
@@ -240,8 +239,7 @@ class CloudService {
         debugPrint('CloudService: esp32 cmd $action → $deviceId OK');
         return true;
       }
-      debugPrint(
-          'CloudService: esp32 cmd $action → $deviceId FAIL ${r.statusCode}: ${r.body}');
+      debugPrint('CloudService: esp32 cmd $action → $deviceId FAIL ${r.statusCode}: ${r.body}');
       return false;
     } catch (e) {
       debugPrint('CloudService: esp32 cmd $action → $deviceId ERROR $e');
@@ -301,7 +299,8 @@ class CloudService {
 
   /// 家长从 App 主动唤醒星星机器人（与 submit_log 后相同的 `xiaozhi_invoke_chat` 通道）。
   Future<bool> triggerXiaozhiParentWakeInvoke(String deviceId) {
-    const opening = '你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。';
+    const opening =
+        '你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。';
     return sendEsp32Command(
       deviceId,
       'xiaozhi_invoke_chat',
@@ -376,16 +375,13 @@ class CloudService {
           )
           .timeout(timeout);
       if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: fetch child profile ${r.statusCode}: ${r.body}');
+        debugPrint('CloudService: fetch child profile ${r.statusCode}: ${r.body}');
         return null;
       }
       final data = json.decode(r.body) as Map<String, dynamic>;
-      final profile =
-          Map<String, dynamic>.from((data['profile'] as Map?) ?? const {});
+      final profile = Map<String, dynamic>.from((data['profile'] as Map?) ?? const {});
       profile['childId'] = childIdToFetch;
-      final skill =
-          Map<String, dynamic>.from((data['skill'] as Map?) ?? const {});
+      final skill = Map<String, dynamic>.from((data['skill'] as Map?) ?? const {});
       profile['skillSummary'] = skill['summary'];
       profile['avatarStyle'] = (skill['avatar'] as Map?)?['theme'];
       profile['skillUpdatedAt'] = skill['updatedAt'] ?? data['updated_at'];
@@ -402,8 +398,7 @@ class CloudService {
           .post(
             Uri.parse('${_base()}/my/children'),
             headers: _authHeaders(),
-            body: json.encode(
-                {'nickname': nickname.trim().isEmpty ? '学生' : nickname.trim()}),
+            body: json.encode({'nickname': nickname.trim().isEmpty ? '学生' : nickname.trim()}),
           )
           .timeout(timeout);
       if (r.statusCode != 200) {
@@ -420,8 +415,7 @@ class CloudService {
     }
   }
 
-  Future<ParentChildProfile?> saveChildProfile(
-      ParentChildProfile profile) async {
+  Future<ParentChildProfile?> saveChildProfile(ParentChildProfile profile) async {
     try {
       final r = await http
           .put(
@@ -431,16 +425,13 @@ class CloudService {
           )
           .timeout(timeout);
       if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: save child profile ${r.statusCode}: ${r.body}');
+        debugPrint('CloudService: save child profile ${r.statusCode}: ${r.body}');
         return null;
       }
       final data = json.decode(r.body) as Map<String, dynamic>;
-      final next =
-          Map<String, dynamic>.from((data['profile'] as Map?) ?? const {});
+      final next = Map<String, dynamic>.from((data['profile'] as Map?) ?? const {});
       next['childId'] = profile.childId;
-      final skill =
-          Map<String, dynamic>.from((data['skill'] as Map?) ?? const {});
+      final skill = Map<String, dynamic>.from((data['skill'] as Map?) ?? const {});
       next['skillSummary'] = skill['summary'];
       next['avatarStyle'] = (skill['avatar'] as Map?)?['theme'];
       next['skillUpdatedAt'] = skill['updatedAt'] ?? data['updated_at'];
@@ -460,8 +451,7 @@ class CloudService {
           )
           .timeout(timeout);
       if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: fetch child skill ${r.statusCode}: ${r.body}');
+        debugPrint('CloudService: fetch child skill ${r.statusCode}: ${r.body}');
         return null;
       }
       final data = json.decode(r.body) as Map<String, dynamic>;
@@ -559,8 +549,7 @@ class CloudService {
           )
           .timeout(timeout);
       if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: fetch teacher alerts ${r.statusCode}: ${r.body}');
+        debugPrint('CloudService: fetch teacher alerts ${r.statusCode}: ${r.body}');
         return const <TeacherAlertEvent>[];
       }
       final data = json.decode(r.body) as Map<String, dynamic>;
@@ -575,326 +564,6 @@ class CloudService {
     } catch (e) {
       debugPrint('CloudService: fetch teacher alerts error $e');
       return const <TeacherAlertEvent>[];
-    }
-  }
-
-  /// 孤独症：待家长确认的孩子需求事件（机器人上报）。
-  Future<List<Map<String, dynamic>>> fetchAutismPendingNeeds(
-      int childIdToFetch) async {
-    try {
-      final r = await http
-          .get(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/needs/pending'),
-            headers: _authHeaders(jsonBody: false),
-          )
-          .timeout(timeout);
-      if (r.statusCode != 200) {
-        debugPrint('CloudService: autism needs ${r.statusCode}: ${r.body}');
-        return const [];
-      }
-      final data = json.decode(r.body) as Map<String, dynamic>;
-      final list = (data['items'] as List?) ?? const [];
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (e) {
-      debugPrint('CloudService: autism needs error $e');
-      return const [];
-    }
-  }
-
-  Future<bool> confirmAutismNeed(int childIdToFetch, int needId) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-              '${_base()}/my/children/$childIdToFetch/autism/needs/$needId/confirm',
-            ),
-            headers: _authHeaders(),
-            body: '{}',
-          )
-          .timeout(timeout);
-      return r.statusCode >= 200 && r.statusCode < 300;
-    } catch (e) {
-      debugPrint('CloudService: autism need confirm error $e');
-      return false;
-    }
-  }
-
-  /// 下发训练会话到星星机器人（经服务端队列 + `autism_session`）。
-  Future<Map<String, dynamic>?> startAutismTraining({
-    required int childIdToFetch,
-    required String sceneId,
-    List<String>? options,
-    Map<String, String?>? images,
-    bool followUp = false,
-    String ttsIntro = '',
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/training/start'),
-            headers: _authHeaders(),
-            body: json.encode({
-              'scene_id': sceneId,
-              'options': options ?? const <String>[],
-              if (images != null) 'images': images,
-              'follow_up': followUp,
-              'tts_intro': ttsIntro,
-            }),
-          )
-          // 服务端 202：会话已建，TTS 注入与入队异步；响应很快。
-          .timeout(const Duration(seconds: 25));
-      if (r.statusCode != 200 && r.statusCode != 202) {
-        debugPrint(
-            'CloudService: autism training start ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } on TimeoutException catch (e) {
-      debugPrint('CloudService: autism training start TIMEOUT $e');
-      return null;
-    } catch (e) {
-      debugPrint('CloudService: autism training start error $e');
-      return null;
-    }
-  }
-
-  /// 预生成孩子训练五个场景的 AI 图片，只写云端缓存/存储，不下发机器人。
-  Future<Map<String, dynamic>?> prepareAutismTrainingAssets({
-    required int childIdToFetch,
-    required List<Map<String, dynamic>> scenes,
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/training/assets'),
-            headers: _authHeaders(),
-            body: json.encode({'scenes': scenes}),
-          )
-          .timeout(const Duration(seconds: 300));
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism training assets ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('CloudService: autism training assets error $e');
-      return null;
-    }
-  }
-
-  /// 检查孩子训练五个场景图片是否已在云端缓存；不触发生图。
-  Future<Map<String, dynamic>?> checkAutismTrainingAssets({
-    required int childIdToFetch,
-    required List<Map<String, dynamic>> scenes,
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/training/assets/check'),
-            headers: _authHeaders(),
-            body: json.encode({'scenes': scenes}),
-          )
-          .timeout(timeout);
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism training assets check ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('CloudService: autism training assets check error $e');
-      return null;
-    }
-  }
-
-  Future<Map<String, dynamic>?> fetchAutismTrainingStatus({
-    required int childIdToFetch,
-    required int sessionId,
-  }) async {
-    try {
-      final r = await http
-          .get(
-            Uri.parse(
-              '${_base()}/my/children/$childIdToFetch/autism/training/status?session_id=$sessionId',
-            ),
-            headers: _authHeaders(jsonBody: false),
-          )
-          .timeout(timeout);
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism training status ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('CloudService: autism training status error $e');
-      return null;
-    }
-  }
-
-  /// 五条日常计划：服务端智谱生图并入队下发设备。
-  Future<Map<String, dynamic>?> postAutismDailyPlan(
-    int childIdToFetch, {
-    List<Map<String, dynamic>>? slots,
-    Map<String, String?>? images,
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/daily-plan'),
-            headers: _authHeaders(),
-            body: json.encode({
-              if (slots != null) 'slots': slots,
-              if (images != null) 'images': images,
-            }),
-          )
-          .timeout(const Duration(seconds: 180));
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism daily-plan ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('CloudService: autism daily-plan error $e');
-      return null;
-    }
-  }
-
-  /// 计划表：预生成所有选项图片，只写云端缓存/存储，不下发机器人。
-  Future<Map<String, dynamic>?> prepareAutismDailyPlanAssets(
-    int childIdToFetch, {
-    required List<Map<String, dynamic>> slots,
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/daily-plan/assets'),
-            headers: _authHeaders(),
-            body: json.encode({'slots': slots}),
-          )
-          .timeout(const Duration(seconds: 300));
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism daily-plan assets ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('CloudService: autism daily-plan assets error $e');
-      return null;
-    }
-  }
-
-  /// 检查计划表图片是否已在云端缓存；不触发生图。
-  Future<Map<String, dynamic>?> checkAutismDailyPlanAssets(
-    int childIdToFetch, {
-    required List<Map<String, dynamic>> slots,
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/daily-plan/assets/check'),
-            headers: _authHeaders(),
-            body: json.encode({'slots': slots}),
-          )
-          .timeout(timeout);
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism daily-plan assets check ${r.statusCode}: ${r.body}');
-        return null;
-      }
-      return json.decode(r.body) as Map<String, dynamic>;
-    } catch (e) {
-      debugPrint('CloudService: autism daily-plan assets check error $e');
-      return null;
-    }
-  }
-
-  Future<String?> generateAutismImage({
-    required int childIdToFetch,
-    required String prompt,
-  }) async {
-    try {
-      final r = await http
-          .post(
-            Uri.parse('${_base()}/my/children/$childIdToFetch/autism/images'),
-            headers: _authHeaders(),
-            body: json.encode({'prompt': prompt}),
-          )
-          .timeout(timeout);
-      if (r.statusCode != 200) return null;
-      final data = json.decode(r.body) as Map<String, dynamic>;
-      return data['url'] as String?;
-    } catch (e) {
-      debugPrint('CloudService: autism images error $e');
-      return null;
-    }
-  }
-
-  Future<bool> postAutismTrainingEvent({
-    required int childIdToFetch,
-    required String scene,
-    required String phase,
-    Map<String, dynamic>? payload,
-    int? sessionId,
-    String? ts,
-  }) async {
-    try {
-      final body = <String, dynamic>{
-        'scene': scene,
-        'phase': phase,
-        if (payload != null) 'payload': payload,
-        if (sessionId != null) 'session_id': sessionId,
-        if (ts != null && ts.isNotEmpty) 'ts': ts,
-      };
-      final r = await http
-          .post(
-            Uri.parse(
-                '${_base()}/my/children/$childIdToFetch/autism/events/training'),
-            headers: _authHeaders(),
-            body: json.encode(body),
-          )
-          .timeout(timeout);
-      return r.statusCode >= 200 && r.statusCode < 300;
-    } catch (e) {
-      debugPrint('CloudService: autism training event error $e');
-      return false;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> fetchAutismTrainingEvents({
-    required int childIdToFetch,
-    int afterId = 0,
-  }) async {
-    try {
-      final r = await http
-          .get(
-            Uri.parse(
-              '${_base()}/my/children/$childIdToFetch/autism/events/training?after_id=$afterId',
-            ),
-            headers: _authHeaders(jsonBody: false),
-          )
-          .timeout(timeout);
-      if (r.statusCode != 200) {
-        debugPrint(
-            'CloudService: autism training events ${r.statusCode}: ${r.body}');
-        return const [];
-      }
-      final data = json.decode(r.body) as Map<String, dynamic>;
-      final list = (data['items'] as List?) ?? const [];
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-    } catch (e) {
-      debugPrint('CloudService: autism training events error $e');
-      return const [];
     }
   }
 }

@@ -54,6 +54,7 @@ class _AppModeShellState extends State<AppModeShell> {
   Widget build(BuildContext context) {
     if (_loading) {
       return MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         home: const Scaffold(body: Center(child: CircularProgressIndicator())),
       );
@@ -62,10 +63,12 @@ class _AppModeShellState extends State<AppModeShell> {
     return switch (_mode) {
       AppMode.parent => FamilyShell(onSwitchMode: _resetMode),
       AppMode.teacher => MaterialApp(
+          debugShowCheckedModeBanner: false,
           theme: AppTheme.light,
           home: TeacherShell(onSwitchMode: _resetMode),
         ),
       null => MaterialApp(
+          debugShowCheckedModeBanner: false,
           theme: AppTheme.light,
           home: _ModeChoicePage(onChooseMode: _chooseMode),
         ),
@@ -293,12 +296,14 @@ class _FamilyShellState extends State<FamilyShell> {
   Widget build(BuildContext context) {
     if (_loadingPrefs) {
       return MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         home: const Scaffold(body: Center(child: CircularProgressIndicator())),
       );
     }
     if (_token == null || _token!.isEmpty) {
       return MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         home: LoginPage(
           serviceHost: _serviceHost,
@@ -308,6 +313,7 @@ class _FamilyShellState extends State<FamilyShell> {
     }
     if (!_categoryLoaded) {
       return MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         home: const Scaffold(
           body: Center(child: CircularProgressIndicator()),
@@ -316,6 +322,7 @@ class _FamilyShellState extends State<FamilyShell> {
     }
     if (_homeCondition.isAutism) {
       return MaterialApp(
+        debugShowCheckedModeBanner: false,
         theme: AppTheme.light,
         home: AutismFamilyShell(
           key: ValueKey<Object>('autism_${_childId}_${_homeCondition.name}'),
@@ -330,6 +337,7 @@ class _FamilyShellState extends State<FamilyShell> {
       );
     }
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       home: AdhdMonitorApp(
         key: ValueKey<Object>('adhd_${_childId}_${_homeCondition.name}'),

@@ -9,6 +9,7 @@ class TeacherLocalStore {
   static const _kStudents = 'teacher_students_json';
   static const _kTeacherBand = 'teacher_band_binding_json';
   static const _kAlertEvents = 'teacher_alert_events_json';
+  static const _kNotifyTeacherBandOnAlert = 'teacher_notify_teacher_band_on_alert';
   static const _kTeacherBandAuthPrefix = 'teacher_band_auth_';
   static const _kStudentBandAuthPrefix = 'teacher_student_band_auth_';
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
@@ -151,6 +152,16 @@ class TeacherLocalStore {
       _kAlertEvents,
       json.encode(next.map((item) => item.toJson()).toList()),
     );
+  }
+
+  static Future<bool> getNotifyTeacherBandOnAlert() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_kNotifyTeacherBandOnAlert) ?? true;
+  }
+
+  static Future<void> saveNotifyTeacherBandOnAlert(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_kNotifyTeacherBandOnAlert, value);
   }
 
   static Future<TeacherStudent> _migrateStudentAuthKey(TeacherStudent student) async {

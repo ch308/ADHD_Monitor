@@ -6,6 +6,8 @@ import 'package:vibration/vibration.dart';
 
 import '../theme/app_theme.dart';
 import '../models/heart_rate_data.dart';
+import '../models/parent_child_profile.dart';
+import '../screens/child_skill_page.dart';
 import '../services/cloud_service.dart';
 import '../services/miband_service.dart';
 import '../services/session_store.dart';
@@ -60,14 +62,18 @@ class _TeacherShellState extends State<TeacherShell> {
   static const List<String> _genderOptions = <String>['男', '女', '其他', '不便说明'];
 
   final TeacherBleService _bleService = TeacherBleService();
+  late final CloudService _cloudService =
+      CloudService(serverHost: SessionStore.defaultServerHost);
   List<TeacherStudent> _students = const <TeacherStudent>[];
   List<TeacherAlertEvent> _events = const <TeacherAlertEvent>[];
   TeacherBandBinding? _teacherBand;
   bool _loading = true;
+  bool _eventsLoading = false;
   bool _monitoring = false;
   bool _monitorBusy = false;
   bool _teacherBindingBusy = false;
   bool _teacherVibrationBusy = false;
+  bool _notifyTeacherBandOnAlert = true;
   Color? _teacherBandVibrationTestColor;
   String? _teacherBandMessage;
   MiBandStatus? _teacherBandStatus;
@@ -118,12 +124,16 @@ class _TeacherShellState extends State<TeacherShell> {
   Future<void> _restore() async {
     final students = await TeacherLocalStore.getStudents();
     final teacherBand = await TeacherLocalStore.getTeacherBand();
-    final events = await TeacherLocalStore.getAlertEvents();
+    final notifyTeacherBandOnAlert =
+        await TeacherLocalStore.getNotifyTeacherBandOnAlert();
+    await _syncCloudServiceFromSession();
+    final events = await _cloudService.fetchTeacherAlertEvents();
     if (!mounted) return;
     _safeSetState(() {
       _students = students;
       _teacherBand = teacherBand;
       _events = events;
+      _notifyTeacherBandOnAlert = notifyTeacherBandOnAlert;
       if (teacherBand != null) {
         _teacherBandStatus = const MiBandStatus(
           MiBandStage.idle,
@@ -143,10 +153,94 @@ class _TeacherShellState extends State<TeacherShell> {
     });
   }
 
+  Future<void> _syncCloudServiceFromSession() async {
+    _cloudService.serverHost = await SessionStore.getServerHost();
+    _cloudService.authToken = await SessionStore.getToken();
+  }
+
   Future<void> _persistStudents(List<TeacherStudent> students) async {
     await TeacherLocalStore.saveStudents(students);
     if (!mounted) return;
     setState(() => _students = students);
+  }
+
+  Future<void> _setNotifyTeacherBandOnAlert(bool value) async {
+    await TeacherLocalStore.saveNotifyTeacherBandOnAlert(value);
+    if (!mounted) return;
+    setState(() => _notifyTeacherBandOnAlert = value);
+  }
+
+  Future<void> _refreshTeacherAlertEvents() async {
+    await _syncCloudServiceFromSession();
+    final events = await _cloudService.fetchTeacherAlertEvents();
+    if (!mounted) return;
+    setState(() => _events = events);
+  }
+
+  ParentChildProfile _profileFromStudent(TeacherStudent student, int childId) {
+    return ParentChildProfile(
+      childId: childId,
+      name: student.name,
+      nickname: student.nickname,
+      age: student.age,
+      gender: student.gender,
+      personality: student.personality,
+      interests: student.interests,
+      category: student.category,
+      note: student.note,
+      highThresholdBpm: student.thresholdBpm,
+      lowThresholdBpm: student.lowThresholdBpm,
+      updatedAt: DateTime.now(),
+    );
+  }
+
+  Future<void> _openStudentSkill(TeacherStudent student) async {
+    await _syncCloudServiceFromSession();
+    if ((_cloudService.authToken ?? '').isEmpty) {
+      _showSnack('请先登录云端账号，再为学生生成 Skill。');
+      return;
+    }
+
+    var childId = int.tryParse(student.serverStudentId ?? '');
+    childId ??= await _cloudService.createChild(
+      (student.nickname ?? '').trim().isNotEmpty
+          ? student.nickname!.trim()
+          : student.name,
+    );
+    if (childId == null) {
+      _showSnack('云端学生档案创建失败，请检查网络或登录状态。');
+      return;
+    }
+
+    final profile = _profileFromStudent(student, childId);
+    final savedProfile = await _cloudService.saveChildProfile(profile);
+    if (savedProfile == null) {
+      _showSnack('学生 Skill 生成失败，请稍后重试。');
+      return;
+    }
+
+    if (student.serverStudentId != '$childId') {
+      final students = _students
+          .map(
+            (item) => item.id == student.id
+                ? item.copyWith(serverStudentId: '$childId')
+                : item,
+          )
+          .toList();
+      await _persistStudents(students);
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChildSkillPage(
+          cloudService: _cloudService,
+          childId: childId!,
+          fallbackProfile: savedProfile,
+        ),
+      ),
+    );
   }
 
   Future<void> _addStudent() async {
@@ -695,12 +789,17 @@ class _TeacherShellState extends State<TeacherShell> {
     required String note,
   }) async {
     final teacherBandReady = _teacherBand?.vibrationVerified == true;
-    if (teacherBandReady &&
+    var teacherBandNotified = false;
+    if (_notifyTeacherBandOnAlert &&
+        teacherBandReady &&
         _teacherBand != null &&
         (_teacherBand!.authHexKey ?? '').isNotEmpty) {
-      unawaited(_vibrateTeacherBandForAlert(student, eventType));
+      teacherBandNotified =
+          await _vibrateTeacherBandForAlert(student, eventType);
     }
-    await _phoneFallbackAlert();
+    if (_notifyTeacherBandOnAlert) {
+      await _phoneFallbackAlert();
+    }
     final alertLabel = teacherAlertEventLabel(eventType);
     final event = TeacherAlertEvent(
       id: DateTime.now().microsecondsSinceEpoch.toString(),
@@ -711,17 +810,28 @@ class _TeacherShellState extends State<TeacherShell> {
       thresholdBpm: thresholdBpm,
       startedAt: DateTime.now(),
       note: note,
+      uploaded: true,
+      teacherBandNotified: teacherBandNotified,
     );
-    await TeacherLocalStore.addAlertEvent(event);
-    final events = await TeacherLocalStore.getAlertEvents();
+    await _syncCloudServiceFromSession();
+    final saved = await _cloudService.saveTeacherAlertEvent(event);
+    final events = saved
+        ? await _cloudService.fetchTeacherAlertEvents()
+        : <TeacherAlertEvent>[event, ..._events].take(80).toList();
     if (!mounted) return;
     setState(() => _events = events);
 
+    final recordText = saved ? '已记录到云端' : '云端记录失败';
     _showSnack(
-      teacherBandReady
-          ? '${student.name}$alertLabel，已提醒老师手环'
-          : '${student.name}$alertLabel，已先用手机提醒',
+      !_notifyTeacherBandOnAlert
+          ? '${student.name}$alertLabel，$recordText'
+          : teacherBandNotified
+              ? '${student.name}$alertLabel，$recordText，已提醒老师手环'
+              : '${student.name}$alertLabel，$recordText，已先用手机提醒',
     );
+    if (!saved) {
+      _showSnack('云端异常记录保存失败，请检查网络或服务器。');
+    }
   }
 
   Future<void> _phoneFallbackAlert() async {
@@ -735,9 +845,15 @@ class _TeacherShellState extends State<TeacherShell> {
   }
 
   Future<void> _showEvents() async {
-    final events = await TeacherLocalStore.getAlertEvents();
+    if (_eventsLoading) return;
+    setState(() => _eventsLoading = true);
+    await _syncCloudServiceFromSession();
+    final events = await _cloudService.fetchTeacherAlertEvents();
     if (!mounted) return;
-    setState(() => _events = events);
+    setState(() {
+      _events = events;
+      _eventsLoading = false;
+    });
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -745,23 +861,25 @@ class _TeacherShellState extends State<TeacherShell> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
           const Text(
-            '本地提醒记录',
+            '云端异常记录',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
-          if (events.isEmpty) const Text('还没有提醒记录。'),
+          if (events.isEmpty) const Text('云端还没有异常记录。'),
           for (final event in events)
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.notifications_active_outlined),
               title: Text(event.studentNameSnapshot),
               subtitle: Text(
-                '${teacherAlertEventLabel(event.eventType)} · ${event.bpm ?? '--'} 次/分钟 / 提醒线 ${event.thresholdBpm ?? '--'}\n${event.startedAt}${(event.note?.isNotEmpty ?? false) ? '\n${event.note}' : ''}',
+                '${teacherAlertEventLabel(event.eventType)} · ${event.bpm ?? '--'} 次/分钟 / 提醒线 ${event.thresholdBpm ?? '--'}\n${event.startedAt}${event.teacherBandNotified ? '\n已通知老师手环' : '\n未通知老师手环'}${(event.note?.isNotEmpty ?? false) ? '\n${event.note}' : ''}',
               ),
             ),
         ],
       ),
     );
+    if (!mounted) return;
+    setState(() => _eventsLoading = false);
   }
 
   Future<_StudentDialogResult?> _showStudentDialog(
@@ -1064,12 +1182,12 @@ class _TeacherShellState extends State<TeacherShell> {
     await _bleService.dispose();
   }
 
-  Future<void> _vibrateTeacherBandForAlert(
+  Future<bool> _vibrateTeacherBandForAlert(
     TeacherStudent student,
     String eventType,
   ) async {
     final binding = _teacherBand;
-    if (binding == null || (binding.authHexKey ?? '').isEmpty) return;
+    if (binding == null || (binding.authHexKey ?? '').isEmpty) return false;
 
     if (_teacherBandClient == null ||
         !_teacherBandClient!.status.value.isConnected) {
@@ -1077,15 +1195,16 @@ class _TeacherShellState extends State<TeacherShell> {
         remoteId: binding.remoteId,
         authHexKey: binding.authHexKey!,
       );
-      if (!result.success || result.client == null) return;
+      if (!result.success || result.client == null) return false;
       await _disposeTeacherClient();
       _attachTeacherClient(result.client!);
     }
-    await _bleService.vibrateAlertBand(
+    final result = await _bleService.vibrateAlertBand(
       _teacherBandClient!,
       newAlertMessage:
           '${student.name} ${teacherBandAlertShortStatus(eventType)}',
     );
+    return result.success;
   }
 
   _BandDiagnosticViewData _buildStudentDiagnostic(TeacherStudent student) {
@@ -1397,7 +1516,7 @@ class _TeacherShellState extends State<TeacherShell> {
         ),
         actions: [
           IconButton(
-            tooltip: '本地提醒记录',
+            tooltip: '云端异常记录',
             onPressed: _showEvents,
             icon: const Icon(Icons.history_rounded),
           ),
@@ -1441,11 +1560,13 @@ class _TeacherShellState extends State<TeacherShell> {
                   _monitorBusy || _teacherBindingBusy || _teacherVibrationBusy,
               teacherBandName: _teacherBand?.displayName,
               teacherBandMessage: _teacherBandMessage,
+              notifyTeacherBandOnAlert: _notifyTeacherBandOnAlert,
               onBindTeacherBand: _bindTeacherBand,
               onVerifyVibration: _verifyTeacherVibration,
+              onNotifyTeacherBandChanged: _setNotifyTeacherBandOnAlert,
               onToggleMonitoring: _toggleMonitoring,
             ),
-            const SizedBox(height: 12),
+            // Connection diagnostic panel removed for teacher UI.
             if (_students.isEmpty) const _EmptyTeacherState(),
             for (final student in _students) ...[
               _StudentCard(
@@ -1455,6 +1576,7 @@ class _TeacherShellState extends State<TeacherShell> {
                 monitoring: _monitoring,
                 onEdit: () => _editStudent(student),
                 onBindBand: () => _bindStudentBand(student),
+                onOpenSkill: () => _openStudentSkill(student),
                 onToggleEnabled: () => _toggleStudentEnabled(student),
                 onRemove: () => _removeStudent(student),
               ),
@@ -1865,8 +1987,10 @@ class _StatusPanel extends StatelessWidget {
     required this.busy,
     required this.teacherBandName,
     required this.teacherBandMessage,
+    required this.notifyTeacherBandOnAlert,
     required this.onBindTeacherBand,
     required this.onVerifyVibration,
+    required this.onNotifyTeacherBandChanged,
     required this.onToggleMonitoring,
   });
 
@@ -1874,10 +1998,12 @@ class _StatusPanel extends StatelessWidget {
   final int studentCount;
   final bool monitoring;
   final bool busy;
+  final bool notifyTeacherBandOnAlert;
   final String? teacherBandName;
   final String? teacherBandMessage;
   final VoidCallback onBindTeacherBand;
   final VoidCallback onVerifyVibration;
+  final ValueChanged<bool> onNotifyTeacherBandChanged;
   final Future<void> Function() onToggleMonitoring;
 
   @override
@@ -1941,6 +2067,21 @@ class _StatusPanel extends StatelessWidget {
             Text('当前老师手环：$teacherBandName',
                 style: const TextStyle(color: AppColors.ink)),
           ],
+          const SizedBox(height: 12),
+          SwitchListTile.adaptive(
+            contentPadding: EdgeInsets.zero,
+            value: notifyTeacherBandOnAlert,
+            onChanged: onNotifyTeacherBandChanged,
+            title: const Text(
+              '通知老师手环',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+            // subtitle: Text(
+            //   notifyTeacherBandOnAlert
+            //       ? '开启后：云端记录异常，并尝试震动老师手环。'
+            //       : '关闭后：只把异常人物、时间、心率等信息记录到云端。',
+            // ),
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -2208,6 +2349,7 @@ class _StudentCard extends StatelessWidget {
     required this.monitoring,
     required this.onEdit,
     required this.onBindBand,
+    required this.onOpenSkill,
     required this.onToggleEnabled,
     required this.onRemove,
   });
@@ -2218,6 +2360,7 @@ class _StudentCard extends StatelessWidget {
   final bool monitoring;
   final VoidCallback onEdit;
   final VoidCallback onBindBand;
+  final VoidCallback onOpenSkill;
   final VoidCallback onToggleEnabled;
   final VoidCallback onRemove;
 
@@ -2314,6 +2457,7 @@ class _StudentCard extends StatelessWidget {
               TextButton(
                   onPressed: onBindBand,
                   child: Text(hasBand ? '更换手环' : '绑定手环')),
+              TextButton(onPressed: onOpenSkill, child: const Text('Skill')),
               TextButton(onPressed: onEdit, child: const Text('编辑')),
               TextButton(
                   onPressed: onToggleEnabled,
