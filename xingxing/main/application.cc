@@ -56,7 +56,8 @@ static constexpr int64_t kAutoStopForceShortFragmentsSpeechMs = 700;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
 static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
 
-// 进入「休眠省电」后多久关背光/面板（仍保持 WiFi 与长轮询，便于 App 远程唤醒）。
+// 进入「休眠省电」后多久关背光/面板。休眠期间 WiFi 保持 PERFORMANCE 档，避免关会话后
+// OnAudioChannelClosed 把 STA 打成 LOW_POWER 导致掉线（计划表到点、HTTP 校时、长轮询依赖联网）。
 static constexpr int64_t kAppSleepDisplayOffAfterUs = 30LL * 1000000LL;
 
 static int64_t AutoStopEndpointDelayMs(int64_t quiet_before_voice_ms) {
@@ -710,7 +711,10 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
-        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+        // 休眠省电时关会话会走到这里；LOW_POWER modem 休眠在部分路由器上易断线，
+        // 计划表与 Path A 长轮询需要稳定 STA，故休眠中维持 PERFORMANCE。
+        board.SetPowerSaveLevel(sleep_power_save_mode_ ? PowerSaveLevel::PERFORMANCE
+                                                       : PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -1373,11 +1377,13 @@ void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server
     RestoreApplicationSleepDisplay();
     sleep_power_save_mode_ = true;
     auto& board = Board::GetInstance();
-    board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
     auto display = board.GetDisplay();
     display->SetStatus("休眠省电中");
     display->SetChatMessage("system", "休眠省电中");
     TerminateCurrentSession(reason, notify_server);
+    // 关会话会触发 OnAudioChannelClosed；上面已让休眠态下保持 PERFORMANCE。
+    // 若通道本就未打开，这里再显式拉高档位，避免仍停留在 LOW_POWER。
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
 #ifdef CONFIG_ADHD_KIDS_UI
     RefreshKidsDisplay();
 #endif
