@@ -108,6 +108,7 @@ public:
     void SubmitChildTextInput(const std::string& text);
     void SetVisualChoiceMode(bool enabled);
     bool CanEnterSleepMode();
+    void ExitSleepPowerSaveForAlarm(const char* reason);
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }

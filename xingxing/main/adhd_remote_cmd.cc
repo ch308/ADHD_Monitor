@@ -105,7 +105,9 @@ static int g_autism_training_cmd_revision = 0;
 #endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
-static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation = 0);
+struct ChoicePreviewRequest;
+static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation,
+                                        const ChoicePreviewRequest* binding = nullptr);
 
 // Must match BLE name `XIAOZHI_<id>` / Flutter `EspProvDevice.deviceId` and the
 // plush-ball `ADHD_<id>` convention: last 4 bytes of STA MAC as 8 upper-hex
@@ -209,7 +211,7 @@ static void RestoreDefaultActionCards() {
 
 static bool IsChoiceGenerationActive(int generation) {
     if (generation <= 0) {
-        return true;
+        return false;
     }
     bool active = false;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -246,20 +248,47 @@ static void ShowAutismChoiceWaitingPrompt() {
     display->SetEmotion("happy");
 }
 
-static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url);
+static void ScheduleChoiceLabelAudio(const ChoicePreviewRequest& preview);
 
 struct ChoicePreviewRequest {
     std::string url;
     std::string audio_url;
     int generation = 0;
     int index = -1;
+    std::string scene;
+    std::string source;
+    int training_cmd_revision = 0;
+    int plan_table_revision = 0;
 };
+
+static bool IsChoicePreviewBindingStillValid(const ChoicePreviewRequest& b) {
+    if (g_choice_mutex == nullptr) {
+        return false;
+    }
+    if (xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return false;
+    }
+    bool ok = g_choice_context.active && g_choice_context.generation == b.generation &&
+              g_choice_context.current_index == b.index &&
+              b.index >= 0 && b.index < static_cast<int>(g_choice_context.items.size()) &&
+              g_choice_context.items[b.index].image_url == b.url &&
+              g_choice_context.items[b.index].audio_url == b.audio_url &&
+              g_choice_context.scene == b.scene && g_choice_context.source == b.source;
+    if (ok && b.source == "child_training") {
+        ok = g_choice_context.training_cmd_revision == b.training_cmd_revision;
+    }
+    if (ok && g_choice_context.scene == "daily_plan") {
+        ok = g_choice_context.plan_table_revision == b.plan_table_revision;
+    }
+    xSemaphoreGive(g_choice_mutex);
+    return ok;
+}
 
 static void ChoicePreviewTask(void* arg) {
     auto* req = static_cast<ChoicePreviewRequest*>(arg);
     if (req != nullptr) {
-        if (DownloadAndShowPreviewImage(req->url, req->generation)) {
-            ScheduleChoiceLabelAudio(req->generation, req->index, req->audio_url);
+        if (DownloadAndShowPreviewImage(req->url, req->generation, req)) {
+            ScheduleChoiceLabelAudio(*req);
         }
         delete req;
     }
@@ -368,7 +397,8 @@ void adhd_remote_cmd_start_default_proactive(void) {
     SubmitRobotOpeningLine(opening, context);
 }
 
-static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation) {
+static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation,
+                                        const ChoicePreviewRequest* binding) {
     if (url.empty()) {
         return false;
     }
@@ -467,10 +497,19 @@ static bool DownloadAndShowPreviewImage(const std::string& url, int choice_gener
         ESP_LOGI(TAG, "autism image head %02x%02x%02x%02x (expect 89504e47 for PNG)",
                  u[0], u[1], u[2], u[3]);
     }
-    if (!IsChoiceGenerationActive(choice_generation)) {
-        ESP_LOGI(TAG, "autism image skip stale generation=%d", choice_generation);
-        heap_caps_free(data);
-        return false;
+    if (binding != nullptr) {
+        if (!IsChoicePreviewBindingStillValid(*binding)) {
+            ESP_LOGI(TAG, "autism image skip stale binding gen=%d idx=%d scene=%s",
+                     binding->generation, binding->index, binding->scene.c_str());
+            heap_caps_free(data);
+            return false;
+        }
+    } else if (choice_generation >= 0) {
+        if (!IsChoiceGenerationActive(choice_generation)) {
+            ESP_LOGI(TAG, "autism image skip stale generation=%d", choice_generation);
+            heap_caps_free(data);
+            return false;
+        }
     }
     ExitActionCardsIfCoveringPreview();
     auto* lvgl = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
@@ -649,6 +688,11 @@ struct ChoiceLabelAudioRequest {
     int generation = 0;
     int index = -1;
     std::string audio_url;
+    std::string image_url;
+    std::string scene;
+    std::string source;
+    int training_cmd_revision = 0;
+    int plan_table_revision = 0;
 };
 
 static void ChoiceLabelAudioHoldTask(void* arg) {
@@ -659,28 +703,37 @@ static void ChoiceLabelAudioHoldTask(void* arg) {
     }
     // 图片已显示后再播标签 OGG（与服务端预生成 o 对应）
     vTaskDelay(pdMS_TO_TICKS(2000));
-    bool still_current = false;
-    if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        still_current = g_choice_context.active &&
-                        g_choice_context.generation == req->generation &&
-                        g_choice_context.current_index == req->index;
-        xSemaphoreGive(g_choice_mutex);
-    }
-    if (still_current) {
+    ChoicePreviewRequest chk;
+    chk.url = req->image_url;
+    chk.audio_url = req->audio_url;
+    chk.generation = req->generation;
+    chk.index = req->index;
+    chk.scene = req->scene;
+    chk.source = req->source;
+    chk.training_cmd_revision = req->training_cmd_revision;
+    chk.plan_table_revision = req->plan_table_revision;
+    if (IsChoicePreviewBindingStillValid(chk)) {
         (void)DownloadAndPlayOggLabel(req->audio_url);
+    } else {
+        ESP_LOGI(TAG, "autism label audio skip stale gen=%d idx=%d", req->generation, req->index);
     }
     delete req;
     vTaskDelete(nullptr);
 }
 
-static void ScheduleChoiceLabelAudio(int generation, int index, const std::string& audio_url) {
-    if (audio_url.empty()) {
+static void ScheduleChoiceLabelAudio(const ChoicePreviewRequest& preview) {
+    if (preview.audio_url.empty()) {
         return;
     }
     auto* req = new ChoiceLabelAudioRequest();
-    req->generation = generation;
-    req->index = index;
-    req->audio_url = audio_url;
+    req->generation = preview.generation;
+    req->index = preview.index;
+    req->audio_url = preview.audio_url;
+    req->image_url = preview.url;
+    req->scene = preview.scene;
+    req->source = preview.source;
+    req->training_cmd_revision = preview.training_cmd_revision;
+    req->plan_table_revision = preview.plan_table_revision;
     BaseType_t tr = xTaskCreate(ChoiceLabelAudioHoldTask, "choice_audio", 8192, req, 3, nullptr);
     if (tr != pdPASS) {
         delete req;
@@ -709,7 +762,7 @@ static void AutismImageSequenceTask(void* arg) {
         return;
     }
     for (const auto& url : *urls) {
-        DownloadAndShowPreviewImage(url);
+        DownloadAndShowPreviewImage(url, -1, nullptr);
         vTaskDelay(pdMS_TO_TICKS(4500));
     }
     delete urls;
@@ -825,10 +878,12 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
 
 struct IntroThenChoiceArg {
     AutismChoiceContext* ctx = nullptr;
-    /// 开场白 OGG；先完整外放它，播完再出选图，避免图片突兀出现。
+    /// 开场白 OGG（计划表为各时段 `tts` 预合成的固定话术，非闲聊链路）。
     std::string intro_audio_url;
     /// 没有开场白音频时的兜底等待（让等待界面不至于瞬间弹出）。
     int fallback_delay_ms = 500;
+    /// 仅 daily_plan：到点时计划表 revision，无选图 ctx 时仍用于丢弃已被替换的旧开场。
+    int daily_plan_revision_snapshot = -1;
 };
 
 static void IntroThenChoiceTask(void* arg) {
@@ -840,13 +895,33 @@ static void IntroThenChoiceTask(void* arg) {
     ESP_LOGI(TAG, "autism_intro_wait: start (intro_url_len=%u rev=%d)",
              (unsigned)a->intro_audio_url.size(),
              a->ctx != nullptr ? a->ctx->training_cmd_revision : -1);
+    if (a->daily_plan_revision_snapshot >= 0 &&
+        a->daily_plan_revision_snapshot != g_daily_plan_store_revision) {
+        ESP_LOGI(TAG, "daily_plan superseded before intro (rev=%d current=%d); skip",
+                 a->daily_plan_revision_snapshot, g_daily_plan_store_revision);
+        delete a->ctx;
+        a->ctx = nullptr;
+        delete a;
+        vTaskDelete(nullptr);
+        return;
+    }
     if (!a->intro_audio_url.empty()) {
-        // 先把开场白整段播完（含解码/播放队列排空），再露出选图界面。
+        // 固定话术 OGG（服务端按时段 tts 预生成），整段播完再出选图。
         (void)DownloadAndPlayOggLabel(a->intro_audio_url);
         WaitForRobotAudioQuietBounded(15000);
         vTaskDelay(pdMS_TO_TICKS(400));  // 一点自然停顿，避免说完立刻跳图
     } else if (a->fallback_delay_ms > 0) {
         vTaskDelay(pdMS_TO_TICKS(a->fallback_delay_ms));
+    }
+    if (a->daily_plan_revision_snapshot >= 0 &&
+        a->daily_plan_revision_snapshot != g_daily_plan_store_revision) {
+        ESP_LOGI(TAG, "daily_plan superseded after intro (rev=%d current=%d); skip choice UI",
+                 a->daily_plan_revision_snapshot, g_daily_plan_store_revision);
+        delete a->ctx;
+        a->ctx = nullptr;
+        delete a;
+        vTaskDelete(nullptr);
+        return;
     }
     if (a->ctx != nullptr && a->ctx->scene == "daily_plan" &&
         a->ctx->plan_table_revision != g_daily_plan_store_revision) {
@@ -893,6 +968,7 @@ static void InvalidateAutismTrainingChoiceUi() {
 }
 
 static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
+    Application::GetInstance().ExitSleepPowerSaveForAlarm("daily_plan");
     ExitActionCardsIfCoveringPreview();
     AutismChoiceContext* plan_ctx = nullptr;
     if (!slot.image_urls.empty()) {
@@ -911,12 +987,22 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
             plan_ctx->items.push_back(std::move(item));
         }
     }
-    ESP_LOGI(TAG, "daily_plan fire %s images=%u", slot.time_text.c_str(), (unsigned)slot.image_urls.size());
-    if (plan_ctx != nullptr) {
-        // 开场白播完后再出选图界面，避免突兀。
+    ESP_LOGI(TAG, "daily_plan fire %s images=%u intro_url=%s", slot.time_text.c_str(),
+             (unsigned)slot.image_urls.size(), slot.intro_audio_url.empty() ? "empty" : "ok");
+    const bool have_intro = !slot.intro_audio_url.empty();
+    if (!have_intro && plan_ctx == nullptr) {
+        ESP_LOGW(TAG, "daily_plan fire %s: no intro_audio and no images (tts needs server OGG inject)",
+                 slot.time_text.c_str());
+        return;
+    }
+    if (have_intro && plan_ctx == nullptr && !slot.tts.empty()) {
+        ESP_LOGI(TAG, "daily_plan intro-only (fixed tts playback, no choice UI this slot)");
+    }
+    if (have_intro || plan_ctx != nullptr) {
         auto* delay_arg = new IntroThenChoiceArg();
         delay_arg->ctx = plan_ctx;
         delay_arg->intro_audio_url = slot.intro_audio_url;
+        delay_arg->daily_plan_revision_snapshot = slot.plan_table_revision;
         BaseType_t tr = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 8192, delay_arg, 3, nullptr);
         if (tr != pdPASS) {
             ESP_LOGW(TAG, "autism_intro_wait task create failed");
@@ -1194,6 +1280,10 @@ bool adhd_next_autism_choice(void) {
     std::string audio_url;
     int next_idx = -1;
     int generation = 0;
+    std::string scene;
+    std::string source;
+    int training_cmd_revision = 0;
+    int plan_table_revision = 0;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (g_choice_context.active && !g_choice_context.items.empty()) {
             if (g_choice_context.display_dimmed) {
@@ -1206,6 +1296,10 @@ bool adhd_next_autism_choice(void) {
                 url = g_choice_context.items[next_idx].image_url;
                 audio_url = g_choice_context.items[next_idx].audio_url;
                 generation = g_choice_context.generation;
+                scene = g_choice_context.scene;
+                source = g_choice_context.source;
+                training_cmd_revision = g_choice_context.training_cmd_revision;
+                plan_table_revision = g_choice_context.plan_table_revision;
             }
         }
         xSemaphoreGive(g_choice_mutex);
@@ -1223,6 +1317,10 @@ bool adhd_next_autism_choice(void) {
     req->audio_url = audio_url;
     req->generation = generation;
     req->index = next_idx;
+    req->scene = std::move(scene);
+    req->source = std::move(source);
+    req->training_cmd_revision = training_cmd_revision;
+    req->plan_table_revision = plan_table_revision;
     BaseType_t tr = xTaskCreate(ChoicePreviewTask, "choice_next", 8192, req, 3, nullptr);
     if (tr != pdPASS) {
         ESP_LOGW(TAG, "choice_next task create failed");

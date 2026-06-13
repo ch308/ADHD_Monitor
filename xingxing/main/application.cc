@@ -1390,6 +1390,19 @@ void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server
     }
 }
 
+void Application::ExitSleepPowerSaveForAlarm(const char* reason) {
+    if (!sleep_power_save_mode_) {
+        return;
+    }
+    ESP_LOGI(TAG, "Exit sleep power-save for alarm: %s", reason ? reason : "");
+    sleep_power_save_mode_ = false;
+    RestoreApplicationSleepDisplay();
+    Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+#ifdef CONFIG_ADHD_KIDS_UI
+    RefreshKidsDisplay();
+#endif
+}
+
 void Application::RestoreApplicationSleepDisplay() {
     if (sleep_display_off_timer_ != nullptr) {
         esp_timer_stop(sleep_display_off_timer_);
