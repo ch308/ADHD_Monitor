@@ -837,6 +837,9 @@ static void IntroThenChoiceTask(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
+    ESP_LOGI(TAG, "autism_intro_wait: start (intro_url_len=%u rev=%d)",
+             (unsigned)a->intro_audio_url.size(),
+             a->ctx != nullptr ? a->ctx->training_cmd_revision : -1);
     if (!a->intro_audio_url.empty()) {
         // 先把开场白整段播完（含解码/播放队列排空），再露出选图界面。
         (void)DownloadAndPlayOggLabel(a->intro_audio_url);
@@ -1425,6 +1428,9 @@ static void RemoteCmdTask(void* /*arg*/) {
                           std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + "/device/" + id +
                           "/cmd?wait=55";
 
+        // 长轮询期间会阻塞数十秒；默认无日志易被误认为死机，故每次发起前打一行。
+        ESP_LOGI(TAG, "cmd long-poll: blocking GET (server may hold up to ~55s)…");
+
         esp_http_client_config_t cfg = {};
         cfg.url = url.c_str();
         cfg.timeout_ms = 70000;
@@ -1467,7 +1473,7 @@ static void RemoteCmdTask(void* /*arg*/) {
             ESP_LOGI(TAG, "cmd payload: %s", body.c_str());
             ProcessCmdPayload(body.c_str());
         } else if (err == ESP_OK && status == 204) {
-            // no command
+            ESP_LOGI(TAG, "cmd long-poll: empty queue (204), alive — next round");
         } else {
             ESP_LOGD(TAG, "cmd poll err=%s status=%d", esp_err_to_name(err), status);
             vTaskDelay(pdMS_TO_TICKS(1500));

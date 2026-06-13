@@ -554,12 +554,16 @@ class CloudService {
               'tts_intro': ttsIntro,
             }),
           )
-          .timeout(const Duration(seconds: 120));
-      if (r.statusCode != 200) {
+          // 服务端 202：会话已建，TTS 注入与入队异步；响应很快。
+          .timeout(const Duration(seconds: 25));
+      if (r.statusCode != 200 && r.statusCode != 202) {
         debugPrint('CloudService: autism training start ${r.statusCode}: ${r.body}');
         return null;
       }
       return json.decode(r.body) as Map<String, dynamic>;
+    } on TimeoutException catch (e) {
+      debugPrint('CloudService: autism training start TIMEOUT $e');
+      return null;
     } catch (e) {
       debugPrint('CloudService: autism training start error $e');
       return null;

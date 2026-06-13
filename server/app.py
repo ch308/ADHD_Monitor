@@ -5,6 +5,7 @@ import json
 import re
 import threading
 import time
+import copy
 import hashlib
 import hmac
 import html
@@ -3593,6 +3594,55 @@ def _autism_audio_for_options(options: list[str], images: dict[str, str | None],
     return audio
 
 
+def _training_start_enqueue_background(child_id: int, sid: int, payload: dict) -> None:
+    """TTS 注入 + 设备队列写入；在独立线程中运行，HTTP 已先返回 202。
+
+    payload 为已在请求线程中 deepcopy 的快照，勿与请求对象共享可变引用。"""
+    session = {"session_id": sid, **payload}
+    try:
+        with app.app_context():
+            queued = _enqueue_autism_session_for_child(child_id, session)
+            st = "sent" if queued else "queued_no_device"
+            now2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn2 = sqlite3.connect("adhd_data.db")
+            cur2 = conn2.cursor()
+            cur2.execute(
+                """
+                UPDATE autism_training_sessions SET status = ?, updated_at = ?
+                WHERE id = ? AND child_id = ?
+                """,
+                (st, now2, sid, child_id),
+            )
+            conn2.commit()
+            conn2.close()
+            app.logger.info(
+                "training/start async done session_id=%s child=%s status=%s devices=%d",
+                sid,
+                child_id,
+                st,
+                len(queued),
+            )
+    except Exception:
+        app.logger.exception("training/start async enqueue failed session_id=%s child=%s", sid, child_id)
+        try:
+            nowe = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            conn3 = sqlite3.connect("adhd_data.db")
+            c3 = conn3.cursor()
+            c3.execute(
+                """
+                UPDATE autism_training_sessions SET status = ?, updated_at = ?
+                WHERE id = ? AND child_id = ?
+                """,
+                ("enqueue_failed", nowe, sid, child_id),
+            )
+            conn3.commit()
+            conn3.close()
+        except Exception:
+            app.logger.exception(
+                "training/start could not persist enqueue_failed session_id=%s", sid
+            )
+
+
 @app.route("/my/children/<int:child_id>/autism/training/start", methods=["POST"])
 def autism_training_start(child_id):
     user = _get_request_user()
@@ -3643,21 +3693,30 @@ def autism_training_start(child_id):
     sid = cursor.lastrowid
     conn.commit()
     conn.close()
-    queued = _enqueue_autism_session_for_child(child_id, {"session_id": sid, **payload})
-    st = "sent" if queued else "queued_no_device"
-    now2 = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn2 = sqlite3.connect("adhd_data.db")
-    cur2 = conn2.cursor()
-    cur2.execute(
-        """
-        UPDATE autism_training_sessions SET status = ?, updated_at = ?
-        WHERE id = ? AND child_id = ?
-        """,
-        (st, now2, sid, child_id),
+    preview_ids = _xingxing_device_ids_for_child(child_id)
+    threading.Thread(
+        target=_training_start_enqueue_background,
+        args=(child_id, sid, copy.deepcopy(payload)),
+        daemon=True,
+        name=f"training_start_{sid}",
+    ).start()
+    app.logger.info(
+        "training/start accepted 202 session_id=%s child=%s scene=%s option_count=%d "
+        "(TTS inject + device enqueue in background thread)",
+        sid,
+        child_id,
+        scene_id,
+        len(options),
     )
-    conn2.commit()
-    conn2.close()
-    return jsonify({"status": "ok", "session_id": sid, "queued_devices": queued}), 200
+    return jsonify(
+        {
+            "status": "accepted",
+            "session_id": sid,
+            "queued_devices": preview_ids,
+            "enqueue_pending": True,
+            "message": "会话已创建，语音合成与入队正在后台进行，数秒至数十秒内星星将收到指令。",
+        }
+    ), 202
 
 
 @app.route("/my/children/<int:child_id>/autism/training/assets", methods=["POST"])
@@ -5438,7 +5497,14 @@ def _autism_inject_scripted_audio(session: dict) -> None:
 def _enqueue_autism_session_for_child(child_id: int, session: dict) -> list[str]:
     """把孤独症训练/日程 JSON 推入星星机器人长轮询命令队列。"""
     sk = session.get("kind")
+    t0 = time.perf_counter()
     _autism_inject_scripted_audio(session)
+    inject_ms = (time.perf_counter() - t0) * 1000.0
+    app.logger.info(
+        "autism_session inject_scripted_audio kind=%s took_ms=%.0f (edge-tts/ffmpeg 慢时家长会感觉「下发卡住」)",
+        sk,
+        inject_ms,
+    )
     body = json.dumps(session, ensure_ascii=False)
     if len(body) > 32000:
         body = body[:32000]

@@ -305,6 +305,12 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   bool _loadingTrainingDraft = false;
   bool _trainingPreparingImages = false;
   bool _trainingImagesReady = false;
+  /// 下发请求进行中：禁用「应用」与「下发」，避免连点导致设备端多段音频叠播、声音破碎。
+  bool _trainingDispatchInFlight = false;
+  /// 孩子已在设备上完成选图（image_confirmed）：在家长修改开场白或选项前禁止再次「应用/下发」。
+  bool _trainingLockActionsAfterChildPick = false;
+  /// 与 `_trainingLockActionsAfterChildPick` 配对：当前文案与此时一致则保持锁定。
+  String _trainingPostPickContentFingerprint = '';
   Timer? _trainingAssetCheckTimer;
   String _trainingImageStatus = '正在检查云端是否已有当前场景图片…';
   Map<String, Map<String, String?>> _preparedTrainingImages = const {};
@@ -370,6 +376,9 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       _trainingPhase = AutismTrainingPhase.parentSetup;
       _trainingPreparingImages = false;
       _trainingImagesReady = false;
+      _trainingDispatchInFlight = false;
+      _trainingLockActionsAfterChildPick = false;
+      _trainingPostPickContentFingerprint = '';
       _preparedTrainingImages = const {};
       _trainingImageStatus = '正在检查云端是否已有当前场景图片…';
       _needsPollPrimed = false;
@@ -435,6 +444,12 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
 
   _TrainingScenePreset get _trainingPreset => _trainingScenePresets[_trainingSceneIndex];
 
+  /// 当前场景开场白 + 选项文案，用于判断家长是否在「孩子选图后」做了实质修改以解除按钮锁定。
+  String _fingerprintCurrentTrainingDraft() {
+    final d = _trainingDrafts[_trainingSceneIndex];
+    return '${d.ttsIntro}|${d.options.join('\u241e')}';
+  }
+
   void _saveCurrentTrainingDraft() {
     final draft = _trainingDrafts[_trainingSceneIndex];
     draft.ttsIntro = _ttsIntroCtrl.text.trim();
@@ -457,10 +472,25 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   void _markTrainingDraftDirty() {
     if (_loadingTrainingDraft) return;
     _saveCurrentTrainingDraft();
-    if (_trainingPreparingImages) return;
+    final fp = _fingerprintCurrentTrainingDraft();
+    final unlockPostPick = _trainingLockActionsAfterChildPick &&
+        fp != _trainingPostPickContentFingerprint;
+    if (_trainingPreparingImages) {
+      if (unlockPostPick && mounted) {
+        setState(() {
+          _trainingLockActionsAfterChildPick = false;
+          _trainingPostPickContentFingerprint = '';
+        });
+      }
+      return;
+    }
     final nextImages = Map<String, Map<String, String?>>.from(_preparedTrainingImages)
       ..remove(_trainingPreset.sceneId);
     setState(() {
+      if (unlockPostPick) {
+        _trainingLockActionsAfterChildPick = false;
+        _trainingPostPickContentFingerprint = '';
+      }
       _trainingImagesReady = false;
       _preparedTrainingImages = nextImages;
       _trainingImageStatus = '当前场景内容已修改，正在检查云端是否已有图片…';
@@ -483,6 +513,10 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       _optionCtrls[i].text = i < preset.options.length ? preset.options[i] : '';
     }
     _loadingTrainingDraft = false;
+    setState(() {
+      _trainingLockActionsAfterChildPick = false;
+      _trainingPostPickContentFingerprint = '';
+    });
     _scheduleTrainingAssetCacheCheck();
   }
 
@@ -560,6 +594,9 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       _trainingSessionId = null;
       _trainingPhase = AutismTrainingPhase.parentSetup;
       _lastSessionState = '';
+      _trainingDispatchInFlight = false;
+      _trainingLockActionsAfterChildPick = false;
+      _trainingPostPickContentFingerprint = '';
       _loadTrainingDraft(index);
       _trainingImagesReady = false;
       _trainingImageStatus = '正在检查云端是否已有当前场景图片…';
@@ -689,6 +726,16 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
 
       final confirmed = list.where((e) => (e['phase'] ?? '').toString() == 'image_confirmed').toList();
       if (confirmed.isEmpty) return;
+      var lockAfterChildPick = false;
+      for (final ev in confirmed) {
+        final sc = (ev['scene'] ?? '').toString();
+        if (sc.isEmpty || sc == 'daily_plan') continue;
+        final sid = (ev['session_id'] as num?)?.toInt();
+        if (_trainingSessionId != null && sid != null && sid == _trainingSessionId) {
+          lockAfterChildPick = true;
+          break;
+        }
+      }
       final latest = confirmed.last;
       final payload = Map<String, dynamic>.from((latest['payload'] as Map?) ?? const {});
       final label = (payload['label'] ?? '').toString().trim();
@@ -696,6 +743,11 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       final slotTime = (payload['slot_time'] ?? '').toString().trim();
       HapticFeedback.heavyImpact();
       setState(() {
+        if (lockAfterChildPick) {
+          _saveCurrentTrainingDraft();
+          _trainingLockActionsAfterChildPick = true;
+          _trainingPostPickContentFingerprint = _fingerprintCurrentTrainingDraft();
+        }
         _trainingEventBanner = [
           if (slotTime.isNotEmpty) slotTime,
           scene == 'daily_plan' ? '日常计划' : '孩子训练',
@@ -776,6 +828,9 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   }
 
   Future<void> _applyTrainingAssets() async {
+    if (_trainingDispatchInFlight || _trainingLockActionsAfterChildPick) {
+      return;
+    }
     _saveCurrentTrainingDraft();
     final scene = _trainingDrafts[_trainingSceneIndex].toJson();
     final options = (scene['options'] as List?) ?? const [];
@@ -840,6 +895,9 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   }
 
   Future<void> _startTraining() async {
+    if (_trainingDispatchInFlight || _trainingLockActionsAfterChildPick) {
+      return;
+    }
     _saveCurrentTrainingDraft();
     if (_trainingPreparingImages || !_trainingImagesReady) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -857,32 +915,61 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
       );
       return;
     }
-    final res = await _cloud.startAutismTraining(
-      childIdToFetch: widget.activeChildId,
-      sceneId: _trainingPreset.sceneId,
-      options: options,
-      images: _preparedTrainingImages[_trainingPreset.sceneId],
-      followUp: false,
-      ttsIntro: _ttsIntroCtrl.text.trim(),
-    );
     if (!mounted) return;
-    if (res == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('下发失败，请检查网络与星星是否在线')),
-      );
-      return;
-    }
-    final sid = (res['session_id'] as num?)?.toInt();
-    if (sid != null) {
-      _startPollingIfNeeded(sid);
-    }
+    setState(() => _trainingDispatchInFlight = true);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${_trainingPreset.title}已排队下发（设备数：${(res['queued_devices'] as List?)?.length ?? 0}）',
-        ),
+      const SnackBar(
+        content: Text('正在下发到星星机器人，请稍候…'),
+        duration: Duration(seconds: 2),
       ),
     );
+    try {
+      final res = await _cloud.startAutismTraining(
+        childIdToFetch: widget.activeChildId,
+        sceneId: _trainingPreset.sceneId,
+        options: options,
+        images: _preparedTrainingImages[_trainingPreset.sceneId],
+        followUp: false,
+        ttsIntro: _ttsIntroCtrl.text.trim(),
+      );
+      if (!mounted) return;
+      if (res == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              '下发请求未完成：请检查手机网络或稍后再试（若服务器正忙，可看 app.error.log）。',
+            ),
+            duration: Duration(seconds: 5),
+          ),
+        );
+        return;
+      }
+      setState(() {
+        _trainingLockActionsAfterChildPick = false;
+        _trainingPostPickContentFingerprint = '';
+      });
+      final sid = (res['session_id'] as num?)?.toInt();
+      if (sid != null) {
+        _startPollingIfNeeded(sid);
+      }
+      final pending = res['enqueue_pending'] == true;
+      final n = (res['queued_devices'] as List?)?.length ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            pending
+                ? '${_trainingPreset.title}已创建会话（后台合成语音并入队，通常数秒～数十秒内星星会收到）。'
+                    '预计目标设备数：$n。'
+                : '${_trainingPreset.title}已排队下发（设备数：$n）',
+          ),
+          duration: Duration(seconds: pending ? 6 : 4),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _trainingDispatchInFlight = false);
+      }
+    }
   }
 
   List<Map<String, dynamic>> _dailyPlanSlotsJson() {
@@ -1736,6 +1823,10 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
   Widget _buildTraining() {
     final preset = _trainingPreset;
     final canStartTraining = _trainingImagesReady && !_trainingPreparingImages;
+    final trainingActionsHardLocked =
+        _trainingDispatchInFlight || _trainingLockActionsAfterChildPick;
+    final canPressApply = !_trainingPreparingImages && !trainingActionsHardLocked;
+    final canPressDispatch = canStartTraining && !trainingActionsHardLocked;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1808,7 +1899,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                   child: Text('图片选项（至少一项）', style: TextStyle(fontWeight: FontWeight.w600)),
                 ),
                 TextButton.icon(
-                  onPressed: _trainingPreparingImages
+                  onPressed: (_trainingPreparingImages || trainingActionsHardLocked)
                       ? null
                       : () => setState(() => _applyTrainingScenePreset(_trainingSceneIndex)),
                   icon: const Icon(Icons.restart_alt_rounded, size: 18),
@@ -1864,14 +1955,28 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
               ),
             ),
             const SizedBox(height: 10),
+            if (_trainingDispatchInFlight) ...[
+              const Text(
+                '正在下发，请勿重复点击「应用」或「下发」，以免设备端多段语音叠播。',
+                style: TextStyle(height: 1.35, color: _Az.muted, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+            ],
+            if (_trainingLockActionsAfterChildPick && !_trainingDispatchInFlight) ...[
+              const Text(
+                '孩子已完成本轮选图。请修改上方开场白或图片选项后，再点击「应用」与「下发」开始下一轮。',
+                style: TextStyle(height: 1.35, color: _Az.muted, fontSize: 13),
+              ),
+              const SizedBox(height: 8),
+            ],
             FilledButton.icon(
-              onPressed: _trainingPreparingImages ? null : _applyTrainingAssets,
+              onPressed: canPressApply ? _applyTrainingAssets : null,
               icon: const Icon(Icons.cloud_upload_outlined),
               label: const Text('应用：先生成并存储当前场景图片'),
             ),
             const SizedBox(height: 8),
             FilledButton.icon(
-              onPressed: canStartTraining ? _startTraining : null,
+              onPressed: canPressDispatch ? _startTraining : null,
               icon: const Icon(Icons.send_rounded),
               label: Text('${preset.startButton}并下发到星星机器人'),
             ),
