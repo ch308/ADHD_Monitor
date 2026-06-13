@@ -239,7 +239,7 @@ static void ShowAutismChoiceWaitingPrompt() {
         lvgl->SetPreviewImage(nullptr);
     }
     display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u7b49\u5f85\u4f60\u7684\u9009\u62e9"));
-    display->SetEmotion("relaxed");
+    display->SetEmotion("happy");
 }
 
 static void VisualChoiceFallbackRestoreTask(void*) {
@@ -364,6 +364,18 @@ static bool PostXiaozhiOpeningHint(const std::string& opening, const std::string
     return ok;
 }
 
+static void SubmitRobotOpeningLine(const std::string& line, const std::string& context) {
+    if (line.empty()) {
+        return;
+    }
+    if (!PostXiaozhiOpeningHint(line, context)) {
+        return;
+    }
+    Application::GetInstance().Schedule([line]() {
+        Application::GetInstance().SubmitChildTextInput(line);
+    });
+}
+
 void adhd_remote_cmd_start_default_proactive(void) {
     const std::string opening(reinterpret_cast<const char*>(
         u8"\u4f60\u597d\u5440\uff0c\u6211\u662f\u661f\u661f\u3002"
@@ -375,7 +387,7 @@ void adhd_remote_cmd_start_default_proactive(void) {
         u8"\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u5f00\u573a\u767d\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u56de\u7b54\u3002"
     ));
     ESP_LOGI(TAG, "default proactive opening start");
-    (void)PostXiaozhiOpeningHint(opening, context);
+    SubmitRobotOpeningLine(opening, context);
 }
 
 static bool DownloadAndShowPreviewImage(const std::string& url, int choice_generation) {
@@ -586,6 +598,27 @@ static int ParseHourMinuteToMinuteOfDay(const char* text) {
     return hh * 60 + mm;
 }
 
+/// Rough delay so cloud TTS for the intro can play before we show choice UI.
+static int EstimateIntroDelayMs(const std::string& line) {
+    if (line.empty()) {
+        return 1500;
+    }
+    int n = 0;
+    for (unsigned char c : line) {
+        if ((c & 0xC0) != 0x80) {
+            ++n;
+        }
+    }
+    int ms = 1400 + n * 320;
+    if (ms < 2200) {
+        ms = 2200;
+    }
+    if (ms > 55000) {
+        ms = 55000;
+    }
+    return ms;
+}
+
 static void AutismImageSequenceTask(void* arg) {
     auto* urls = static_cast<std::vector<std::string>*>(arg);
     if (urls == nullptr) {
@@ -786,14 +819,14 @@ static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
         ? std::string(reinterpret_cast<const char*>(u8"\u65f6\u95f4\u5230\u5566\uff0c\u6211\u4eec\u6765\u9009\u4e00\u9009\u5427"))
         : slot.tts;
     ESP_LOGI(TAG, "daily_plan fire %s images=%u", slot.time_text.c_str(), (unsigned)slot.image_urls.size());
-    (void)PostXiaozhiOpeningHint(
+    SubmitRobotOpeningLine(
         line,
         std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8ba1\u5212\u8868\u5230\u70b9\u89e6\u53d1\u7684\u4e3b\u52a8\u63d0\u95ee\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u9009\u62e9\u56fe\u7247\u6216\u8bed\u97f3\u56de\u7b54\u3002"))
     );
     if (plan_ctx != nullptr) {
         auto* delay_arg = new IntroThenChoiceArg();
         delay_arg->ctx = plan_ctx;
-        delay_arg->delay_ms = 500;
+        delay_arg->delay_ms = EstimateIntroDelayMs(line);
         BaseType_t tr = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
         if (tr != pdPASS) {
             ESP_LOGW(TAG, "autism_intro_wait task create failed");
@@ -1028,9 +1061,10 @@ bool adhd_confirm_autism_choice(void) {
             praise = std::string(reinterpret_cast<const char*>(u8"\u771f\u68d2\uff01\u4f60\u9009\u4e86")) + label +
                      std::string(reinterpret_cast<const char*>(u8"\uff0c\u505a\u5f97\u5f88\u597d\uff01"));
         }
-        Application::GetInstance().Schedule([praise]() {
-            Application::GetInstance().SubmitChildTextInput(praise);
-        });
+        SubmitRobotOpeningLine(
+            praise,
+            std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8bad\u7ec3\u56fe\u7247\u9009\u62e9\u786e\u8ba4\u540e\u7684\u7ed3\u675f\u9f13\u52b1\u8bed\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u4e0d\u8981\u8ffd\u95ee\u3002"))
+        );
     }
     ScheduleVisualChoiceFallbackRestore();
     return true;
@@ -1044,16 +1078,23 @@ bool adhd_next_autism_choice(void) {
     int generation = 0;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (g_choice_context.active && !g_choice_context.items.empty()) {
-            g_choice_context.display_dimmed = false;
-            ++g_choice_context.activity_seq;
-            next_idx = (g_choice_context.current_index + 1) %
-                       static_cast<int>(g_choice_context.items.size());
-            g_choice_context.current_index = next_idx;
-            url = g_choice_context.items[next_idx].image_url;
-            audio_url = g_choice_context.items[next_idx].audio_url;
-            generation = g_choice_context.generation;
+            if (g_choice_context.display_dimmed) {
+                next_idx = -2;
+            } else {
+                ++g_choice_context.activity_seq;
+                next_idx = (g_choice_context.current_index + 1) %
+                           static_cast<int>(g_choice_context.items.size());
+                g_choice_context.current_index = next_idx;
+                url = g_choice_context.items[next_idx].image_url;
+                audio_url = g_choice_context.items[next_idx].audio_url;
+                generation = g_choice_context.generation;
+            }
         }
         xSemaphoreGive(g_choice_mutex);
+    }
+    if (next_idx == -2) {
+        ESP_LOGI(TAG, "autism choice shake ignored while dimmed");
+        return true;
     }
     if (next_idx < 0 || url.empty()) {
         return false;
@@ -1193,9 +1234,18 @@ static void HandleOneCommand(cJSON* root) {
                 InvalidateAutismTrainingChoiceUi();
                 ++g_autism_training_cmd_revision;
                 ctx->training_cmd_revision = g_autism_training_cmd_revision;
+                cJSON* tts = cJSON_GetObjectItem(session, "tts_intro");
+                std::string line(reinterpret_cast<const char*>(u8"\u6211\u4eec\u4e00\u8d77\u6765\u505a\u4e00\u4e2a\u7ec3\u4e60\u5427"));
+                if (cJSON_IsString(tts) && tts->valuestring && strlen(tts->valuestring) > 0) {
+                    line = tts->valuestring;
+                }
+                SubmitRobotOpeningLine(
+                    line,
+                    std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u5b64\u72ec\u75c7\u65e5\u5e38\u8bad\u7ec3\u7684\u5f00\u573a\u767d\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u4e0d\u8981\u8ffd\u95ee\uff0c\u7136\u540e\u7b49\u5f85\u5b69\u5b50\u9009\u62e9\u56fe\u7247\u3002"))
+                );
                 auto* delay_arg = new IntroThenChoiceArg();
                 delay_arg->ctx = ctx;
-                delay_arg->delay_ms = 500;
+                delay_arg->delay_ms = EstimateIntroDelayMs(line);
                 BaseType_t tr_intro = xTaskCreate(IntroThenChoiceTask, "autism_intro_wait", 4096, delay_arg, 3, nullptr);
                 if (tr_intro != pdPASS) {
                     ESP_LOGW(TAG, "autism_intro_wait task create failed");
@@ -1217,9 +1267,10 @@ static void HandleOneCommand(cJSON* root) {
                 line = tts->valuestring;
             }
             if (!line.empty()) {
-                Application::GetInstance().Schedule([line]() {
-                    Application::GetInstance().SubmitChildTextInput(line);
-                });
+                SubmitRobotOpeningLine(
+                    line,
+                    std::string(reinterpret_cast<const char*>(u8"\u8fd9\u662f\u8bad\u7ec3\u7ed3\u679c\u6216\u7ed3\u675f\u64ad\u62a5\u3002\u8bf7\u53ea\u64ad\u653e\u8fd9\u53e5\u8bdd\uff0c\u4e0d\u8981\u8ffd\u95ee\u3002"))
+                );
             }
         } else if (strcmp(k, "daily_plan") == 0) {
             StoreAutismDailyPlan(session);

@@ -1795,7 +1795,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
             const SizedBox(height: 10),
             _buildTrainingFlowExpander(preset),
             const SizedBox(height: 12),
-            const Text('开场白（可选）', style: TextStyle(fontWeight: FontWeight.w600)),
+            const Text('开场白', style: TextStyle(fontWeight: FontWeight.w600)),
             TextField(
               controller: _ttsIntroCtrl,
               enabled: !_trainingPreparingImages,

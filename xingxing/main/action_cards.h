@@ -28,11 +28,18 @@ private:
     ActionCards& operator=(const ActionCards&) = delete;
 
     static void ConfirmCallbackThunk(void* user_data);
+    static void IdleDimTask(void* user_data);
+    void MarkActivity();
+    void RestoreBacklight();
+    void DimBacklight();
+    void ShowWaitingPrompt();
     void ShowCurrent();
     void Announce();
 
     bool active_ = false;
-    int index_ = 0;
+    bool display_dimmed_ = false;
+    int activity_seq_ = 0;
+    int index_ = -1;
 };
 
 #endif // ACTION_CARDS_H
