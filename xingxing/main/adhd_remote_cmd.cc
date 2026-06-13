@@ -507,8 +507,53 @@ static bool DownloadAndPlayOggLabel(const std::string& url) {
         http->Close();
         return false;
     }
-    std::string body = http->ReadAll();
+    const size_t content_length = http->GetBodyLength();
+    const size_t max_audio_bytes = 256 * 1024;
+    if (content_length > max_audio_bytes) {
+        ESP_LOGW(TAG, "autism label audio too large length=%u", (unsigned)content_length);
+        http->Close();
+        return false;
+    }
+    ESP_LOGI(TAG, "autism label audio http ok body_len=%u", (unsigned)content_length);
+
+    std::string body;
+    body.reserve(content_length > 0 ? content_length : 8192);
+    size_t total_read = 0;
+    const int64_t read_deadline_us = esp_timer_get_time() + 8000LL * 1000LL;
+    while (content_length == 0 || total_read < content_length) {
+        if (esp_timer_get_time() > read_deadline_us) {
+            ESP_LOGW(TAG, "autism label audio read timeout bytes=%u url=%s",
+                     (unsigned)total_read, url.c_str());
+            http->Close();
+            return false;
+        }
+        char chunk[2048];
+        const size_t want = content_length > 0
+            ? std::min(sizeof(chunk), content_length - total_read)
+            : sizeof(chunk);
+        int ret = http->Read(chunk, want);
+        if (ret < 0) {
+            ESP_LOGW(TAG, "autism label audio read failed: %s", url.c_str());
+            http->Close();
+            return false;
+        }
+        if (ret == 0) {
+            break;
+        }
+        if (total_read + static_cast<size_t>(ret) > max_audio_bytes) {
+            ESP_LOGW(TAG, "autism label audio chunked too large >%u", (unsigned)max_audio_bytes);
+            http->Close();
+            return false;
+        }
+        body.append(chunk, ret);
+        total_read += static_cast<size_t>(ret);
+    }
     http->Close();
+    if (content_length > 0 && total_read != content_length) {
+        ESP_LOGW(TAG, "autism label audio incomplete read %u/%u",
+                 (unsigned)total_read, (unsigned)content_length);
+        return false;
+    }
     if (body.empty() || body.size() > 256 * 1024) {
         ESP_LOGW(TAG, "autism label audio invalid size=%u", (unsigned)body.size());
         return false;
@@ -516,6 +561,17 @@ static bool DownloadAndPlayOggLabel(const std::string& url) {
     Application::GetInstance().PlaySound(std::string_view(body.data(), body.size()));
     ESP_LOGI(TAG, "autism label audio played bytes=%u", (unsigned)body.size());
     return true;
+}
+
+static void WaitForRobotAudioQuietBounded(int timeout_ms) {
+    const int64_t deadline_us = esp_timer_get_time() + static_cast<int64_t>(timeout_ms) * 1000LL;
+    auto& audio_service = Application::GetInstance().GetAudioService();
+    while (!audio_service.IsIdle() && esp_timer_get_time() < deadline_us) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    if (!audio_service.IsIdle()) {
+        ESP_LOGW(TAG, "robot audio wait timeout after %d ms", timeout_ms);
+    }
 }
 
 struct RobotOggRequest {
@@ -546,10 +602,14 @@ static void PlayRobotOggAsync(const std::string& url) {
 }
 
 /// 日常训练确认后：全屏选图 UI 保持到鼓励 OGG 播完，再关 visual choice / 恢复动作卡片。
-/// `generation_marker` 为确认瞬间的 `g_choice_generation`；若期间被 Invalidate 覆盖会递增，此时不再关 UI（已由 Invalidate 处理）。
+/// `training_cmd_revision` 为确认时的 `snapshot.training_cmd_revision`；若期间下发新的
+/// training_start 会递增 `g_autism_training_cmd_revision`，此时不再关 UI（新会话已接管）。
 struct PraiseThenCloseVisualArg {
     std::string praise_url;
-    int generation_marker = 0;
+    int training_cmd_revision = 0;
+    AutismChoiceContext snapshot;
+    int idx = -1;
+    std::string label;
 };
 
 static void PraiseThenCloseVisualChoiceTask(void* arg) {
@@ -558,14 +618,19 @@ static void PraiseThenCloseVisualChoiceTask(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
+    // 从本任务发 POST，避免在 BOOT/LVGL 线程里同步 HttpPostJson 与鼓励下载并发卡死 lwIP。
+    (void)PostAutismTrainingChoiceEvent(a->snapshot, a->idx, a->label);
     if (!a->praise_url.empty()) {
-        (void)DownloadAndPlayOggLabel(a->praise_url);
-        Application::GetInstance().GetAudioService().WaitForPlaybackQueueEmpty();
+        const bool played = DownloadAndPlayOggLabel(a->praise_url);
+        if (!played) {
+            ESP_LOGW(TAG, "praise_close: encourage ogg missing or download failed");
+        }
+        WaitForRobotAudioQuietBounded(15000);
         vTaskDelay(pdMS_TO_TICKS(400));
     }
     bool skip_close = false;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-        if (g_choice_generation != a->generation_marker) {
+        if (g_autism_training_cmd_revision != a->training_cmd_revision) {
             skip_close = true;
         }
         xSemaphoreGive(g_choice_mutex);
@@ -573,6 +638,8 @@ static void PraiseThenCloseVisualChoiceTask(void* arg) {
     if (!skip_close) {
         Application::GetInstance().SetVisualChoiceMode(false);
         RestoreDefaultActionCards();
+    } else {
+        ESP_LOGI(TAG, "praise_close: skip UI close (superseded by newer training_start)");
     }
     delete a;
     vTaskDelete(nullptr);
@@ -773,7 +840,7 @@ static void IntroThenChoiceTask(void* arg) {
     if (!a->intro_audio_url.empty()) {
         // 先把开场白整段播完（含解码/播放队列排空），再露出选图界面。
         (void)DownloadAndPlayOggLabel(a->intro_audio_url);
-        Application::GetInstance().GetAudioService().WaitForPlaybackQueueEmpty();
+        WaitForRobotAudioQuietBounded(15000);
         vTaskDelay(pdMS_TO_TICKS(400));  // 一点自然停顿，避免说完立刻跳图
     } else if (a->fallback_delay_ms > 0) {
         vTaskDelay(pdMS_TO_TICKS(a->fallback_delay_ms));
@@ -1055,7 +1122,6 @@ bool adhd_confirm_autism_choice(void) {
     bool consumed_wake = false;
     int idx = -1;
     std::string label;
-    int gen_after_confirm = 0;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
         if (g_choice_context.active) {
             if (g_choice_context.display_dimmed) {
@@ -1070,8 +1136,8 @@ bool adhd_confirm_autism_choice(void) {
                 idx = g_choice_context.current_index;
                 label = g_choice_context.items[idx].label;
                 g_choice_context.active = false;
-                g_choice_generation++;
-                gen_after_confirm = g_choice_generation;
+                // 不在此处递增 g_choice_generation：下一轮 StartAutismChoiceSequence 会再 ++，
+                // 若此处也 ++，鼓励收尾任务会误判 supersede 而永远不 SetVisualChoiceMode(false)。
             }
         }
         xSemaphoreGive(g_choice_mutex);
@@ -1085,9 +1151,8 @@ bool adhd_confirm_autism_choice(void) {
     }
     ESP_LOGI(TAG, "autism choice confirmed scene=%s idx=%d label=%s",
              snapshot.scene.c_str(), idx, label.c_str());
-    (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
     if (snapshot.source == "child_training") {
-        // 鼓励语：同步下载并入队播放后等队列排空，全屏选图保持到播完再关 UI。
+        // 鼓励语：在独立任务里先 POST 再下载播放，避免 LVGL 线程与 HTTP 下载并发；播完再关 UI。
         const std::string praise_url =
             (idx >= 0 && idx < static_cast<int>(snapshot.items.size()))
                 ? snapshot.items[idx].praise_audio_url
@@ -1095,19 +1160,25 @@ bool adhd_confirm_autism_choice(void) {
         if (!praise_url.empty()) {
             auto* pa = new PraiseThenCloseVisualArg();
             pa->praise_url = praise_url;
-            pa->generation_marker = gen_after_confirm;
-            if (xTaskCreate(PraiseThenCloseVisualChoiceTask, "praise_close", 8192, pa, 3, nullptr) != pdPASS) {
+            pa->training_cmd_revision = snapshot.training_cmd_revision;
+            pa->snapshot = std::move(snapshot);
+            pa->idx = idx;
+            pa->label = std::move(label);
+            if (xTaskCreate(PraiseThenCloseVisualChoiceTask, "praise_close", 12288, pa, 3, nullptr) != pdPASS) {
                 ESP_LOGW(TAG, "praise_close task create failed");
+                (void)PostAutismTrainingChoiceEvent(pa->snapshot, pa->idx, pa->label);
                 delete pa;
                 Application::GetInstance().SetVisualChoiceMode(false);
                 RestoreDefaultActionCards();
             }
         } else {
             ESP_LOGW(TAG, "autism praise audio missing (server edge-tts/ffmpeg?) idx=%d", idx);
+            (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
             Application::GetInstance().SetVisualChoiceMode(false);
             RestoreDefaultActionCards();
         }
     } else {
+        (void)PostAutismTrainingChoiceEvent(snapshot, idx, label);
         Application::GetInstance().SetVisualChoiceMode(false);
         RestoreDefaultActionCards();
     }
