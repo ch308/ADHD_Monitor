@@ -416,6 +416,29 @@ static void SubmitRobotOpeningLine(const std::string& line, const std::string& c
     });
 }
 
+static std::string RewriteLoopbackAssetUrlForDevice(const std::string& url) {
+    if (url.empty() || strlen(CONFIG_ADHD_MONITOR_CMD_HOST) == 0) {
+        return url;
+    }
+    const bool is_loopback =
+        url.rfind("http://127.0.0.1", 0) == 0 ||
+        url.rfind("http://localhost", 0) == 0;
+    if (!is_loopback) {
+        return url;
+    }
+    const size_t scheme_end = url.find("://");
+    const size_t path_start = scheme_end == std::string::npos
+        ? std::string::npos
+        : url.find('/', scheme_end + 3);
+    if (path_start == std::string::npos) {
+        return url;
+    }
+    std::string rewritten = std::string("http://") + CONFIG_ADHD_MONITOR_CMD_HOST + ":" +
+                            std::to_string(CONFIG_ADHD_MONITOR_CMD_PORT) + url.substr(path_start);
+    ESP_LOGW(TAG, "rewrite loopback asset url for device: %s -> %s", url.c_str(), rewritten.c_str());
+    return rewritten;
+}
+
 void adhd_remote_cmd_start_default_proactive(void) {
     const std::string opening(reinterpret_cast<const char*>(
         u8"\u4f60\u597d\u5440\uff0c\u6211\u662f\u661f\u661f\u3002"
@@ -435,15 +458,16 @@ static bool DownloadAndShowPreviewImage(const std::string& url, int choice_gener
     if (url.empty()) {
         return false;
     }
+    const std::string asset_url = RewriteLoopbackAssetUrlForDevice(url);
     auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-    ESP_LOGI(TAG, "autism image download: %s", url.c_str());
-    if (!http->Open("GET", url)) {
-        ESP_LOGW(TAG, "autism image open failed: %s", url.c_str());
+    ESP_LOGI(TAG, "autism image download: %s", asset_url.c_str());
+    if (!http->Open("GET", asset_url)) {
+        ESP_LOGW(TAG, "autism image open failed: %s", asset_url.c_str());
         return false;
     }
     int status_code = http->GetStatusCode();
     if (status_code != 200) {
-        ESP_LOGW(TAG, "autism image http status=%d url=%s", status_code, url.c_str());
+        ESP_LOGW(TAG, "autism image http status=%d url=%s", status_code, asset_url.c_str());
         http->Close();
         return false;
     }
@@ -481,7 +505,7 @@ static bool DownloadAndShowPreviewImage(const std::string& url, int choice_gener
             : sizeof(chunk);
         int ret = http->Read(dst, want);
         if (ret < 0) {
-            ESP_LOGW(TAG, "autism image read failed: %s", url.c_str());
+            ESP_LOGW(TAG, "autism image read failed: %s", asset_url.c_str());
             if (data != nullptr) {
                 heap_caps_free(data);
             }
@@ -567,15 +591,16 @@ static bool DownloadAndPlayOggLabel(const std::string& url) {
     if (url.empty()) {
         return false;
     }
+    const std::string asset_url = RewriteLoopbackAssetUrlForDevice(url);
     auto http = Board::GetInstance().GetNetwork()->CreateHttp(3);
-    ESP_LOGI(TAG, "autism label audio download: %s", url.c_str());
-    if (!http->Open("GET", url)) {
-        ESP_LOGW(TAG, "autism label audio open failed: %s", url.c_str());
+    ESP_LOGI(TAG, "autism label audio download: %s", asset_url.c_str());
+    if (!http->Open("GET", asset_url)) {
+        ESP_LOGW(TAG, "autism label audio open failed: %s", asset_url.c_str());
         return false;
     }
     const int status_code = http->GetStatusCode();
     if (status_code != 200) {
-        ESP_LOGW(TAG, "autism label audio http status=%d url=%s", status_code, url.c_str());
+        ESP_LOGW(TAG, "autism label audio http status=%d url=%s", status_code, asset_url.c_str());
         http->Close();
         return false;
     }
@@ -595,7 +620,7 @@ static bool DownloadAndPlayOggLabel(const std::string& url) {
     while (content_length == 0 || total_read < content_length) {
         if (esp_timer_get_time() > read_deadline_us) {
             ESP_LOGW(TAG, "autism label audio read timeout bytes=%u url=%s",
-                     (unsigned)total_read, url.c_str());
+                     (unsigned)total_read, asset_url.c_str());
             http->Close();
             return false;
         }
@@ -605,7 +630,7 @@ static bool DownloadAndPlayOggLabel(const std::string& url) {
             : sizeof(chunk);
         int ret = http->Read(chunk, want);
         if (ret < 0) {
-            ESP_LOGW(TAG, "autism label audio read failed: %s", url.c_str());
+            ESP_LOGW(TAG, "autism label audio read failed: %s", asset_url.c_str());
             http->Close();
             return false;
         }
