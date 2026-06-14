@@ -32,3 +32,6 @@ bool adhd_next_autism_choice(void);
 
 /// 选图界面已进入「省电黑屏」时：摇晃不应唤醒或切图（仅 BOOT 唤醒），供 MPU 任务先判断。
 bool adhd_autism_choice_shake_blocked(void);
+
+/// 日常训练/计划表「开场白」播放期间为 true；Kids 中心表情/文案不刷新，避免盖住全屏。
+bool adhd_path_a_intro_suppresses_kids(void);

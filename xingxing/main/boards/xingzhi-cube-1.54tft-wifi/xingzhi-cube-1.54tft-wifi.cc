@@ -120,6 +120,10 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
+            // 上电全屏「欢迎你」等待期：单击 BOOT 进入「摇摇我」提示，再解锁摇晃换图。
+            if (Application::GetInstance().TryConsumePowerOnWelcomeBootClick()) {
+                return;
+            }
             // 动态训练 / 日常计划图片显示时，BOOT 单击 = 确认当前图片并上报云端。
             if (adhd_confirm_autism_choice()) {
                 return;
@@ -436,6 +440,9 @@ private:
 
                 if (delta >= MPU6050_SHAKE_SWITCH_THRESHOLD) {
                     last_switch_us = now_us;
+                    if (Application::GetInstance().PowerOnWelcomeShakeBlocked()) {
+                        continue;
+                    }
                     if (adhd_autism_choice_shake_blocked()) {
                         continue;
                     }

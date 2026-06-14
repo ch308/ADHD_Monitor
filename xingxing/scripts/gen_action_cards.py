@@ -14,7 +14,8 @@ This script produces four kinds of output:
      (ten routine cards + five hint images when sources exist)
   2. Ogg/Opus voice clips    -> main/assets/locales/zh-CN/act_<slug>.ogg
      (TTS text: "妈妈，我要" + Chinese label; gen_lang.py -> Lang::Sounds::OGG_ACT_<SLUG>)
-     When using --audio, also writes hint_welcome.ogg ("嗨，今天又是美好的一天").
+     When using --audio, also writes hint_welcome.ogg and hint_try_shake.ogg
+     ("嗨，今天又是美好的一天" / "你试着摇摇我吧").
   3. A manifest header       -> main/action_cards/action_cards_generated.h
      (the table consumed by action_cards.cc; flips ACTION_CARDS_HAVE_AUDIO to 1
       only once every voice clip exists, so the project always builds)
@@ -208,9 +209,20 @@ def generate_audio():
             "-ar", "16000", "-frame_duration", "60",
             ogg_welcome,
         ])
+        mp3_shake = os.path.join(tmp_dir, "hint_try_shake.mp3")
+        ogg_shake = os.path.join(AUDIO_OUT_DIR, "hint_try_shake.ogg")
+        shake_text = "\u4f60\u8bd5\u7740\u6447\u6447\u6211\u5427"  # 你试着摇摇我吧
+        log("TTS '%s' -> hint_try_shake.ogg" % shake_text)
+        asyncio.run(synth(shake_text, mp3_shake))
+        subprocess.check_call([
+            ffmpeg, "-y", "-i", mp3_shake,
+            "-c:a", "libopus", "-b:a", "16k", "-ac", "1",
+            "-ar", "16000", "-frame_duration", "60",
+            ogg_shake,
+        ])
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    log("audio generation done (%d routine + hint_welcome)" % len(ACTIONS))
+    log("audio generation done (%d routine + hint_welcome + hint_try_shake)" % len(ACTIONS))
 
 
 def audio_present():

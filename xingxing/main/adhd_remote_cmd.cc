@@ -40,6 +40,7 @@
 #include <functional>
 #include <memory>
 #include <vector>
+#include <atomic>
 
 #include "application.h"
 #include "board.h"
@@ -220,17 +221,26 @@ static void EnsureAutismChoiceMutex() {
     }
 }
 
+#if HAVE_LVGL
+static std::atomic<bool> g_path_a_intro_suppresses_kids{false};
+struct PathAIntroKidsGuard {
+    PathAIntroKidsGuard() { g_path_a_intro_suppresses_kids.store(true); }
+    ~PathAIntroKidsGuard() { g_path_a_intro_suppresses_kids.store(false); }
+};
+#endif
+
+bool adhd_path_a_intro_suppresses_kids(void) {
+#if HAVE_LVGL
+    return g_path_a_intro_suppresses_kids.load();
+#else
+    return false;
+#endif
+}
+
 /** 行动卡片全屏层在 preview_image_ 之上，不退出则训练图永远被挡住。 */
 static void ExitActionCardsIfCoveringPreview() {
     if (ActionCards::GetInstance().IsActive()) {
         ESP_LOGI(TAG, "leaving action cards (fullscreen was covering preview)");
-        ActionCards::GetInstance().Toggle();
-    }
-}
-
-static void RestoreDefaultActionCards() {
-    if (!ActionCards::GetInstance().IsActive()) {
-        ESP_LOGI(TAG, "restore default action cards");
         ActionCards::GetInstance().Toggle();
     }
 }
@@ -723,7 +733,7 @@ static void PlayRobotOggAsync(const std::string& url) {
     }
 }
 
-/// 日常训练 / 计划表确认后：全屏选图 UI 保持到鼓励 OGG 播完，再关 visual choice / 恢复动作卡片。
+/// 日常训练 / 计划表确认后：全屏选图 UI 保持到鼓励 OGG 播完，再关 visual choice，并按上电逻辑回到全屏「欢迎你」。
 /// `training_cmd_revision` / `plan_table_revision` 为确认时的快照；若期间下发新的
 /// training_start 或新计划表会递增 revision，此时不再关 UI（新会话已接管）。
 struct PraiseThenCloseVisualArg {
@@ -830,8 +840,8 @@ static void PraiseThenCloseVisualChoiceTask(void* arg) {
     }
     if (!skip_close) {
         Application::GetInstance().SetVisualChoiceMode(false);
-        RestoreDefaultActionCards();
         RestoreAutismChoiceDisplayFully();
+        Application::GetInstance().EnterChildVoluntaryWelcomeFromPathA();
     } else {
         ESP_LOGI(TAG, "praise_close: skip UI close (superseded by newer session/plan)");
     }
@@ -873,8 +883,8 @@ static void ChoiceTimeoutCloseTask(void* arg) {
         ESP_LOGW(TAG, "choice_timeout: no choice_timeout_audio_url from server");
     }
     Application::GetInstance().SetVisualChoiceMode(false);
-    RestoreDefaultActionCards();
     RestoreAutismChoiceDisplayFully();
+    Application::GetInstance().EnterChildVoluntaryWelcomeFromPathA();
     delete snap;
     vTaskDelete(nullptr);
 }
@@ -1085,6 +1095,9 @@ static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
         delete ctx;
         return;
     }
+#if HAVE_LVGL
+    g_path_a_intro_suppresses_kids.store(false);
+#endif
     Application::GetInstance().SetVisualChoiceMode(true);
     EnsureAutismChoiceMutex();
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
@@ -1135,6 +1148,9 @@ static void IntroThenChoiceTask(void* arg) {
         vTaskDelete(nullptr);
         return;
     }
+#if HAVE_LVGL
+    PathAIntroKidsGuard intro_kids_guard;
+#endif
     if (!a->intro_audio_url.empty()) {
         // 固定话术 OGG（服务端按时段 tts 预生成），整段播完再出选图。
         (void)DownloadAndPlayOggLabel(a->intro_audio_url);
@@ -1206,8 +1222,8 @@ static void InvalidateAutismTrainingChoiceUi() {
     }
     if (cleared) {
         Application::GetInstance().SetVisualChoiceMode(false);
-        RestoreDefaultActionCards();
         RestoreAutismChoiceDisplayFully();
+        Application::GetInstance().EnterChildVoluntaryWelcomeFromPathA();
         ESP_LOGI(TAG, "autism training superseded: cleared in-progress training choice UI");
     }
 }
@@ -1315,8 +1331,8 @@ static void InvalidateAutismDailyPlanChoiceUi() {
     }
     if (cleared) {
         Application::GetInstance().SetVisualChoiceMode(false);
-        RestoreDefaultActionCards();
         RestoreAutismChoiceDisplayFully();
+        Application::GetInstance().EnterChildVoluntaryWelcomeFromPathA();
         ESP_LOGI(TAG, "daily_plan superseded: cleared in-progress plan choice UI");
     }
 }
@@ -1524,14 +1540,14 @@ bool adhd_confirm_autism_choice(void) {
             (void)PostAutismChoiceEvent(pa->snapshot, "image_confirmed", pa->idx, pa->label, false);
             delete pa;
             Application::GetInstance().SetVisualChoiceMode(false);
-            RestoreDefaultActionCards();
             RestoreAutismChoiceDisplayFully();
+            Application::GetInstance().EnterChildVoluntaryWelcomeFromPathA();
         }
     } else {
         (void)PostAutismChoiceEvent(snapshot, "image_confirmed", idx, label, false);
         Application::GetInstance().SetVisualChoiceMode(false);
-        RestoreDefaultActionCards();
         RestoreAutismChoiceDisplayFully();
+        Application::GetInstance().EnterChildVoluntaryWelcomeFromPathA();
     }
     return true;
 }
@@ -1897,6 +1913,10 @@ bool adhd_next_autism_choice(void) {
     return false;
 }
 bool adhd_autism_choice_shake_blocked(void) {
+    return false;
+}
+
+bool adhd_path_a_intro_suppresses_kids(void) {
     return false;
 }
 

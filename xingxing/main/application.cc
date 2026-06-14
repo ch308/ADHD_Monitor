@@ -10,6 +10,7 @@
 #include "assets.h"
 #include "settings.h"
 #include "adhd_remote_cmd.h"
+#include "action_cards.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -25,9 +26,12 @@
 
 #if HAVE_LVGL
 #include "action_cards/choice_hint_images_generated.h"
+#include "lcd_display.h"
 #include <atomic>
+#include <functional>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
 #include <esp_timer.h>
 #endif
 
@@ -35,6 +39,46 @@
 
 #if HAVE_LVGL
 static std::atomic<bool> g_power_on_welcome_armed{true};
+/// 0=正常；1=全屏欢迎等 BOOT；2=已按 BOOT，播「摇摇我」并再等 2s，仍禁止 MPU 换作息图。
+static std::atomic<int> g_power_welcome_shake_gate{0};
+
+static void RunUiSync(std::function<void()> fn) {
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    if (sem == nullptr) {
+        fn();
+        return;
+    }
+    auto* heap_fn = new std::function<void()>(std::move(fn));
+    Application::GetInstance().Schedule([heap_fn, sem]() {
+        (*heap_fn)();
+        delete heap_fn;
+        xSemaphoreGive(sem);
+    });
+    (void)xSemaphoreTake(sem, pdMS_TO_TICKS(8000));
+    vSemaphoreDelete(sem);
+}
+
+static void PowerOnWelcomePostBootTask(void*) {
+    RunUiSync([]() {
+        auto* d = Board::GetInstance().GetDisplay();
+        if (d != nullptr) {
+            d->HideFullscreenImage();
+        }
+    });
+    Application::GetInstance().PlaySound(Lang::Sounds::OGG_HINT_TRY_SHAKE);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    auto& audio = Application::GetInstance().GetAudioService();
+    const int64_t deadline_us = esp_timer_get_time() + 15000LL * 1000LL;
+    while (!audio.IsIdle() && esp_timer_get_time() < deadline_us) {
+        vTaskDelay(pdMS_TO_TICKS(80));
+    }
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    Application::GetInstance().Schedule([]() {
+        ActionCards::GetInstance().EnterRoutineFromPowerWelcome();
+        g_power_welcome_shake_gate.store(3);
+    });
+    vTaskDelete(nullptr);
+}
 
 static void PowerOnWelcomeTask(void*) {
     auto* display = Board::GetInstance().GetDisplay();
@@ -49,12 +93,33 @@ static void PowerOnWelcomeTask(void*) {
         vTaskDelay(pdMS_TO_TICKS(80));
     }
     vTaskDelay(pdMS_TO_TICKS(300));
-    if (display != nullptr) {
-        display->HideFullscreenImage();
-    }
     vTaskDelete(nullptr);
 }
 #endif
+
+void Application::EnterChildVoluntaryWelcomeFromPathA() {
+#if HAVE_LVGL
+    g_power_welcome_shake_gate.store(1);
+    Schedule([this]() {
+        if (ActionCards::GetInstance().IsActive()) {
+            ActionCards::GetInstance().Toggle();
+        }
+        auto* display = Board::GetInstance().GetDisplay();
+        if (display != nullptr) {
+            if (auto* lcd = dynamic_cast<LcdDisplay*>(display)) {
+                lcd->SetPreviewImage(nullptr);
+            }
+            display->HideFullscreenImage();
+        }
+        if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) != pdPASS) {
+            g_power_welcome_shake_gate.store(0);
+#ifdef CONFIG_ADHD_KIDS_UI
+            RefreshKidsDisplay();
+#endif
+        }
+    });
+#endif
+}
 
 static constexpr const char* kXiaoxingxingWakeOpeningLine =
     "你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。";
@@ -525,6 +590,13 @@ void Application::HandleActivationDoneEvent() {
 #endif
 
     SystemInfo::PrintHeapStats();
+    bool welcome_pending = false;
+#if HAVE_LVGL
+    welcome_pending = g_power_on_welcome_armed.exchange(false);
+    if (welcome_pending) {
+        g_power_welcome_shake_gate.store(1);
+    }
+#endif
     SetDeviceState(kDeviceStateIdle);
 
     auto display = Board::GetInstance().GetDisplay();
@@ -551,14 +623,13 @@ void Application::HandleActivationDoneEvent() {
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
 #if HAVE_LVGL
-    // 上电欢迎 TTS 与 OGG_SUCCESS 几乎同时播时，两条 Ogg 进同一解码队列易叠音、发糊。
-    // 欢迎任务成功启动时由欢迎语音代替 success；创建失败则仍播 success。
     bool welcome_started = false;
-    if (g_power_on_welcome_armed.exchange(false)) {
+    if (welcome_pending) {
         if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) == pdPASS) {
             welcome_started = true;
         } else {
             g_power_on_welcome_armed = true;
+            g_power_welcome_shake_gate.store(0);
         }
     }
     if (!welcome_started) {
@@ -1169,6 +1240,22 @@ static const char* PickKidsStatusLine(const char* const* lines, size_t count) {
 }
 
 void Application::RefreshKidsDisplay() {
+#if HAVE_LVGL
+    const int gate = g_power_welcome_shake_gate.load();
+    if (gate == 1 || gate == 2) {
+        return;
+    }
+    // 行动卡片全屏图期间勿用 Kids 中心表情/文案盖住画面（否则会像「只剩小笑脸」）。
+    if (ActionCards::GetInstance().IsActive()) {
+        return;
+    }
+    if (adhd_path_a_intro_suppresses_kids()) {
+        return;
+    }
+#endif
+    if (visual_choice_mode_) {
+        return;
+    }
     auto display = Board::GetInstance().GetDisplay();
     display->SetWelcomeTitle("");
 
@@ -1738,6 +1825,31 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+
+bool Application::TryConsumePowerOnWelcomeBootClick() {
+#if HAVE_LVGL
+    int expected = 1;
+    if (!g_power_welcome_shake_gate.compare_exchange_strong(expected, 2)) {
+        return false;
+    }
+    if (xTaskCreate(PowerOnWelcomePostBootTask, "pwr_wel_post", 6144, nullptr, 3, nullptr) != pdPASS) {
+        g_power_welcome_shake_gate.store(1);
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool Application::PowerOnWelcomeShakeBlocked() const {
+#if HAVE_LVGL
+    const int g = g_power_welcome_shake_gate.load();
+    return g == 1 || g == 2;
+#else
+    return false;
+#endif
 }
 
 void Application::ResetProtocol() {

@@ -39,6 +39,21 @@ void ActionCards::ConfirmSelection() {
     Announce();
 }
 
+void ActionCards::EnterRoutineFromPowerWelcome() {
+    if (active_) {
+        return;
+    }
+    auto* display = Board::GetInstance().GetDisplay();
+    active_ = true;
+    display_dimmed_ = false;
+    activity_seq_ = 0;
+    index_ = 0;
+    ESP_LOGI(TAG, "Entering action cards from power welcome (shake selects card)");
+    RestoreBacklight();
+    ShowCurrent();
+    (void)xTaskCreate(IdleDimTask, "cards_idle_dim", 3072, this, 2, nullptr);
+}
+
 void ActionCards::Toggle() {
     auto* display = Board::GetInstance().GetDisplay();
     if (!active_) {
@@ -191,6 +206,7 @@ void ActionCards::DimBacklight() {}
 void ActionCards::ShowWaitingPrompt() {}
 void ActionCards::ShowCurrent() {}
 void ActionCards::ConfirmSelection() {}
+void ActionCards::EnterRoutineFromPowerWelcome() {}
 void ActionCards::Announce() {}
 
 #endif  // HAVE_LVGL
