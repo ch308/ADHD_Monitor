@@ -85,13 +85,15 @@ private:
 #else
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
 #endif
+        // 与 Application::EnterSleepPowerSaveMode 一致：关背光 + 关面板，避免仅背光=1 仍像「变暗」
+        // 且摇晃易被误判为活动；休眠期间 MPU 任务不再 WakeUp（见 StartMpu6050Task）。
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
-            GetBacklight()->SetBrightness(1);
+            SetApplicationSleepDisplayDimmed(true);
         });
         power_save_timer_->OnExitSleepMode([this]() {
+            SetApplicationSleepDisplayDimmed(false);
             GetDisplay()->SetPowerSaveMode(false);
-            GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
@@ -422,6 +424,11 @@ private:
                 int64_t now_us = esp_timer_get_time();
 
                 auto& cards = ActionCards::GetInstance();
+
+                // 板级省电休眠中：不响应摇晃亮屏/换图（与 USB 时走应用关屏、晃不醒一致）。
+                if (board->power_save_timer_->InSleepMode()) {
+                    continue;
+                }
 
                 if (now_us - last_switch_us < MPU6050_SHAKE_COOLDOWN_US) {
                     continue;

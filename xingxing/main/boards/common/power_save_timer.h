@@ -16,6 +16,9 @@ public:
     void OnShutdownRequest(std::function<void()> callback);
     void WakeUp();
 
+    /** Board-level idle sleep (after seconds_to_sleep_); true while dim/off callbacks apply. */
+    bool InSleepMode() const { return in_sleep_mode_; }
+
 private:
     void PowerSaveCheck();
 

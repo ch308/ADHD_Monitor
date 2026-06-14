@@ -29,6 +29,7 @@ private:
     PowerManager* power_manager_;
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
+    bool app_sleep_lcd_off_ = false;
 
     void InitializePowerManager() {
         power_manager_ = new PowerManager(GPIO_NUM_38);
@@ -53,11 +54,11 @@ private:
 #endif
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
-            GetBacklight()->SetBrightness(1);
+            SetApplicationSleepDisplayDimmed(true);
         });
         power_save_timer_->OnExitSleepMode([this]() {
+            SetApplicationSleepDisplayDimmed(false);
             GetDisplay()->SetPowerSaveMode(false);
-            GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
@@ -211,6 +212,26 @@ public:
             power_save_timer_->WakeUp();
         }
         DualNetworkBoard::SetPowerSaveLevel(level);
+    }
+
+    virtual void SetApplicationSleepDisplayDimmed(bool dimmed) override {
+        if (panel_ == nullptr) {
+            Board::SetApplicationSleepDisplayDimmed(dimmed);
+            return;
+        }
+        if (dimmed) {
+            if (!app_sleep_lcd_off_) {
+                GetBacklight()->SetBrightness(0);
+                esp_lcd_panel_disp_on_off(panel_, false);
+                app_sleep_lcd_off_ = true;
+            }
+        } else {
+            if (app_sleep_lcd_off_) {
+                esp_lcd_panel_disp_on_off(panel_, true);
+                app_sleep_lcd_off_ = false;
+            }
+            Board::SetApplicationSleepDisplayDimmed(false);
+        }
     }
 };
 
