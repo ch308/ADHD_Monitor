@@ -35,7 +35,6 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_mac.h>
-#include <esp_random.h>
 #include <algorithm>
 #include <ctime>
 #include <functional>
@@ -332,19 +331,6 @@ static bool IsChoicePreviewBindingStillValid(const ChoicePreviewRequest& b) {
 static void ChoicePreviewTask(void* arg) {
     auto* req = static_cast<ChoicePreviewRequest*>(arg);
     if (req != nullptr) {
-        UiSyncRun([]() {
-            auto* d = Board::GetInstance().GetDisplay();
-            if (d != nullptr) {
-                d->ShowFullscreenImage(&please_choose);
-            }
-        });
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        UiSyncRun([]() {
-            auto* d = Board::GetInstance().GetDisplay();
-            if (d != nullptr) {
-                d->HideFullscreenImage();
-            }
-        });
         if (DownloadAndShowPreviewImage(req->url, req->generation, req)) {
             ScheduleChoiceLabelAudio(*req);
         }
@@ -749,9 +735,18 @@ struct PraiseThenCloseVisualArg {
     std::string label;
 };
 
-static void CelebrationOverlayTask(void*) {
-    const lv_image_dsc_t* img =
-        (esp_random() & 1u) ? &celebrate_highfive : &you_great;
+struct CelebrationOverlayArg {
+    bool is_daily_plan = false;  // true=计划表→你真棒；false=日常训练→击掌庆祝
+};
+
+static void CelebrationOverlayTask(void* arg) {
+    bool is_daily_plan = false;
+    if (arg != nullptr) {
+        auto* p = static_cast<CelebrationOverlayArg*>(arg);
+        is_daily_plan = p->is_daily_plan;
+        delete p;
+    }
+    const lv_image_dsc_t* img = is_daily_plan ? &you_great : &celebrate_highfive;
     UiSyncRun([img]() {
         auto* d = Board::GetInstance().GetDisplay();
         if (d != nullptr) {
@@ -806,8 +801,11 @@ static void PraiseThenCloseVisualChoiceTask(void* arg) {
     }
 
     if (!a->praise_url.empty()) {
-        if (xTaskCreate(CelebrationOverlayTask, "cele_overlay", 4096, nullptr, 3, nullptr) != pdPASS) {
+        auto* cele = new CelebrationOverlayArg();
+        cele->is_daily_plan = a->is_daily_plan;
+        if (xTaskCreate(CelebrationOverlayTask, "cele_overlay", 4096, cele, 3, nullptr) != pdPASS) {
             ESP_LOGW(TAG, "praise_close: cele_overlay task create failed");
+            delete cele;
         }
         const bool played = DownloadAndPlayOggLabel(a->praise_url);
         if (!played) {

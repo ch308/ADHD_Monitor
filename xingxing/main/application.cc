@@ -550,10 +550,26 @@ void Application::HandleActivationDoneEvent() {
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
+#if HAVE_LVGL
+    // 上电欢迎 TTS 与 OGG_SUCCESS 几乎同时播时，两条 Ogg 进同一解码队列易叠音、发糊。
+    // 欢迎任务成功启动时由欢迎语音代替 success；创建失败则仍播 success。
+    bool welcome_started = false;
+    if (g_power_on_welcome_armed.exchange(false)) {
+        if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) == pdPASS) {
+            welcome_started = true;
+        } else {
+            g_power_on_welcome_armed = true;
+        }
+    }
+    if (!welcome_started) {
+        Schedule([this]() { audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS); });
+    }
+#else
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+#endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
     // 同步登记：避免仅依赖后台任务时序（或烧录了与 build 不一致的 elf）
@@ -561,14 +577,6 @@ void Application::HandleActivationDoneEvent() {
     adhd_remote_cmd_announce_sync_once();
 #endif
     adhd_remote_cmd_start();
-
-#if HAVE_LVGL
-    if (g_power_on_welcome_armed.exchange(false)) {
-        if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) != pdPASS) {
-            g_power_on_welcome_armed = true;
-        }
-    }
-#endif
 
 }
 
