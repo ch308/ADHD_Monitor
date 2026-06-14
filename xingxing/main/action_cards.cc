@@ -128,7 +128,8 @@ void ActionCards::ShowWaitingPrompt() {
     }
     display->HideFullscreenImage();
     display->SetCenterStatus("");
-    display->ShowFullscreenImage(&please_choose);
+    // 孩子主动选择 / 训练与计划表结束回到待机：与上电欢迎一致，只显示「欢迎你」，不用「请选择」。
+    display->ShowFullscreenImage(&welcome_ni);
 }
 
 void ActionCards::ShowCurrent() {

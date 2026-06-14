@@ -289,7 +289,8 @@ static void ShowAutismChoiceWaitingPrompt() {
     }
     display->HideFullscreenImage();
     display->SetCenterStatus("");
-    display->ShowFullscreenImage(&please_choose);
+    // 与行动卡片待机一致：选图会话初始全屏也用「欢迎你」，避免上电欢迎后再切一张「请选择」。
+    display->ShowFullscreenImage(&welcome_ni);
 }
 
 static void ScheduleChoiceLabelAudio(const ChoicePreviewRequest& preview);
