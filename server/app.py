@@ -6,6 +6,7 @@ import re
 import threading
 import time
 import copy
+import contextvars
 import hashlib
 import hmac
 import html
@@ -41,6 +42,13 @@ def server_time():
 _AUTISM_LOCAL_IMAGE_STORE = os.path.normpath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "action")
 )
+
+# training/start 在后台线程里做 TTS 注入时没有 Flask request；用 ContextVar 传入发起请求时的公网 base，
+# 并缓存最近一次「非本机」Host，避免下发 http://127.0.0.1 给 ESP32（设备无法访问宿主机 loopback）。
+_autism_public_base_url_ctx: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "_autism_public_base_url_ctx", default=None
+)
+_autism_last_device_base_url: str | None = None
 
 
 def _autism_normalize_action_image_filename(fn: str) -> str:
@@ -3679,11 +3687,17 @@ def _autism_audio_for_options(options: list[str], images: dict[str, str | None],
     return audio
 
 
-def _training_start_enqueue_background(child_id: int, sid: int, payload: dict) -> None:
+def _training_start_enqueue_background(
+    child_id: int, sid: int, payload: dict, public_base: str | None = None
+) -> None:
     """TTS 注入 + 设备队列写入；在独立线程中运行，HTTP 已先返回 202。
 
-    payload 为已在请求线程中 deepcopy 的快照，勿与请求对象共享可变引用。"""
+    payload 为已在请求线程中 deepcopy 的快照，勿与请求对象共享可变引用。
+    public_base 由请求线程传入，供 TTS OGG URL 使用（后台线程无 request.host）。"""
     session = {"session_id": sid, **payload}
+    token = None
+    if public_base:
+        token = _autism_public_base_url_ctx.set(public_base.rstrip("/"))
     try:
         with app.app_context():
             queued = _enqueue_autism_session_for_child(child_id, session)
@@ -3726,6 +3740,9 @@ def _training_start_enqueue_background(child_id: int, sid: int, payload: dict) -
             app.logger.exception(
                 "training/start could not persist enqueue_failed session_id=%s", sid
             )
+    finally:
+        if token is not None:
+            _autism_public_base_url_ctx.reset(token)
 
 
 @app.route("/my/children/<int:child_id>/autism/training/start", methods=["POST"])
@@ -3779,9 +3796,10 @@ def autism_training_start(child_id):
     conn.commit()
     conn.close()
     preview_ids = _xingxing_device_ids_for_child(child_id)
+    public_base = _autism_public_base_url()
     threading.Thread(
         target=_training_start_enqueue_background,
-        args=(child_id, sid, copy.deepcopy(payload)),
+        args=(child_id, sid, copy.deepcopy(payload), public_base),
         daemon=True,
         name=f"training_start_{sid}",
     ).start()
@@ -4889,13 +4907,26 @@ def _autism_option_icon_prompt(label: str, context: str = "") -> str:
 
 
 def _autism_public_base_url() -> str:
-    """星星拉图的绝对 URL 前缀（设备侧需可访问）。未设置时默认本机端口。"""
-    configured = os.getenv("FLASK_PUBLIC_BASE_URL") or os.getenv("AUTISM_IMAGE_PUBLIC_BASE")
+    """星星拉音频/图的绝对 URL 前缀（设备 STA 必须可访问）。"""
+    ctx = _autism_public_base_url_ctx.get()
+    if ctx:
+        return ctx.rstrip("/")
+    global _autism_last_device_base_url
+    configured = (os.getenv("FLASK_PUBLIC_BASE_URL") or os.getenv("AUTISM_IMAGE_PUBLIC_BASE") or "").strip()
     if configured:
         return configured.rstrip("/")
     if has_request_context():
-        # 不能把 127.0.0.1 下发给 ESP32；优先沿用手机访问 Flask 的 Host/IP。
-        return request.host_url.rstrip("/")
+        base = request.host_url.rstrip("/")
+        host = (request.host or "").split(":")[0].strip().lower()
+        if host and host not in ("127.0.0.1", "localhost", "::1"):
+            _autism_last_device_base_url = base
+        return base
+    if _autism_last_device_base_url:
+        return _autism_last_device_base_url.rstrip("/")
+    app.logger.warning(
+        "TTS/音频 URL 使用回退 127.0.0.1：无 HTTP 上下文且未设置 FLASK_PUBLIC_BASE_URL / "
+        "AUTISM_IMAGE_PUBLIC_BASE，且从未缓存过公网 Host；ESP32 将无法下载。请设置环境变量或先经手机访问一次 API。"
+    )
     return "http://127.0.0.1:11760"
 
 

@@ -1177,7 +1177,7 @@ void Application::RefreshKidsDisplay() {
             case kDeviceStateIdle:
                 if (have_wifi_ssid) {
                     static const char* const kIdleLines[] = {
-                        "我在这里，想聊就叫我",
+                        reinterpret_cast<const char*>(u8"\u671f\u5f85\u4f60\u7684\u4e3b\u52a8\u9009\u62e9\u54e6"),
                         "准备好了就说一声",
                         "今天也可以慢慢来"
                     };

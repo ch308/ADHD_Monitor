@@ -126,7 +126,7 @@ void ActionCards::ShowWaitingPrompt() {
         return;
     }
     display->HideFullscreenImage();
-    display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u7b49\u5f85\u4f60\u7684\u9009\u62e9"));
+    display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u671f\u5f85\u4f60\u7684\u4e3b\u52a8\u9009\u62e9\u54e6"));
     display->SetEmotion("happy");
 }
 
