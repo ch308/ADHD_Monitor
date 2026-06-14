@@ -43,7 +43,6 @@ void ActionCards::EnterRoutineFromPowerWelcome() {
     if (active_) {
         return;
     }
-    auto* display = Board::GetInstance().GetDisplay();
     active_ = true;
     display_dimmed_ = false;
     activity_seq_ = 0;

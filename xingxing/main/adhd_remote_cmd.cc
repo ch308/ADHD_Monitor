@@ -960,19 +960,6 @@ static int ParseHourMinuteToMinuteOfDay(const char* text) {
     }
     return hh * 60 + mm;
 }
-static void AutismImageSequenceTask(void* arg) {
-    auto* urls = static_cast<std::vector<std::string>*>(arg);
-    if (urls == nullptr) {
-        vTaskDelete(nullptr);
-        return;
-    }
-    for (const auto& url : *urls) {
-        DownloadAndShowPreviewImage(url, -1, nullptr);
-        vTaskDelay(pdMS_TO_TICKS(4500));
-    }
-    delete urls;
-    vTaskDelete(nullptr);
-}
 
 static void AutismChoiceSequenceTask(void* arg) {
     auto* ctx = static_cast<AutismChoiceContext*>(arg);
@@ -1075,19 +1062,6 @@ static void AutismChoiceSequenceTask(void* arg) {
     // 执行；Invalidate 路径会自行 SetVisualChoiceMode(false)。
     delete ctx;
     vTaskDelete(nullptr);
-}
-
-static void StartAutismImageSequenceUrls(std::vector<std::string>* urls) {
-    if (urls == nullptr || urls->empty()) {
-        delete urls;
-        return;
-    }
-    ESP_LOGI(TAG, "autism image sequence start count=%u", (unsigned)urls->size());
-    BaseType_t tr = xTaskCreate(AutismImageSequenceTask, "autism_img", 8192, urls, 3, nullptr);
-    if (tr != pdPASS) {
-        ESP_LOGW(TAG, "autism_img task create failed");
-        delete urls;
-    }
 }
 
 static void StartAutismChoiceSequence(AutismChoiceContext* ctx) {
