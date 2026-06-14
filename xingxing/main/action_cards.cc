@@ -13,6 +13,7 @@ ActionCards& ActionCards::GetInstance() {
 #ifdef HAVE_LVGL
 
 #include "action_cards/action_cards_generated.h"
+#include "action_cards/choice_hint_images_generated.h"
 #include "board.h"
 #include "application.h"
 #include "sdkconfig.h"
@@ -126,8 +127,8 @@ void ActionCards::ShowWaitingPrompt() {
         return;
     }
     display->HideFullscreenImage();
-    display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u671f\u5f85\u4f60\u7684\u4e3b\u52a8\u9009\u62e9\u54e6"));
-    display->SetEmotion("happy");
+    display->SetCenterStatus("");
+    display->ShowFullscreenImage(&please_choose);
 }
 
 void ActionCards::ShowCurrent() {

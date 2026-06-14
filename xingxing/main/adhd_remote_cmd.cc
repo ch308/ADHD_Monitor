@@ -35,14 +35,17 @@
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include <esp_mac.h>
+#include <esp_random.h>
 #include <algorithm>
 #include <ctime>
+#include <functional>
 #include <memory>
 #include <vector>
 
 #include "application.h"
 #include "board.h"
 #include "action_cards.h"
+#include "action_cards/choice_hint_images_generated.h"
 #include "lvgl_display.h"
 #include "display/lvgl_display/lvgl_image.h"
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
@@ -52,6 +55,23 @@
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
 static const char* TAG = "adhd_cmd";
+
+/// Run UI mutation on the Application main thread (LVGL-safe).
+static void UiSyncRun(std::function<void()> fn) {
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    if (sem == nullptr) {
+        fn();
+        return;
+    }
+    auto* heap_fn = new std::function<void()>(std::move(fn));
+    Application::GetInstance().Schedule([heap_fn, sem]() {
+        (*heap_fn)();
+        delete heap_fn;
+        xSemaphoreGive(sem);
+    });
+    (void)xSemaphoreTake(sem, pdMS_TO_TICKS(8000));
+    vSemaphoreDelete(sem);
+}
 
 struct AutismDailyPlanSlot {
     int minute_of_day = -1;
@@ -268,8 +288,9 @@ static void ShowAutismChoiceWaitingPrompt() {
     if (lvgl != nullptr) {
         lvgl->SetPreviewImage(nullptr);
     }
-    display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u671f\u5f85\u4f60\u7684\u4e3b\u52a8\u9009\u62e9\u54e6"));
-    display->SetEmotion("happy");
+    display->HideFullscreenImage();
+    display->SetCenterStatus("");
+    display->ShowFullscreenImage(&please_choose);
 }
 
 static void ScheduleChoiceLabelAudio(const ChoicePreviewRequest& preview);
@@ -311,6 +332,19 @@ static bool IsChoicePreviewBindingStillValid(const ChoicePreviewRequest& b) {
 static void ChoicePreviewTask(void* arg) {
     auto* req = static_cast<ChoicePreviewRequest*>(arg);
     if (req != nullptr) {
+        UiSyncRun([]() {
+            auto* d = Board::GetInstance().GetDisplay();
+            if (d != nullptr) {
+                d->ShowFullscreenImage(&please_choose);
+            }
+        });
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        UiSyncRun([]() {
+            auto* d = Board::GetInstance().GetDisplay();
+            if (d != nullptr) {
+                d->HideFullscreenImage();
+            }
+        });
         if (DownloadAndShowPreviewImage(req->url, req->generation, req)) {
             ScheduleChoiceLabelAudio(*req);
         }
@@ -569,6 +603,10 @@ static bool DownloadAndShowPreviewImage(const std::string& url, int choice_gener
         }
     }
     ExitActionCardsIfCoveringPreview();
+    auto* any_disp = Board::GetInstance().GetDisplay();
+    if (any_disp != nullptr) {
+        any_disp->HideFullscreenImage();
+    }
     auto* lvgl = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
     if (lvgl == nullptr) {
         ESP_LOGW(TAG, "autism image: display is not LvglDisplay, skip preview");
@@ -711,6 +749,25 @@ struct PraiseThenCloseVisualArg {
     std::string label;
 };
 
+static void CelebrationOverlayTask(void*) {
+    const lv_image_dsc_t* img =
+        (esp_random() & 1u) ? &celebrate_highfive : &you_great;
+    UiSyncRun([img]() {
+        auto* d = Board::GetInstance().GetDisplay();
+        if (d != nullptr) {
+            d->ShowFullscreenImage(img);
+        }
+    });
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    UiSyncRun([]() {
+        auto* d = Board::GetInstance().GetDisplay();
+        if (d != nullptr) {
+            d->HideFullscreenImage();
+        }
+    });
+    vTaskDelete(nullptr);
+}
+
 static void PraiseThenCloseVisualChoiceTask(void* arg) {
     auto* a = static_cast<PraiseThenCloseVisualArg*>(arg);
     if (a == nullptr) {
@@ -719,13 +776,47 @@ static void PraiseThenCloseVisualChoiceTask(void* arg) {
     }
     // 从本任务发 POST，避免在 BOOT/LVGL 线程里同步 HttpPostJson 与鼓励下载并发卡死 lwIP。
     (void)PostAutismChoiceEvent(a->snapshot, "image_confirmed", a->idx, a->label, false);
+
+    // BOOT 确认瞬间：「你想做什么」0.5s，再播选项标签音（如「面条」）。
+    UiSyncRun([]() {
+        auto* d = Board::GetInstance().GetDisplay();
+        if (d != nullptr) {
+            d->ShowFullscreenImage(&what_you_want);
+        }
+    });
+    vTaskDelay(pdMS_TO_TICKS(500));
+    UiSyncRun([]() {
+        auto* d = Board::GetInstance().GetDisplay();
+        if (d != nullptr) {
+            d->HideFullscreenImage();
+        }
+    });
+
+    std::string label_audio;
+    if (a->idx >= 0 && a->idx < static_cast<int>(a->snapshot.items.size())) {
+        label_audio = a->snapshot.items[a->idx].audio_url;
+    }
+    if (!label_audio.empty()) {
+        const bool label_ok = DownloadAndPlayOggLabel(label_audio);
+        if (!label_ok) {
+            ESP_LOGW(TAG, "praise_close: option label ogg missing or download failed");
+        }
+        WaitForRobotAudioQuietBounded(15000);
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+
     if (!a->praise_url.empty()) {
+        if (xTaskCreate(CelebrationOverlayTask, "cele_overlay", 4096, nullptr, 3, nullptr) != pdPASS) {
+            ESP_LOGW(TAG, "praise_close: cele_overlay task create failed");
+        }
         const bool played = DownloadAndPlayOggLabel(a->praise_url);
         if (!played) {
             ESP_LOGW(TAG, "praise_close: encourage ogg missing or download failed");
         }
         WaitForRobotAudioQuietBounded(15000);
         vTaskDelay(pdMS_TO_TICKS(400));
+    } else {
+        ESP_LOGW(TAG, "praise_close: no praise_url (skip encourage overlay)");
     }
     bool skip_close = false;
     if (g_choice_mutex != nullptr && xSemaphoreTake(g_choice_mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
@@ -1417,31 +1508,22 @@ bool adhd_confirm_autism_choice(void) {
     ESP_LOGI(TAG, "autism choice confirmed scene=%s idx=%d label=%s",
              snapshot.scene.c_str(), idx, label.c_str());
     if (snapshot.source == "child_training" || snapshot.source == "daily_plan") {
-        // 鼓励语：在独立任务里先 POST 再下载播放，避免 LVGL 线程与 HTTP 下载并发；播完再关 UI。
         const std::string praise_url =
             (idx >= 0 && idx < static_cast<int>(snapshot.items.size()))
                 ? snapshot.items[idx].praise_audio_url
                 : std::string();
-        if (!praise_url.empty()) {
-            auto* pa = new PraiseThenCloseVisualArg();
-            pa->praise_url = praise_url;
-            pa->training_cmd_revision = snapshot.training_cmd_revision;
-            pa->plan_table_revision = snapshot.plan_table_revision;
-            pa->is_daily_plan = (snapshot.source == "daily_plan");
-            pa->snapshot = std::move(snapshot);
-            pa->idx = idx;
-            pa->label = std::move(label);
-            if (xTaskCreate(PraiseThenCloseVisualChoiceTask, "praise_close", 12288, pa, 3, nullptr) != pdPASS) {
-                ESP_LOGW(TAG, "praise_close task create failed");
-                (void)PostAutismChoiceEvent(pa->snapshot, "image_confirmed", pa->idx, pa->label, false);
-                delete pa;
-                Application::GetInstance().SetVisualChoiceMode(false);
-                RestoreDefaultActionCards();
-                RestoreAutismChoiceDisplayFully();
-            }
-        } else {
-            ESP_LOGW(TAG, "autism praise audio missing (server edge-tts/ffmpeg?) idx=%d", idx);
-            (void)PostAutismChoiceEvent(snapshot, "image_confirmed", idx, label, false);
+        auto* pa = new PraiseThenCloseVisualArg();
+        pa->praise_url = praise_url;
+        pa->training_cmd_revision = snapshot.training_cmd_revision;
+        pa->plan_table_revision = snapshot.plan_table_revision;
+        pa->is_daily_plan = (snapshot.source == "daily_plan");
+        pa->snapshot = std::move(snapshot);
+        pa->idx = idx;
+        pa->label = std::move(label);
+        if (xTaskCreate(PraiseThenCloseVisualChoiceTask, "praise_close", 12288, pa, 3, nullptr) != pdPASS) {
+            ESP_LOGW(TAG, "praise_close task create failed");
+            (void)PostAutismChoiceEvent(pa->snapshot, "image_confirmed", pa->idx, pa->label, false);
+            delete pa;
             Application::GetInstance().SetVisualChoiceMode(false);
             RestoreDefaultActionCards();
             RestoreAutismChoiceDisplayFully();

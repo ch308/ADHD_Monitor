@@ -23,7 +23,38 @@
 #include <font_awesome.h>
 #include <sdkconfig.h>
 
+#if HAVE_LVGL
+#include "action_cards/choice_hint_images_generated.h"
+#include <atomic>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_timer.h>
+#endif
+
 #define TAG "Application"
+
+#if HAVE_LVGL
+static std::atomic<bool> g_power_on_welcome_armed{true};
+
+static void PowerOnWelcomeTask(void*) {
+    auto* display = Board::GetInstance().GetDisplay();
+    if (display != nullptr) {
+        display->ShowFullscreenImage(&welcome_ni);
+    }
+    Application::GetInstance().PlaySound(Lang::Sounds::OGG_HINT_WELCOME);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    auto& audio = Application::GetInstance().GetAudioService();
+    const int64_t deadline_us = esp_timer_get_time() + 8000LL * 1000LL;
+    while (!audio.IsIdle() && esp_timer_get_time() < deadline_us) {
+        vTaskDelay(pdMS_TO_TICKS(80));
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));
+    if (display != nullptr) {
+        display->HideFullscreenImage();
+    }
+    vTaskDelete(nullptr);
+}
+#endif
 
 static constexpr const char* kXiaoxingxingWakeOpeningLine =
     "你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。";
@@ -530,6 +561,14 @@ void Application::HandleActivationDoneEvent() {
     adhd_remote_cmd_announce_sync_once();
 #endif
     adhd_remote_cmd_start();
+
+#if HAVE_LVGL
+    if (g_power_on_welcome_armed.exchange(false)) {
+        if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) != pdPASS) {
+            g_power_on_welcome_armed = true;
+        }
+    }
+#endif
 
 }
 

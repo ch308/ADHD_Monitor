@@ -2,19 +2,23 @@
 """Generate firmware assets for the "action cards" feature.
 
 The feature shows ten 240x240 pictures (one per daily routine action) embedded
-in the firmware as RGB565 LVGL C arrays. After the child taps the
-picture to confirm, the device plays an offline Ogg/Opus clip: the spoken
-sentence "妈妈，我要" plus the action label (e.g. 起床), via
-AudioService::PlaySound().
+in the firmware as RGB565 LVGL C arrays, plus five optional "choice hint" images
+(欢迎你 / 请选择 / 你想做什么 / 击掌庆祝 / 你真棒) used by Path A autism UI.
+After the child taps the picture to confirm, the device plays an offline
+Ogg/Opus clip: the spoken sentence "妈妈，我要" plus the action label
+(e.g. 起床), via AudioService::PlaySound().
 
-This script produces three kinds of output:
+This script produces four kinds of output:
 
   1. RGB565 LVGL C arrays   -> main/action_cards/images/<slug>.c
+     (ten routine cards + five hint images when sources exist)
   2. Ogg/Opus voice clips    -> main/assets/locales/zh-CN/act_<slug>.ogg
      (TTS text: "妈妈，我要" + Chinese label; gen_lang.py -> Lang::Sounds::OGG_ACT_<SLUG>)
+     When using --audio, also writes hint_welcome.ogg ("嗨，今天又是美好的一天").
   3. A manifest header       -> main/action_cards/action_cards_generated.h
      (the table consumed by action_cards.cc; flips ACTION_CARDS_HAVE_AUDIO to 1
       only once every voice clip exists, so the project always builds)
+  4. Hint image declarations -> main/action_cards/choice_hint_images_generated.h
 
 Images need only Pillow + the project's LVGLImage.py (pypng + lz4). They are
 produced in any environment. Voice generation needs an online TTS (edge-tts by
@@ -58,6 +62,16 @@ ACTIONS = [
     ("睡觉",     "sleep",        "睡觉.png"),
 ]
 
+# Extra 240x240 RGB565 images (no "妈妈，我要" voice, not in kActionCards).
+# (ascii_slug_for_c_array, source_png_filename)
+CHOICE_HINT_IMAGES = [
+    ("welcome_ni", "欢迎你.png"),
+    ("please_choose", "请选择.png"),
+    ("what_you_want", "你想做什么.png"),
+    ("celebrate_highfive", "击掌庆祝.png"),
+    ("you_great", "你真棒.png"),
+]
+
 # Avoid names exported by libc/POSIX headers. LVGL image descriptors are linked as
 # globals, so a card named "sleep" collides with unistd.h's sleep().
 IMAGE_SYMBOL_OVERRIDES = {
@@ -76,6 +90,7 @@ SRC_IMAGE_DIR = os.path.join(ADHD_DIR, "assets", "action")
 
 IMAGES_OUT_DIR = os.path.join(PROJECT_DIR, "main", "action_cards", "images")
 MANIFEST_PATH = os.path.join(PROJECT_DIR, "main", "action_cards", "action_cards_generated.h")
+CHOICE_HINT_HEADER = os.path.join(PROJECT_DIR, "main", "action_cards", "choice_hint_images_generated.h")
 AUDIO_OUT_DIR = os.path.join(PROJECT_DIR, "main", "assets", "locales", "zh-CN")
 
 IMAGE_SIZE = 240
@@ -100,24 +115,22 @@ def generate_images():
 
     os.makedirs(IMAGES_OUT_DIR, exist_ok=True)
     expected_outputs = set("%s.c" % image_symbol(slug) for _cn, slug, _png in ACTIONS)
+    expected_outputs.update("%s.c" % slug for slug, _png in CHOICE_HINT_IMAGES)
     for filename in os.listdir(IMAGES_OUT_DIR):
         if filename.endswith(".c") and filename not in expected_outputs:
             os.remove(os.path.join(IMAGES_OUT_DIR, filename))
     tmp_dir = tempfile.mkdtemp(prefix="action_cards_img_")
     try:
-        for cn_name, slug, png_name in ACTIONS:
+        def convert_one(png_name, slug):
             src = os.path.join(SRC_IMAGE_DIR, png_name)
             if not os.path.isfile(src):
                 raise SystemExit("source picture missing: %s" % src)
-            # Normalize to a 240x240 RGB PNG with an ASCII name so LVGLImage.py
-            # derives a valid C identifier from the file stem.
             img = Image.open(src).convert("RGB")
             if img.size != (IMAGE_SIZE, IMAGE_SIZE):
                 img = img.resize((IMAGE_SIZE, IMAGE_SIZE), Image.LANCZOS)
             symbol = image_symbol(slug)
             ascii_png = os.path.join(tmp_dir, symbol + ".png")
             img.save(ascii_png)
-
             cmd = [
                 sys.executable, LVGL_IMAGE_PY,
                 "--ofmt", "C",
@@ -128,9 +141,15 @@ def generate_images():
             ]
             log("converting %s -> images/%s.c" % (png_name, symbol))
             subprocess.check_call(cmd)
+
+        for cn_name, slug, png_name in ACTIONS:
+            convert_one(png_name, slug)
+        for slug, png_name in CHOICE_HINT_IMAGES:
+            convert_one(png_name, slug)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    log("image conversion done (%d files)" % len(ACTIONS))
+    log("image conversion done (%d routine + %d hint files)"
+        % (len(ACTIONS), len(CHOICE_HINT_IMAGES)))
 
 
 def _which(prog):
@@ -177,9 +196,21 @@ def generate_audio():
                 "-ar", "16000", "-frame_duration", "60",
                 ogg_path,
             ])
+        # Power-on welcome (embedded zh-CN); not part of the ten routine cards.
+        mp3_welcome = os.path.join(tmp_dir, "hint_welcome.mp3")
+        ogg_welcome = os.path.join(AUDIO_OUT_DIR, "hint_welcome.ogg")
+        welcome_text = "\u55e8\uff0c\u4eca\u5929\u53c8\u662f\u7f8e\u597d\u7684\u4e00\u5929"  # 嗨，今天又是美好的一天
+        log("TTS '%s' -> hint_welcome.ogg" % welcome_text)
+        asyncio.run(synth(welcome_text, mp3_welcome))
+        subprocess.check_call([
+            ffmpeg, "-y", "-i", mp3_welcome,
+            "-c:a", "libopus", "-b:a", "16k", "-ac", "1",
+            "-ar", "16000", "-frame_duration", "60",
+            ogg_welcome,
+        ])
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-    log("audio generation done (%d files)" % len(ACTIONS))
+    log("audio generation done (%d routine + hint_welcome)" % len(ACTIONS))
 
 
 def audio_present():
@@ -239,9 +270,27 @@ def write_manifest():
         % (os.path.relpath(MANIFEST_PATH, PROJECT_DIR), 1 if have_audio else 0))
 
 
+def write_choice_hint_header():
+    """Emit extern declarations for CHOICE_HINT_IMAGES (no voice, not in kActionCards)."""
+    lines = [
+        "// Auto-generated by scripts/gen_action_cards.py - DO NOT EDIT.",
+        "#pragma once",
+        "",
+        "#include <lvgl.h>",
+        "",
+    ]
+    for slug, _png in CHOICE_HINT_IMAGES:
+        lines.append("extern const lv_image_dsc_t %s;" % slug)
+    lines.append("")
+    os.makedirs(os.path.dirname(CHOICE_HINT_HEADER), exist_ok=True)
+    with open(CHOICE_HINT_HEADER, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    log("wrote %s" % os.path.relpath(CHOICE_HINT_HEADER, PROJECT_DIR))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate action-cards firmware assets")
-    parser.add_argument("--images", action="store_true", help="convert the 10 PNGs to RGB565 C arrays")
+    parser.add_argument("--images", action="store_true", help="convert routine + hint PNGs to RGB565 C arrays")
     parser.add_argument("--audio", action="store_true", help="synthesize the 10 Chinese voice ogg clips")
     args = parser.parse_args()
 
@@ -254,6 +303,7 @@ def main():
     if do_audio:
         generate_audio()
     write_manifest()
+    write_choice_hint_header()
 
 
 if __name__ == "__main__":
