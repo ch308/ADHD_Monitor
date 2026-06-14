@@ -1240,7 +1240,7 @@ void Application::RefreshKidsDisplay() {
                     static const char* const kListeningLines[] = {
                         "我在听，慢慢说",
                         "不用急，我会等你",
-                        "想休息就说“休息吧，小星星”"
+                        "休息就说“休息吧，小星星”"
                     };
                     center = PickKidsStatusLine(kListeningLines,
                                                 sizeof(kListeningLines) / sizeof(kListeningLines[0]));
@@ -1252,7 +1252,7 @@ void Application::RefreshKidsDisplay() {
                     static const char* const kSpeakingLines[] = {
                         "我慢慢说完这一句",
                         "一边想，一边陪你",
-                        "想停下来就说“休息吧，小星星”"
+                        "停下来就说“休息吧，小星星”"
                     };
                     center = PickKidsStatusLine(kSpeakingLines,
                                                 sizeof(kSpeakingLines) / sizeof(kSpeakingLines[0]));
@@ -1266,7 +1266,7 @@ void Application::RefreshKidsDisplay() {
             case kDeviceStateIdle:
                 if (have_wifi_ssid) {
                     static const char* const kIdleLines[] = {
-                        reinterpret_cast<const char*>(u8"\u671f\u5f85\u4f60\u7684\u4e3b\u52a8\u9009\u62e9\u54e6"),
+                        "我在这里，想聊就叫我",
                         "准备好了就说一声",
                         "今天也可以慢慢来"
                     };

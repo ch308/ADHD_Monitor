@@ -1150,8 +1150,7 @@ void Application::RefreshKidsDisplay() {
                 {
                     static const char* const kListeningLines[] = {
                         "我在听，慢慢说",
-                        "不用急，我会等你",
-                        "想休息就说“休息吧，小星星”"
+                        "不用急，我会等你"
                     };
                     center = PickKidsStatusLine(kListeningLines,
                                                 sizeof(kListeningLines) / sizeof(kListeningLines[0]));
@@ -1162,8 +1161,7 @@ void Application::RefreshKidsDisplay() {
                 {
                     static const char* const kSpeakingLines[] = {
                         "我慢慢说完这一句",
-                        "一边想，一边陪你",
-                        "想停下来就说“休息吧，小星星”"
+                        "一边想，一边陪你"
                     };
                     center = PickKidsStatusLine(kSpeakingLines,
                                                 sizeof(kSpeakingLines) / sizeof(kSpeakingLines[0]));
