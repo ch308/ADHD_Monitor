@@ -185,26 +185,15 @@ const List<_DailyPlanPreset> _dailyPlanPresets = [
   ),
 ];
 
-const List<String> _dailyPlanTimeChoices = [
-  '06:00',
-  '06:30',
-  '07:00',
-  '07:30',
-  '08:00',
-  '10:30',
-  '11:00',
-  '11:30',
-  '12:00',
-  '13:00',
-  '13:30',
-  '14:00',
-  '14:30',
-  '17:30',
-  '18:00',
-  '18:30',
-  '19:00',
-  '20:00',
-];
+List<String> _dailyPlanTimeChoices() {
+  final times = <String>[];
+  for (var h = 6; h <= 20; h++) {
+    for (var m = 0; m < 60; m += 5) {
+      times.add('${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}');
+    }
+  }
+  return times;
+}
 
 class _DailyPlanRowEdit {
   _DailyPlanRowEdit(_DailyPlanPreset preset)
@@ -2074,7 +2063,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                           isDense: true,
                           labelText: '时间',
                         ),
-                        items: _dailyPlanTimeChoices
+                        items: _dailyPlanTimeChoices()
                             .map(
                               (t) => DropdownMenuItem<String>(
                                 value: t,
