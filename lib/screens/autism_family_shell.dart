@@ -1401,7 +1401,6 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
               if (v == 'child_skill') await _openChildSkill();
               if (v == 'xiaozhi_prov') await _openXiaozhiProv();
               if (v == 'xiaozhi_reset') await _resetXiaozhiProv();
-              if (v == 'xiaozhi_bind') await _showXiaozhiBind();
               if (v == 'switch_mode') widget.onSwitchMode?.call();
               if (v == 'logout') widget.onLogout?.call();
             },
@@ -1422,7 +1421,6 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
               ),
               const PopupMenuItem(value: 'xiaozhi_prov', child: Text('配网星星机器人')),
               const PopupMenuItem(value: 'xiaozhi_reset', child: Text('让星星机器人重新配网')),
-              const PopupMenuItem(value: 'xiaozhi_bind', child: Text('绑定小智设备 (MAC)')),
               const PopupMenuDivider(),
               if (widget.onSwitchMode != null)
                 const PopupMenuItem(value: 'switch_mode', child: Text('切换使用身份')),
