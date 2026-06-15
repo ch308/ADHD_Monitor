@@ -11,7 +11,7 @@
 | 项目 | 设定 |
 |------|------|
 | 片名 | 《温柔的信号 / The Gentle Signal》 |
-| 时长 | 约 76 秒（11 个镜头，累计；可裁剪至 75–90 秒区间） |
+| 时长 | 约 82 秒（12 个镜头，累计；可裁剪至 75–90 秒区间） |
 | 风格基调 | **真人实拍写实风格**（photorealistic / live-action，非动画、非插画、非 3D 渲染）、温暖治愈、细腻自然、略带科技未来感 |
 | 时间设定 | **故事发生在同一个晚上（约 20:00）**，孩子在书房写作业、父母在客厅——**全片为夜晚室内场景**：窗外漆黑、无日光，唯一光源为室内灯具（书房暖黄台灯 / 客厅落地灯·壁灯）与屏幕冷光 |
 | 主色调 | 焦虑段落：冷青灰、低饱和；治愈段落：琥珀暖金、柔光弥散 |
@@ -139,19 +139,31 @@
 | 音效 | 柔和"亮起"音、432Hz 乐曲淡入、缓慢的吸气呼气声、光晕脉动的低频"呼…呼…" |
 | 音乐 | 432Hz 旋律舒展，弦乐铺底如拥抱，温暖弥散 |
 
-### 镜头 10 — 重拾平静 · 对话解困 · 继续作业
+### 镜头 10 — 对话解困 · 一起面对难题
+| 字段 | 内容 |
+|------|------|
+| 时长 | 6 秒 |
+| 景别 | 中近景（机器人 + 孩子，正反打） |
+| 运镜 | 固定/轻微对切，在机器人面屏与孩子神情间来回 |
+| 镜头内容 | 平静下来的男孩转向星星机器人，机器人温柔询问他卡在哪里、引导他说出困难，两人一问一答、一起拆解这道题（**左手腕**手环始终**黑屏、不发光**） |
+| 画面描述 | 暖光环绕，男孩指着作业本边说边皱眉、随后渐渐舒展，星形面屏配合点头/眨眼的微表情回应；写字的**左手腕**入镜时，手环**全黑、不发光、静默** |
+| 旁白/字幕 | （机器人·特教老师般温柔女声）"现在感觉好一点了吗？刚才那道题，是卡在哪一步了呀？"<br>（孩子·小声）"这道应用题……我不知道该先算哪一个。"<br>（机器人）"别急，我们一起看看？" |
+| 音效 | 机器人轻柔提示音、孩子翻动作业本与铅笔轻点声 |
+| 音乐 | 432Hz 旋律温暖延展，轻柔铃声点缀 |
+
+### 镜头 11 — 茅塞顿开 · 继续作业
 | 字段 | 内容 |
 |------|------|
 | 时长 | 6 秒 |
 | 景别 | 中近景 |
 | 运镜 | 固定，轻微推近至笔尖落纸 |
-| 镜头内容 | 男孩调整好状态后与星星机器人简短对话、理顺思路，微笑着重新拿起铅笔，写下答案（**左手腕**手环始终**黑屏、不发光**） |
-| 画面描述 | 暖光环绕，孩子神情舒展、嘴角上扬，铅笔重新流畅书写；写字的**左手腕**入镜时，手环**全黑、不发光、静默** |
-| 旁白/字幕 | （孩子轻声）"……我好像会了。"（字幕）"难题还在，但他不再孤单。" |
-| 音效 | 铅笔顺畅书写声、孩子轻轻的笑 |
+| 镜头内容 | 在机器人引导下男孩忽然想通解法，开心在先前划掉的算式旁流畅写下答案（**左手腕**手环始终**黑屏、不发光**） |
+| 画面描述 | 暖光环绕，孩子眼睛一亮、嘴角上扬，铅笔重新流畅书写；写字的**左手腕**入镜时，手环**全黑、不发光、静默** |
+| 旁白/字幕 | （孩子·惊喜）"哦——我明白了！！"<br>（机器人·轻声·特教老师般温柔女声）"你看，你自己就能解开它。"（字幕）"难题还在，但他不再孤单。" |
+| 音效 | 铅笔顺畅书写声、孩子轻快的笑 |
 | 音乐 | 432Hz 主题进入温暖高潮，明亮而安定 |
 
-### 镜头 11 — 父母端 · 心率归于平静 · 收尾
+### 镜头 12 — 父母端 · 心率归于平静 · 收尾
 | 字段 | 内容 |
 |------|------|
 | 时长 | 8 秒 |
@@ -275,18 +287,29 @@
   - **质量词**：杰作，超精细，8K，绒毛与氛围光质感细腻，锐利对焦
 - **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm serene healing cinematic realism, soft-focus atmosphere (not anime, not illustration, not 3D render); (composition) close-up of the plush toy as the opening frame, slow pull-back revealing the boy's face, transitioning into an extremely slow breathing-style push-pull, shallow depth of field; (subject) answering the robot's invitation, the plush toy on the desk suddenly glowing with healing amber warm light from within, its halo expanding and contracting in sync with the breath, the boy breathing deeply with eyes closed in rhythm with the light, shoulders relaxing; (background) the night study desk shifting from cool to warm, bathed in soft warm light, melting into gentle bokeh; (details) a soft halo spreading across the desk with softened pulsing edges, fuzzy fibers rim-lit by warm light showing plush texture, the boy's face lit by the glow, shoulders lowering, chest rising and falling with breath; (light & color) the film's color-temperature turning point — shifting from cool cyan to amber warm gold, diffuse soft-focus glow filling the frame, calm warm and healing; (quality) masterpiece, ultra-detailed, 8K, delicate plush and ambient light texture, sharp focus`
 
-### 镜头 10 — 重拾平静 · 对话解困 · 继续作业
+### 镜头 10 — 对话解困 · 一起面对难题
+- **中文**：
+  - **风格限定**：真人实拍写实风格（非动画非插画），温暖治愈系电影质感，可爱科技产品实物质感
+  - **视角构图**：中近景双主体，星星机器人面屏与男孩同框（正反打感），浅景深
+  - **主题描述**：平静下来的男孩转向桌面星星机器人，指着作业本说出自己卡住的难题，机器人面屏以温柔微表情回应、引导他一起拆解
+  - **背景设定**：夜晚书房书桌，已被暖光笼罩，毛绒玩具柔光陪伴于侧，背景虚化
+  - **细节修饰**：男孩边说边皱眉又渐舒展、手指点向作业本上划掉的算式，星形面屏点头/眨眼的微笑像素表情，**左手腕**智能手环**屏幕全黑、不发光**
+  - **光影色调**：暖光环绕，温馨治愈，机器人面屏柔光点缀，浅景深
+  - **质量词**：杰作，超精细，8K，表情自然生动，锐利对焦
+- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism, real physical tech product (not anime, not illustration, not 3D render); (composition) medium-close two-subject shot, the star robot's face screen and the boy in one frame (shot-reverse-shot feel), shallow depth of field; (subject) the calmed boy turning to the star-faced robot on the desk, pointing at his workbook and telling it the problem he's stuck on, the robot's face responding with gentle micro-expressions and guiding him to break it down together; (background) the night study desk now bathed in warm light, the plush toy glowing softly beside him, blurred behind; (details) the boy frowning then gradually relaxing as he speaks, his finger pointing at a crossed-out equation, nodding/blinking smiling pixel expressions on the star screen, the smart wristband on his left wrist with a completely black, off screen (not glowing); (light & color) surrounded by warm light, heartwarming, soft glow accents from the robot's face, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, natural lively expression, sharp focus`
+
+### 镜头 11 — 茅塞顿开 · 继续作业
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温暖治愈系电影质感
   - **视角构图**：中近景，轻微推近至笔尖落纸的瞬间，浅景深
-  - **主题描述**：男孩面带微笑重新拿起铅笔，自信地写下答案，神情舒展
+  - **主题描述**：男孩忽然想通解法、眼睛一亮，开心自信地写下答案，神情舒展
   - **背景设定**：夜晚书房书桌，毛绒玩具与机器人柔光陪伴于侧，背景虚化
-  - **细节修饰**：嘴角上扬的微笑，笔尖在纸上流畅书写，先前划掉的算式旁写下新的解答
+  - **细节修饰**：眼睛一亮的恍然神情、嘴角上扬的微笑，笔尖在纸上流畅书写，先前划掉的算式旁写下新的解答，**左手腕**智能手环**屏幕全黑、不发光**
   - **光影色调**：暖光环绕，明亮安定，治愈温暖，浅景深
   - **质量词**：杰作，超精细，8K，表情自然生动，锐利对焦
-- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism (not anime, not illustration, not 3D render); (composition) medium-close shot, slight push-in to the moment the pencil tip touches the paper, shallow depth of field; (subject) the boy smiling and picking up his pencil again, confidently writing the answer, expression relaxed; (background) the night study desk, the plush toy and robot glowing softly beside him, blurred behind; (details) a slight upturned smile, the pencil flowing smoothly on paper, a new solution written next to the previously crossed-out equations; (light & color) surrounded by warm light, bright and stable, healing warmth, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, natural lively expression, sharp focus`
+- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism (not anime, not illustration, not 3D render); (composition) medium-close shot, slight push-in to the moment the pencil tip touches the paper, shallow depth of field; (subject) the boy suddenly getting it, eyes lighting up, happily picking up his pencil again and confidently writing the answer, expression relaxed; (background) the night study desk, the plush toy and robot glowing softly beside him, blurred behind; (details) an "aha" look with brightening eyes, a slight upturned smile, the pencil flowing smoothly on paper, a new solution written next to the previously crossed-out equations, the smart wristband on his left wrist with a completely black, off screen (not glowing); (light & color) surrounded by warm light, bright and stable, healing warmth, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, natural lively expression, sharp focus`
 
-### 镜头 11 — 心率归于平静 · 收尾全景
+### 镜头 12 — 心率归于平静 · 收尾全景
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温情收尾的电影质感
   - **视角构图**：手机屏幕特写起幅，大幅后拉至剖面式两房间全景，2.39:1 宽银幕
@@ -301,12 +324,12 @@
 
 ## 四、制作备注（Production Notes）
 
-- **时长预算（累计约 76 秒）**：①6s + ②6s + ③8s + ④5s + ⑤5s + ⑥8s + ⑦6s + ⑧8s + ⑨10s + ⑩6s + ⑪8s。三段节奏：**铺垫与焦虑**（01–03，20s）→ **信号流转与介入**（04–07，24s）→ **陪伴与平复收尾**（08–11，32s）；情绪高潮（点亮 + 呼吸同频 ⑨）给到最长 10s。如需压到 75s，可砍镜头 04/05 约 1s；如需放到 90s，则在 ⑧⑨⑪ 各加 2–4s 让安抚、暖光与呼吸更充分。
+- **时长预算（累计约 82 秒）**：①6s + ②6s + ③8s + ④5s + ⑤5s + ⑥8s + ⑦6s + ⑧8s + ⑨10s + ⑩6s + ⑪6s + ⑫8s。三段节奏：**铺垫与焦虑**（01–03，20s）→ **信号流转与介入**（04–07，24s）→ **陪伴 · 对话解困 · 平复收尾**（08–12，38s）；情绪高潮（点亮 + 呼吸同频 ⑨）给到最长 10s。如需压到 75s，可砍镜头 04/05 约 1s、并把 ⑩⑪ 合并或各缩 1s；如需放到 90s，则在 ⑧⑨⑫ 各加 2–4s 让安抚、暖光与呼吸更充分。
 - **声音设计要点**：孩子端始终"无打扰"——手环无震动、报警声只出现在父母端。声音的"缺席"本身就是叙事，请在镜头03刻意做静默处理。
 - **色彩转场**：镜头01→03 冷化下降；镜头08 星星机器人面屏柔光引入"第一缕暖意"（仍偏冷），镜头09 毛绒玩具琥珀光点亮处完成全片色温转折（冷→暖），务必让这束琥珀光成为情绪拐点。
-- **432Hz 音乐**：从镜头07 前导动机 → 镜头08 正式进入 → 镜头10 高潮 → 镜头11 收束，保持同一主题的三段式发展。
-- **云端品牌一致性**：实现方案云端统一采用**腾讯云**。镜头04 信号传递、镜头07 云端处理、镜头11 数据回流，凡涉及"云端"的可视化均以腾讯云为准；镜头07 可在光核上方隐现"腾讯云 / Tencent Cloud"字样或 Logo，链路按 **腾讯云 IoT Hub + MQTT 下发指令** 呈现，全片云端措辞统一为"腾讯云"。
-- **竖版改编**：若做 9:16 社媒版，优先保留镜头 03 / 08 / 09 / 11，并强化字幕。
+- **432Hz 音乐**：从镜头07 前导动机 → 镜头08 正式进入 → 镜头11 高潮 → 镜头12 收束，保持同一主题的三段式发展（镜头10 对话解困处旋律温暖延展铺垫）。
+- **云端品牌一致性**：实现方案云端统一采用**腾讯云**。镜头04 信号传递、镜头07 云端处理、镜头12 数据回流，凡涉及"云端"的可视化均以腾讯云为准；镜头07 可在光核上方隐现"腾讯云 / Tencent Cloud"字样或 Logo，链路按 **腾讯云 IoT Hub + MQTT 下发指令** 呈现，全片云端措辞统一为"腾讯云"。
+- **竖版改编**：若做 9:16 社媒版，优先保留镜头 03 / 08 / 09 / 12，并强化字幕。
 - **落版 Slogan 备选**：①"最好的科技，是让爱准时抵达。" ②"看不见的守护，听得见的温柔。" ③"当焦虑来临，光，先到了。"
 
 ---
@@ -362,7 +385,7 @@
 - **时间/灯光锁定**：**全片均为同一个晚上的室内夜景**（约 20:00）。生成任何镜头都要保证：**窗外是夜色/漆黑、无日光直射**；书房唯一光源为**暖黄台灯**，客厅光源为**暖色落地灯/壁灯**等室内灯具，整体偏暗、靠灯光与屏幕光提亮人物面部，切勿出现白天天光、明亮窗光或户外日光。
 - **配色锁定**：朗朗-燕麦米色、妈妈-暖驼色、爸爸-藏青色，三人服装低饱和暖调协调，便于同框。
 - **道具锁定**：智能手环（深灰圆角）由 AI 生成并保持造型一致，**始终佩戴在孩子左手腕**，且**全片黑屏、不发光、静默无显示**（这是核心叙事设定，凡有手腕入镜务必保持，切勿让模型给屏幕加数字或发光）；**毛绒玩具 Glow、星星机器人 Star 以上传的实物图片为准**，在各镜头中保持与实拍一致。
-- **使用建议**：先用上面的提示词各生成一张人物（朗朗/妈妈/爸爸）定妆图并锁定 seed / 参考图；毛绒玩具与星星机器人则导入实拍参考图，再在分镜生图时一并引用，以保证 11 个镜头里人物与道具不串味。
+- **使用建议**：先用上面的提示词各生成一张人物（朗朗/妈妈/爸爸）定妆图并锁定 seed / 参考图；毛绒玩具与星星机器人则导入实拍参考图，再在分镜生图时一并引用，以保证 12 个镜头里人物与道具不串味。
 
 ---
 
@@ -374,9 +397,9 @@
 
 ### 推荐流程（4 步）
 1. **锁定一致性**：先用第五章人物定妆词生成朗朗/妈妈/爸爸参考图；毛绒玩具、星星机器**上传实拍图**。在即梦【参考图/角色】中导入，后续每镜头携带同一组参考图。
-2. **逐镜头出首帧**：复制第三章每个镜头的 English Prompt 做【图片生成】，比例选 16:9（竖版选 9:16），2.39:1 留到剪映加黑边。变化类镜头（03/09/11）**首帧 + 尾帧各出一张**，走【首尾帧】图生视频。
+2. **逐镜头出首帧**：复制第三章每个镜头的 English Prompt 做【图片生成】，比例选 16:9（竖版选 9:16），2.39:1 留到剪映加黑边。变化类镜头（03/09/12）**首帧 + 尾帧各出一张**，走【首尾帧】图生视频。
 3. **图生视频 + 运镜**：把首帧拖进【图生视频】，按下表填运镜与时长；6/8/10s 的镜头用"5s + 延长"或拆两段拼接。
-4. **剪映合成**：即梦只出画面，**配乐（432Hz）/旁白/字幕/音效/统一调色**全部在剪映完成；台词镜头08（机器人开口）与镜头10（与机器人简短对话）可用即梦【对口型】。
+4. **剪映合成**：即梦只出画面，**配乐（432Hz）/旁白/字幕/音效/统一调色**全部在剪映完成；台词镜头08（机器人开口）、镜头10（对话解困一问一答）、镜头11（孩子惊喜+机器人轻声）均可用即梦【对口型】。
 
 ### 各镜头即梦操作表
 
@@ -391,8 +414,9 @@
 | 07 | 6s | 文生图→图生视频（VFX，**承接06硬切**） | **承接06上传的细曲线光线自画面外汇入**；缓慢环绕推进至中心光核；数据光点汇聚、两束指令光线分流射出 |
 | 08 | 8s | 图生视频 + **对口型**（**承接07**） | **起幅一道纤细丝滑曲线光线自画面外飘入、汇入机器人**（承接07下发指令，**不出现腾讯云字样**）；缓慢推近机器人星形面屏（表情微笑闪烁），切孩子抬头；机器人先安抚再提议深呼吸，用对口型对上台词；环境仍偏冷、面屏柔光引入第一缕暖意 |
 | 09 | 10s | **首尾帧**图生视频（拆 2 段） | 首帧=熄灭毛绒玩具/冷调，尾帧=琥珀暖光亮起/暖调；前段镜头后拉、光晕由内向外扩散、色温冷转暖，后段转极缓呼吸式推拉，光晕一胀一缩与男孩深呼吸同频、肩膀放松下沉 |
-| 10 | 6s | 图生视频（可选**对口型**） | 男孩与星星机器人简短对话理顺思路；轻微推近至笔尖，男孩咧嘴微笑、重新落笔流畅书写 |
-| 11 | 8s | **首尾帧**图生视频 + 文字贴图 | 首帧=客厅沙发上父母手机里的红色心率峰值；尾帧=绿色平静曲线；镜头大幅后拉露出孩子书房与父母客厅沙发区的剖面两房间（**曲线/UI 建议剪映贴图**） |
+| 10 | 6s | 图生视频 + **对口型** | 机器人与孩子正反打对话；机器人询问"卡在哪一步"，孩子指着作业本说出困难，机器人引导一起拆解；用对口型对上一问一答的台词 |
+| 11 | 6s | 图生视频 + **对口型** | 男孩眼睛一亮"哦——我明白了！"，开心地在划掉的算式旁流畅写下答案；机器人轻声鼓励；轻微推近至笔尖 |
+| 12 | 8s | **首尾帧**图生视频 + 文字贴图 | 首帧=客厅沙发上父母手机里的红色心率峰值；尾帧=绿色平静曲线；镜头大幅后拉露出孩子书房与父母客厅沙发区的剖面两房间（**曲线/UI 建议剪映贴图**） |
 
 ### 即梦提示词模板（图生视频可直接套）
 ```
@@ -408,4 +432,4 @@
 - **概念镜头（04/07）**当 VFX 空镜单独生成光效，再在剪映合成。
 - **手环静默不发光**：手环**全片黑屏、不发光**，戴在**左手腕**。提示词务必含 `smart wristband on left wrist, screen completely black, off, not glowing`，负向词加 `glowing wristband, screen with numbers, lit display`，否则模型爱自动给屏幕加数字或发光。
 - **比例与黑边**：统一 16:9 出片，剪映加上下黑边得到 2.39:1；竖版另出 9:16。
-- **调色统一**：导入剪映后做整体 LUT，前段冷青、镜头09 后转暖金（镜头08 机器人面屏柔光为冷暖过渡），保证 11 段风格连贯。
+- **调色统一**：导入剪映后做整体 LUT，前段冷青、镜头09 后转暖金（镜头08 机器人面屏柔光为冷暖过渡），保证 12 段风格连贯。
