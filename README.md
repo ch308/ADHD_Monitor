@@ -1,7 +1,8 @@
 # 星星守护者 — 特殊儿童陪伴系统
 
-![系统示意图：手机 App 为中枢；毛绒球向 App 实时传输心率/压力；毛绒球与手环数据同步与预警推送；家长侧记录后向星星设备推送 AI 建议，并启动星星机器人（xiaozhi）的 AI 聊天对话模式](docs/images/README-system-overview.png)
-
+![系统示意图：家庭版-多动症，手机 App 为中枢；毛绒球向 App 实时传输心率/压力；毛绒球与手环数据同步与预警推送；家长侧记录后向星星设备推送 AI 建议，并启动星星机器人（xiaozhi）的 AI 聊天对话模式](docs/images/README-system-overview-family-ADHD.jpg)
+![系统示意图：家庭版-孤独症，手机 App 为中枢；三种模式：主动发起，日常训练和计划表，由AI生成对应的图片，下发至星星机器人（xingxing）让孩子选择](docs/images/README-system-overview-family-ASD.jpg)
+![系统示意图：教师版，手机 App 为中枢；老师和孩子分别佩戴手环，当心率异常时，老师会收到报警，并注明对应的孩子](docs/images/README-system-overview-teacher.jpg)
 面向 ADHD（注意缺陷多动障碍）与自闭症谱系家庭的"边缘+云"陪伴方案。
 小米手环采集心率与压力，Flutter App 在父母手机端实时展示并触发陪伴流程，
 ESP32-S3 LCD 毛绒球呼吸灯作为"正念呼吸+倒计时"的实体陪伴道具，
