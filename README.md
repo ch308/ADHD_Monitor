@@ -263,7 +263,7 @@ flowchart TD
 
 - 每个学生阈值可单独配置，并按年龄段给出参考正常范围。
 - 同一学生报警后 90 秒内不重复弹出（冷却期）。
-- 老师手环通过写 BLE GATT 特征  x2A46 发送包含学生姓名的振动短句。
+- 老师手环通过写 BLE GATT 特征 `0x2A46` 发送包含学生姓名的振动短句。
 
 ---
 
@@ -322,7 +322,7 @@ flowchart LR
 
 ### 6.2 ESP32 长轮询命令通道
 
-App 推命令 → 云端用 	hreading.Condition 立即唤醒正在 hold 的设备连接 → 设备收到后执行，延迟 < 100 ms。
+App 推命令 → 云端用 `threading.Condition` 立即唤醒正在 hold 的设备连接 → 设备收到后执行，延迟 < 100 ms。
 
 ```mermaid
 sequenceDiagram
@@ -330,8 +330,8 @@ sequenceDiagram
     participant Flask
     participant App as Flutter App
 
-    Device->>Flask: GET /device/<id>/cmd?wait=25（阻塞）
-    App->>Flask: POST /device/<id>/cmd {action:...}
+    Device->>Flask: GET /device/{device_id}/cmd?wait=25（阻塞）
+    App->>Flask: POST /device/{device_id}/cmd {action:...}
     Flask->>Flask: notify_all() 唤醒
     Flask-->>Device: 200 {action, ...}
     Device->>Device: 执行命令
@@ -385,7 +385,7 @@ flowchart LR
 | GET | /weekly_report/latest | 最新 AI 周报 |
 | POST | /training/start | 下发孤独症训练场景（图片+语音） |
 | POST | /device/esp32/announce | 设备上电自报 |
-| GET/POST | /device/<id>/cmd | 长轮询拉取 / 推送命令 |
+| GET/POST | /device/{device_id}/cmd | 长轮询拉取 / 推送命令 |
 | WS | /xiaozhi/ws | 星星机器人语音上下行（Opus） |
 | GET | /my/children | 查看孩子列表 |
 | POST | /device/esp32/bind | 绑定 ESP32 到孩子（kind 区分毛绒球/星星/xingxing） |
@@ -396,7 +396,7 @@ flowchart LR
 
 ### 8.1 云端服务（server/）
 
-`ash
+```bash
 cd server
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -424,9 +424,9 @@ cd ESP32-S3-LCD-1.47B
 ```powershell
 cd xiaozhi-esp32-2.2.4
 # menuconfig → ADHD Monitor integration:
-#   启用 Long-poll /device/<mac>/cmd
+#   启用 Long-poll /device/{mac}/cmd
 #   填写 ADHD_MONITOR_CMD_HOST / PORT
-#   填写 ADHD_MONITOR_WS_URL (ws://<host>:11760/xiaozhi/ws)
+#   填写 ADHD_MONITOR_WS_URL (ws://{host}:11760/xiaozhi/ws)
 #   WiFi Config Method → ADHD Monitor BLE (network_provisioning, sec0)
 .\build.bat
 .\flash.bat
@@ -443,7 +443,7 @@ cd xingxing
 
 ### 8.4 Flutter App（lib/）
 
-`ash
+```bash
 flutter pub get
 flutter run    # 需真机（BLE）
 ```
