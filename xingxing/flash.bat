@@ -98,6 +98,14 @@ echo [%SCRIPT_NAME%] IDF_PATH=%IDF_PATH%
 echo [%SCRIPT_NAME%] Extra args: %IDF_ARGS%
 echo.
 
+rem --- Regenerate generated language header before CMake scans sources ---
+rem lang_config.h is git-ignored, so another checkout may have a stale copy
+rem that does not include newly added OGG constants such as OGG_HINT_TRY_SHAKE.
+echo [%SCRIPT_NAME%] Regenerating language config: zh-CN
+python "%PROJECT_DIR%\scripts\gen_lang.py" --language zh-CN --output "%PROJECT_DIR%\main\assets\lang_config.h"
+if errorlevel 1 exit /b 1
+echo.
+
 rem --- Ensure target is ESP32-S3 ---
 if not exist "%CD%\sdkconfig" (
   echo [%SCRIPT_NAME%] sdkconfig missing, running fullclean and set-target esp32s3...

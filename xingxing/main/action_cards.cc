@@ -13,6 +13,7 @@ ActionCards& ActionCards::GetInstance() {
 #ifdef HAVE_LVGL
 
 #include "action_cards/action_cards_generated.h"
+#include "action_cards/choice_hint_images_generated.h"
 #include "board.h"
 #include "application.h"
 #include "sdkconfig.h"
@@ -36,6 +37,20 @@ void ActionCards::ConfirmSelection() {
         return;
     }
     Announce();
+}
+
+void ActionCards::EnterRoutineFromPowerWelcome() {
+    if (active_) {
+        return;
+    }
+    active_ = true;
+    display_dimmed_ = false;
+    activity_seq_ = 0;
+    index_ = 0;
+    ESP_LOGI(TAG, "Entering action cards from power welcome (shake selects card)");
+    RestoreBacklight();
+    ShowCurrent();
+    (void)xTaskCreate(IdleDimTask, "cards_idle_dim", 3072, this, 2, nullptr);
 }
 
 void ActionCards::Toggle() {
@@ -126,8 +141,9 @@ void ActionCards::ShowWaitingPrompt() {
         return;
     }
     display->HideFullscreenImage();
-    display->SetCenterStatus(reinterpret_cast<const char*>(u8"\u7b49\u5f85\u4f60\u7684\u9009\u62e9"));
-    display->SetEmotion("happy");
+    display->SetCenterStatus("");
+    // 孩子主动选择 / 训练与计划表结束回到待机：与上电欢迎一致，只显示「欢迎你」，不用「请选择」。
+    display->ShowFullscreenImage(&welcome_ni);
 }
 
 void ActionCards::ShowCurrent() {
@@ -189,6 +205,7 @@ void ActionCards::DimBacklight() {}
 void ActionCards::ShowWaitingPrompt() {}
 void ActionCards::ShowCurrent() {}
 void ActionCards::ConfirmSelection() {}
+void ActionCards::EnterRoutineFromPowerWelcome() {}
 void ActionCards::Announce() {}
 
 #endif  // HAVE_LVGL

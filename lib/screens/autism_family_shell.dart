@@ -185,26 +185,15 @@ const List<_DailyPlanPreset> _dailyPlanPresets = [
   ),
 ];
 
-const List<String> _dailyPlanTimeChoices = [
-  '06:00',
-  '06:30',
-  '07:00',
-  '07:30',
-  '08:00',
-  '10:30',
-  '11:00',
-  '11:30',
-  '12:00',
-  '13:00',
-  '13:30',
-  '14:00',
-  '14:30',
-  '17:30',
-  '18:00',
-  '18:30',
-  '19:00',
-  '20:00',
-];
+List<String> _dailyPlanTimeChoices() {
+  final times = <String>[];
+  for (var h = 6; h <= 20; h++) {
+    for (var m = 0; m < 60; m += 5) {
+      times.add('${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}');
+    }
+  }
+  return times;
+}
 
 class _DailyPlanRowEdit {
   _DailyPlanRowEdit(_DailyPlanPreset preset)
@@ -1401,7 +1390,6 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
               if (v == 'child_skill') await _openChildSkill();
               if (v == 'xiaozhi_prov') await _openXiaozhiProv();
               if (v == 'xiaozhi_reset') await _resetXiaozhiProv();
-              if (v == 'xiaozhi_bind') await _showXiaozhiBind();
               if (v == 'switch_mode') widget.onSwitchMode?.call();
               if (v == 'logout') widget.onLogout?.call();
             },
@@ -1422,7 +1410,6 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
               ),
               const PopupMenuItem(value: 'xiaozhi_prov', child: Text('配网星星机器人')),
               const PopupMenuItem(value: 'xiaozhi_reset', child: Text('让星星机器人重新配网')),
-              const PopupMenuItem(value: 'xiaozhi_bind', child: Text('绑定小智设备 (MAC)')),
               const PopupMenuDivider(),
               if (widget.onSwitchMode != null)
                 const PopupMenuItem(value: 'switch_mode', child: Text('切换使用身份')),
@@ -2076,7 +2063,7 @@ class _AutismFamilyShellState extends State<AutismFamilyShell> {
                           isDense: true,
                           labelText: '时间',
                         ),
-                        items: _dailyPlanTimeChoices
+                        items: _dailyPlanTimeChoices()
                             .map(
                               (t) => DropdownMenuItem<String>(
                                 value: t,

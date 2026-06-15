@@ -304,6 +304,7 @@ void AudioService::AudioOutputTask() {
             esp_timer_stop(audio_power_timer_);
             esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
             codec_->EnableOutput(true);
+            TouchOutputPowerDeadline();
         }
 
         codec_->OutputData(task->pcm);
@@ -646,6 +647,9 @@ void AudioService::PlaySound(const std::string_view& ogg) {
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
         codec_->EnableOutput(true);
     }
+    // 长静音后 `last_output_time_` 仍停在很久以前；若此处不刷新，首个 1s 电源检查会在首帧 PCM
+    // 写出前就把输出关掉（计划表到点与下图为同一时段时 CPU 忙更明显）。
+    TouchOutputPowerDeadline();
 
     const auto* buf = reinterpret_cast<const uint8_t*>(ogg.data());
     size_t size = ogg.size();
@@ -687,6 +691,10 @@ void AudioService::ResetDecoder() {
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
     audio_queue_cv_.notify_all();
+}
+
+void AudioService::TouchOutputPowerDeadline() {
+    last_output_time_ = std::chrono::steady_clock::now();
 }
 
 void AudioService::CheckAndUpdateAudioPowerState() {

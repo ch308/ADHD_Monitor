@@ -1328,7 +1328,7 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
     final deviceId = _boundXiaozhiDeviceId;
     if (deviceId == null || deviceId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先在菜单里配网并绑定星星机器人，或「绑定小智设备」。')),
+        const SnackBar(content: Text('请先在菜单里配网并绑定星星机器人。')),
       );
       return;
     }
@@ -2162,7 +2162,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
               if (v == 'esp_reset') await _resetEsp32Provisioning();
               if (v == 'xiaozhi_prov') await _openXiaozhiProvisionPage();
               if (v == 'xiaozhi_reset') await _resetXiaozhiProvisioning();
-              if (v == 'xiaozhi_bind') await _showXiaozhiBindDialog();
               if (v == 'switch_mode') widget.onSwitchMode?.call();
               if (v == 'logout') widget.onLogout?.call();
             },
@@ -2223,8 +2222,6 @@ class _AdhdMonitorAppState extends State<AdhdMonitorApp>
                   value: 'xiaozhi_prov', child: Text('配网星星机器人')),
               const PopupMenuItem(
                   value: 'xiaozhi_reset', child: Text('让星星机器人重新配网')),
-              const PopupMenuItem(
-                  value: 'xiaozhi_bind', child: Text('绑定小智设备 (MAC)')),
               const PopupMenuDivider(),
               if (widget.onSwitchMode != null)
                 const PopupMenuItem(

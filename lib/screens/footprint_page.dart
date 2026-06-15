@@ -484,7 +484,8 @@ class _FootprintPageState extends State<FootprintPage> {
           const SizedBox(height: 6),
           ...autismEvents.map<Widget>((raw) {
             final e = raw is Map ? Map<String, dynamic>.from(raw) : {};
-            final ts = e['ts']?.toString() ?? '';
+            final ts = (e['timestamp'] ?? e['ts'])?.toString() ?? '';
+            final summaryZh = (e['summary_zh'] ?? '').toString().trim();
             final scene = e['scene']?.toString() ?? '';
             final phase = e['phase']?.toString() ?? '';
             final pl = e['payload'];
@@ -492,18 +493,27 @@ class _FootprintPageState extends State<FootprintPage> {
             if (pl is Map) {
               label = pl['label']?.toString() ?? '';
             }
+            if (label.isEmpty) {
+              label = e['label']?.toString() ?? '';
+            }
             final timePart =
                 ts.contains(' ') ? ts.split(' ').skip(1).join(' ') : ts;
+            final subtitle = summaryZh.isNotEmpty
+                ? summaryZh
+                : [
+                    if (timePart.isNotEmpty) timePart,
+                    if (label.isNotEmpty) label,
+                  ].join(' · ');
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 dense: true,
                 title: Text(
-                  '$scene · $phase',
+                  summaryZh.isNotEmpty ? '训练 / 计划记录' : '$scene · $phase',
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 subtitle: Text(
-                  '$timePart${label.isNotEmpty ? ' · $label' : ''}',
+                  subtitle,
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
               ),
@@ -524,16 +534,20 @@ class _FootprintPageState extends State<FootprintPage> {
             final lab = n['label']?.toString() ?? '';
             final st = n['status']?.toString() ?? '';
             final ca = n['created_at']?.toString() ?? '';
+            final summaryZh = (n['summary_zh'] ?? '').toString().trim();
+            final subtitle = summaryZh.isNotEmpty
+                ? '$summaryZh · $st'
+                : '$ca · $st';
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
                 dense: true,
                 title: Text(
-                  lab.isEmpty ? '（无标题）' : lab,
+                  summaryZh.isNotEmpty ? '孩子主动选择' : (lab.isEmpty ? '（无标题）' : lab),
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 subtitle: Text(
-                  '$ca · $st',
+                  subtitle,
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
               ),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/child_condition.dart';
@@ -75,107 +77,180 @@ class _ParentChildProfileDialogState extends State<ParentChildProfileDialog> {
     super.dispose();
   }
 
+  /// 与 [TextField] 一致；避免 [DropdownButtonFormField] 默认使用更大的 `titleMedium`。
+  TextStyle _profileFieldStyle(BuildContext context) {
+    final base =
+        Theme.of(context).textTheme.bodyLarge ?? const TextStyle(fontSize: 16);
+    return base.copyWith(
+      fontSize: 15,
+      height: 1.4,
+      color: AppColors.ink,
+    );
+  }
+
+  InputDecoration _profileFieldDecoration(
+    BuildContext context, {
+    required String labelText,
+    String? helperText,
+  }) {
+    return InputDecoration(
+      labelText: labelText,
+      helperText: helperText,
+      helperMaxLines: 2,
+      isDense: true,
+      contentPadding: const EdgeInsets.fromLTRB(14, 16, 14, 16),
+    ).applyDefaults(Theme.of(context).inputDecorationTheme);
+  }
+
   @override
   Widget build(BuildContext context) {
     final age = int.tryParse(ageController.text.trim());
     final thresholds = parentHeartRateThresholdsForAge(age);
+    final fieldStyle = _profileFieldStyle(context);
+    final maxContentWidth = math.min(
+      MediaQuery.sizeOf(context).width - 72,
+      420.0,
+    );
     return AlertDialog(
       title: const Text('录入孩子资料'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: nameController,
-              decoration: const InputDecoration(labelText: '孩子姓名，可选'),
-            ),
-            TextField(
-              controller: nicknameController,
-              decoration: const InputDecoration(labelText: '小名，可选'),
-            ),
-            TextField(
-              controller: ageController,
-              keyboardType: TextInputType.number,
-              onChanged: (_) => setState(() => errorText = null),
-              decoration: const InputDecoration(labelText: '年龄'),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: selectedGender,
-              decoration: const InputDecoration(labelText: '性别，可选'),
-              items: _parentGenderOptions
-                  .map((item) =>
-                      DropdownMenuItem<String>(value: item, child: Text(item)))
-                  .toList(),
-              onChanged: (value) => setState(() => selectedGender = value),
-            ),
-            DropdownButtonFormField<String>(
-              value: selectedCategoryLabel,
-              decoration: const InputDecoration(
-                labelText: '类别',
-                helperText: '保存后界面将按类别切换（多动症 / 孤独症）',
+      contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+      content: SizedBox(
+        width: maxContentWidth,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+              TextField(
+                controller: nameController,
+                style: fieldStyle,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '孩子姓名',
+                ),
               ),
-              items: ChildCondition.dropdownLabels
-                  .map(
-                    (e) => DropdownMenuItem<String>(
-                      value: e,
-                      child: Text(e),
+              TextField(
+                controller: nicknameController,
+                style: fieldStyle,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '小名',
+                ),
+              ),
+              TextField(
+                controller: ageController,
+                style: fieldStyle,
+                keyboardType: TextInputType.number,
+                onChanged: (_) => setState(() => errorText = null),
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '年龄',
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedGender,
+                style: fieldStyle,
+                isExpanded: true,
+                itemHeight: 48,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '性别',
+                ),
+                items: _parentGenderOptions
+                    .map(
+                      (item) => DropdownMenuItem<String>(
+                        value: item,
+                        child: Text(item, style: fieldStyle),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) => setState(() => selectedGender = value),
+              ),
+              DropdownButtonFormField<String>(
+                value: selectedCategoryLabel,
+                style: fieldStyle,
+                isExpanded: true,
+                itemHeight: 48,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '类别',
+                ),
+                items: ChildCondition.dropdownLabels
+                    .map(
+                      (e) => DropdownMenuItem<String>(
+                        value: e,
+                        child: Text(e, style: fieldStyle),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() => selectedCategoryLabel = value);
+                },
+              ),
+              TextField(
+                controller: personalityController,
+                style: fieldStyle,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '性格',
+                ),
+              ),
+              TextField(
+                controller: interestsController,
+                style: fieldStyle,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '兴趣爱好',
+                ),
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSoft,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '自动提醒线',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.ink,
+                      ),
                     ),
-                  )
-                  .toList(),
-              onChanged: (value) {
-                if (value == null) return;
-                setState(() => selectedCategoryLabel = value);
-              },
-            ),
-            TextField(
-              controller: personalityController,
-              decoration: const InputDecoration(labelText: '性格，可选'),
-            ),
-            TextField(
-              controller: interestsController,
-              decoration: const InputDecoration(labelText: '兴趣爱好，可选'),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.surfaceSoft,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    '自动提醒线',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.ink,
+                    const SizedBox(height: 6),
+                    Text(
+                      '${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}',
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '${thresholds.ageBandLabel} · ${thresholds.normalRangeLabel}',
-                  ),
-                  const SizedBox(height: 4),
-                  Text('过高提醒：>${thresholds.high} 次/分钟'),
-                  Text('过低提醒：<${thresholds.low} 次/分钟'),
-                ],
+                    const SizedBox(height: 4),
+                    Text('过高提醒：>${thresholds.high} 次/分钟'),
+                    Text('过低提醒：<${thresholds.low} 次/分钟'),
+                  ],
+                ),
               ),
-            ),
-            TextField(
-              controller: noteController,
-              maxLines: 2,
-              decoration: const InputDecoration(labelText: '补充说明，可选'),
-            ),
-            if (errorText != null) ...[
-              const SizedBox(height: 10),
-              Text(errorText!, style: const TextStyle(color: AppColors.coral)),
+              TextField(
+                controller: noteController,
+                maxLines: 2,
+                style: fieldStyle,
+                decoration: _profileFieldDecoration(
+                  context,
+                  labelText: '补充说明，可选',
+                ),
+              ),
+              if (errorText != null) ...[
+                const SizedBox(height: 10),
+                Text(errorText!,
+                    style: const TextStyle(color: AppColors.coral)),
+              ],
             ],
-          ],
+          ),
         ),
       ),
       actions: [
@@ -193,8 +268,9 @@ class _ParentChildProfileDialogState extends State<ParentChildProfileDialog> {
               return;
             }
             final th = parentHeartRateThresholdsForAge(ageValue);
-            final cat = (selectedCategoryLabel ?? ChildCondition.adhd.storageLabel)
-                .trim();
+            final cat =
+                (selectedCategoryLabel ?? ChildCondition.adhd.storageLabel)
+                    .trim();
             Navigator.of(context).pop(
               ParentChildProfile(
                 childId: widget.childId,

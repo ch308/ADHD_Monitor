@@ -22,6 +22,9 @@ public:
     // Play the confirmation voice for the current card (e.g. single tap on image).
     void ConfirmSelection();
 
+    /// After power-on welcome + BOOT flow: enter routine slideshow at first card (shake = Next).
+    void EnterRoutineFromPowerWelcome();
+
 private:
     ActionCards() = default;
     ActionCards(const ActionCards&) = delete;

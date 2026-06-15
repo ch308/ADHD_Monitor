@@ -23,6 +23,7 @@
 #include <driver/rtc_io.h>
 #include <esp_timer.h>
 #include <esp_sleep.h>
+#include <sdkconfig.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -78,14 +79,21 @@ private:
         rtc_gpio_set_direction(GPIO_NUM_21, RTC_GPIO_MODE_OUTPUT_ONLY);
         rtc_gpio_set_level(GPIO_NUM_21, 1);
 
+        // 第三参数：空闲累计秒数后关机/深睡。-1 禁用。原 300≈5min 会 deep_sleep，断 WiFi、停计划表。
+#if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
+        power_save_timer_ = new PowerSaveTimer(-1, 60, -1);
+#else
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
+#endif
+        // 与 Application::EnterSleepPowerSaveMode 一致：关背光 + 关面板，避免仅背光=1 仍像「变暗」
+        // 且摇晃易被误判为活动；休眠期间 MPU 任务不再 WakeUp（见 StartMpu6050Task）。
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
-            GetBacklight()->SetBrightness(1);
+            SetApplicationSleepDisplayDimmed(true);
         });
         power_save_timer_->OnExitSleepMode([this]() {
+            SetApplicationSleepDisplayDimmed(false);
             GetDisplay()->SetPowerSaveMode(false);
-            GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
@@ -112,6 +120,10 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
+            // 上电全屏「欢迎你」等待期：单击 BOOT 进入「摇摇我」提示，再解锁摇晃换图。
+            if (Application::GetInstance().TryConsumePowerOnWelcomeBootClick()) {
+                return;
+            }
             // 动态训练 / 日常计划图片显示时，BOOT 单击 = 确认当前图片并上报云端。
             if (adhd_confirm_autism_choice()) {
                 return;
@@ -417,12 +429,23 @@ private:
 
                 auto& cards = ActionCards::GetInstance();
 
+                // 板级省电休眠中：不响应摇晃亮屏/换图（与 USB 时走应用关屏、晃不醒一致）。
+                if (board->power_save_timer_->InSleepMode()) {
+                    continue;
+                }
+
                 if (now_us - last_switch_us < MPU6050_SHAKE_COOLDOWN_US) {
                     continue;
                 }
 
                 if (delta >= MPU6050_SHAKE_SWITCH_THRESHOLD) {
                     last_switch_us = now_us;
+                    if (Application::GetInstance().PowerOnWelcomeShakeBlocked()) {
+                        continue;
+                    }
+                    if (adhd_autism_choice_shake_blocked()) {
+                        continue;
+                    }
                     board->power_save_timer_->WakeUp();
                     if (adhd_next_autism_choice()) {
                         ESP_LOGI(TAG, "MPU6050 shake -> autism Next(), delta=%d accel=(%d,%d,%d)",

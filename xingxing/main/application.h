@@ -108,12 +108,21 @@ public:
     void SubmitChildTextInput(const std::string& text);
     void SetVisualChoiceMode(bool enabled);
     bool CanEnterSleepMode();
+    void ExitSleepPowerSaveForAlarm(const char* reason);
     void SendMcpMessage(const std::string& payload);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
-    
+
+    /// 上电全屏「欢迎你」等待 BOOT 时消费一次单击；已消费返回 true。
+    bool TryConsumePowerOnWelcomeBootClick();
+    /// 上电欢迎等待 BOOT、或 BOOT 后「摇摇我」提示未结束前，MPU 摇晃不用于换图。
+    bool PowerOnWelcomeShakeBlocked() const;
+
+    /// 日常训练/计划表等 Path A 结束后回到「孩子主动选择」：全屏欢迎你 → BOOT →「摇摇我」→ 摇晃换作息图（与上电一致）。
+    void EnterChildVoluntaryWelcomeFromPathA();
+
     /**
      * Reset protocol resources (thread-safe)
      * Can be called from any task to release resources allocated after network connected

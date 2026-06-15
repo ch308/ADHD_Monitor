@@ -10,6 +10,7 @@
 #include "assets.h"
 #include "settings.h"
 #include "adhd_remote_cmd.h"
+#include "action_cards.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -23,7 +24,102 @@
 #include <font_awesome.h>
 #include <sdkconfig.h>
 
+#if HAVE_LVGL
+#include "action_cards/choice_hint_images_generated.h"
+#include "lcd_display.h"
+#include <atomic>
+#include <functional>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/semphr.h>
+#include <esp_timer.h>
+#endif
+
 #define TAG "Application"
+
+#if HAVE_LVGL
+static std::atomic<bool> g_power_on_welcome_armed{true};
+/// 0=正常；1=全屏欢迎等 BOOT；2=已按 BOOT，播「摇摇我」并再等 2s，仍禁止 MPU 换作息图。
+static std::atomic<int> g_power_welcome_shake_gate{0};
+
+static void RunUiSync(std::function<void()> fn) {
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    if (sem == nullptr) {
+        fn();
+        return;
+    }
+    auto* heap_fn = new std::function<void()>(std::move(fn));
+    Application::GetInstance().Schedule([heap_fn, sem]() {
+        (*heap_fn)();
+        delete heap_fn;
+        xSemaphoreGive(sem);
+    });
+    (void)xSemaphoreTake(sem, pdMS_TO_TICKS(8000));
+    vSemaphoreDelete(sem);
+}
+
+static void PowerOnWelcomePostBootTask(void*) {
+    RunUiSync([]() {
+        auto* d = Board::GetInstance().GetDisplay();
+        if (d != nullptr) {
+            d->HideFullscreenImage();
+        }
+    });
+    Application::GetInstance().PlaySound(Lang::Sounds::OGG_HINT_TRY_SHAKE);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    auto& audio = Application::GetInstance().GetAudioService();
+    const int64_t deadline_us = esp_timer_get_time() + 15000LL * 1000LL;
+    while (!audio.IsIdle() && esp_timer_get_time() < deadline_us) {
+        vTaskDelay(pdMS_TO_TICKS(80));
+    }
+    vTaskDelay(pdMS_TO_TICKS(2000));
+    Application::GetInstance().Schedule([]() {
+        ActionCards::GetInstance().EnterRoutineFromPowerWelcome();
+        g_power_welcome_shake_gate.store(3);
+    });
+    vTaskDelete(nullptr);
+}
+
+static void PowerOnWelcomeTask(void*) {
+    auto* display = Board::GetInstance().GetDisplay();
+    if (display != nullptr) {
+        display->ShowFullscreenImage(&welcome_ni);
+    }
+    Application::GetInstance().PlaySound(Lang::Sounds::OGG_HINT_WELCOME);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    auto& audio = Application::GetInstance().GetAudioService();
+    const int64_t deadline_us = esp_timer_get_time() + 8000LL * 1000LL;
+    while (!audio.IsIdle() && esp_timer_get_time() < deadline_us) {
+        vTaskDelay(pdMS_TO_TICKS(80));
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));
+    vTaskDelete(nullptr);
+}
+#endif
+
+void Application::EnterChildVoluntaryWelcomeFromPathA() {
+#if HAVE_LVGL
+    g_power_welcome_shake_gate.store(1);
+    Schedule([this]() {
+        if (ActionCards::GetInstance().IsActive()) {
+            ActionCards::GetInstance().Toggle();
+        }
+        auto* display = Board::GetInstance().GetDisplay();
+        if (display != nullptr) {
+            if (auto* lcd = dynamic_cast<LcdDisplay*>(display)) {
+                lcd->SetPreviewImage(nullptr);
+            }
+            display->HideFullscreenImage();
+        }
+        if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) != pdPASS) {
+            g_power_welcome_shake_gate.store(0);
+#ifdef CONFIG_ADHD_KIDS_UI
+            RefreshKidsDisplay();
+#endif
+        }
+    });
+#endif
+}
 
 static constexpr const char* kXiaoxingxingWakeOpeningLine =
     "你好，我是星星守护者，有什么可以帮助你的吗？我可以陪你聊天，给你讲故事。";
@@ -56,7 +152,8 @@ static constexpr int64_t kAutoStopForceShortFragmentsSpeechMs = 700;
 // 进入 Listening 后多久没听到任何说话 → 自动关闭会话，避免无限轮询。
 static constexpr int64_t kAutoCloseIdleTimeoutMs = 60000;
 
-// 进入「休眠省电」后多久关背光/面板（仍保持 WiFi 与长轮询，便于 App 远程唤醒）。
+// 进入「休眠省电」后多久关背光/面板。休眠期间 WiFi 保持 PERFORMANCE 档，避免关会话后
+// OnAudioChannelClosed 把 STA 打成 LOW_POWER 导致掉线（计划表到点、HTTP 校时、长轮询依赖联网）。
 static constexpr int64_t kAppSleepDisplayOffAfterUs = 30LL * 1000000LL;
 
 static int64_t AutoStopEndpointDelayMs(int64_t quiet_before_voice_ms) {
@@ -493,6 +590,13 @@ void Application::HandleActivationDoneEvent() {
 #endif
 
     SystemInfo::PrintHeapStats();
+    bool welcome_pending = false;
+#if HAVE_LVGL
+    welcome_pending = g_power_on_welcome_armed.exchange(false);
+    if (welcome_pending) {
+        g_power_welcome_shake_gate.store(1);
+    }
+#endif
     SetDeviceState(kDeviceStateIdle);
 
     auto display = Board::GetInstance().GetDisplay();
@@ -518,10 +622,25 @@ void Application::HandleActivationDoneEvent() {
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
 
+#if HAVE_LVGL
+    bool welcome_started = false;
+    if (welcome_pending) {
+        if (xTaskCreate(PowerOnWelcomeTask, "pwr_welcome", 4096, nullptr, 3, nullptr) == pdPASS) {
+            welcome_started = true;
+        } else {
+            g_power_on_welcome_armed = true;
+            g_power_welcome_shake_gate.store(0);
+        }
+    }
+    if (!welcome_started) {
+        Schedule([this]() { audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS); });
+    }
+#else
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+#endif
 
 #if CONFIG_ADHD_MONITOR_REMOTE_CMD || CONFIG_ADHD_MONITOR_BYPASS_OTA
     // 同步登记：避免仅依赖后台任务时序（或烧录了与 build 不一致的 elf）
@@ -710,7 +829,10 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
-        board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+        // 休眠省电时关会话会走到这里；LOW_POWER modem 休眠在部分路由器上易断线，
+        // 计划表与 Path A 长轮询需要稳定 STA，故休眠中维持 PERFORMANCE。
+        board.SetPowerSaveLevel(sleep_power_save_mode_ ? PowerSaveLevel::PERFORMANCE
+                                                       : PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
@@ -1118,6 +1240,22 @@ static const char* PickKidsStatusLine(const char* const* lines, size_t count) {
 }
 
 void Application::RefreshKidsDisplay() {
+#if HAVE_LVGL
+    const int gate = g_power_welcome_shake_gate.load();
+    if (gate == 1 || gate == 2) {
+        return;
+    }
+    // 行动卡片全屏图期间勿用 Kids 中心表情/文案盖住画面（否则会像「只剩小笑脸」）。
+    if (ActionCards::GetInstance().IsActive()) {
+        return;
+    }
+    if (adhd_path_a_intro_suppresses_kids()) {
+        return;
+    }
+#endif
+    if (visual_choice_mode_) {
+        return;
+    }
     auto display = Board::GetInstance().GetDisplay();
     display->SetWelcomeTitle("");
 
@@ -1146,8 +1284,7 @@ void Application::RefreshKidsDisplay() {
                 {
                     static const char* const kListeningLines[] = {
                         "我在听，慢慢说",
-                        "不用急，我会等你",
-                        "想休息就说“休息吧，小星星”"
+                        "不用急，我会等你"
                     };
                     center = PickKidsStatusLine(kListeningLines,
                                                 sizeof(kListeningLines) / sizeof(kListeningLines[0]));
@@ -1158,8 +1295,7 @@ void Application::RefreshKidsDisplay() {
                 {
                     static const char* const kSpeakingLines[] = {
                         "我慢慢说完这一句",
-                        "一边想，一边陪你",
-                        "想停下来就说“休息吧，小星星”"
+                        "一边想，一边陪你"
                     };
                     center = PickKidsStatusLine(kSpeakingLines,
                                                 sizeof(kSpeakingLines) / sizeof(kSpeakingLines[0]));
@@ -1173,7 +1309,7 @@ void Application::RefreshKidsDisplay() {
             case kDeviceStateIdle:
                 if (have_wifi_ssid) {
                     static const char* const kIdleLines[] = {
-                        "我在这里，想聊就叫我",
+                        reinterpret_cast<const char*>(u8"\u671f\u5f85\u4f60\u7684\u4e3b\u52a8\u9009\u62e9\u54e6"),
                         "准备好了就说一声",
                         "今天也可以慢慢来"
                     };
@@ -1373,11 +1509,13 @@ void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server
     RestoreApplicationSleepDisplay();
     sleep_power_save_mode_ = true;
     auto& board = Board::GetInstance();
-    board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
     auto display = board.GetDisplay();
     display->SetStatus("休眠省电中");
     display->SetChatMessage("system", "休眠省电中");
     TerminateCurrentSession(reason, notify_server);
+    // 关会话会触发 OnAudioChannelClosed；上面已让休眠态下保持 PERFORMANCE。
+    // 若通道本就未打开，这里再显式拉高档位，避免仍停留在 LOW_POWER。
+    board.SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
 #ifdef CONFIG_ADHD_KIDS_UI
     RefreshKidsDisplay();
 #endif
@@ -1388,6 +1526,19 @@ void Application::EnterSleepPowerSaveMode(const char* reason, bool notify_server
             ESP_LOGW(TAG, "sleep display off timer start: %s", esp_err_to_name(err));
         }
     }
+}
+
+void Application::ExitSleepPowerSaveForAlarm(const char* reason) {
+    if (!sleep_power_save_mode_) {
+        return;
+    }
+    ESP_LOGI(TAG, "Exit sleep power-save for alarm: %s", reason ? reason : "");
+    sleep_power_save_mode_ = false;
+    RestoreApplicationSleepDisplay();
+    Board::GetInstance().SetPowerSaveLevel(PowerSaveLevel::PERFORMANCE);
+#ifdef CONFIG_ADHD_KIDS_UI
+    RefreshKidsDisplay();
+#endif
 }
 
 void Application::RestoreApplicationSleepDisplay() {
@@ -1613,6 +1764,13 @@ void Application::SubmitChildTextInput(const std::string& text) {
 }
 
 bool Application::CanEnterSleepMode() {
+    // 孤独症选图 / 计划表全屏选图（含 60s 仅关屏黑屏等待）期间：不让板级 PowerSaveTimer
+    // 累计进入「省电睡眠」回调，避免与选图关屏逻辑竞态，且保持与 Path A 一致——
+    // 选图黑屏只灭背光/面板，不走 Application 休眠省电、不断 WiFi、不深睡。
+    if (visual_choice_mode_) {
+        return false;
+    }
+
     if (GetDeviceState() != kDeviceStateIdle) {
         return false;
     }
@@ -1667,6 +1825,31 @@ void Application::SetAecMode(AecMode mode) {
 
 void Application::PlaySound(const std::string_view& sound) {
     audio_service_.PlaySound(sound);
+}
+
+bool Application::TryConsumePowerOnWelcomeBootClick() {
+#if HAVE_LVGL
+    int expected = 1;
+    if (!g_power_welcome_shake_gate.compare_exchange_strong(expected, 2)) {
+        return false;
+    }
+    if (xTaskCreate(PowerOnWelcomePostBootTask, "pwr_wel_post", 6144, nullptr, 3, nullptr) != pdPASS) {
+        g_power_welcome_shake_gate.store(1);
+        return false;
+    }
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool Application::PowerOnWelcomeShakeBlocked() const {
+#if HAVE_LVGL
+    const int g = g_power_welcome_shake_gate.load();
+    return g == 1 || g == 2;
+#else
+    return false;
+#endif
 }
 
 void Application::ResetProtocol() {

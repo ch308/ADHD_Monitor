@@ -191,6 +191,8 @@ private:
     void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
+    /** After long silence, `last_output_time_` is stale; refresh when re-enabling I2S so we don't immediately power-down again before the first PCM chunk. */
+    void TouchOutputPowerDeadline();
 };
 
 #endif
