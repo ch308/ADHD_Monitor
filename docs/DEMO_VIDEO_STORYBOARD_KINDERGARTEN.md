@@ -3,92 +3,106 @@
 > 产品定位：**「一人护多娃」的课堂温柔守护**，弱化「监控」与「警报」语感；画面与字幕优先使用「关注」「守护」「老师来了」等表述。  
 > 本片独立成篇，可与家庭版演示片剪辑拼接，也可单独用于教师/机构场景的推广。**分镜风格一致性**见「分镜统一风格锚点」；与工程实机差异见文末「成片与实机」说明。
 
+> **相关文档**：本片资产与道具提示词清单见 `docs/AIGC_ASSET_PROMPTS_KINDERGARTEN.md`；通用元提示词见 `docs/META_PROMPTS_AI_VIDEO_PRODUCTION.md`（**第一节**生成分镜稿，**第二节**从分镜生成资产清单，**第三节**图生视频通用模板）。各镜 **AI 提示词示例**与风格锚点已写在**本分镜稿**对应 T01–T08 小节内。
+
 ---
 
 ## 全片基调
 
 - **气质**：温暖克制 + 轻微纪录片感；教室自然光为主，不冰冷、不机构化。  
-- **色板**：教室柔和自然采光（约 5000K）为底；孩子手环亮灯时各引入**专属辨识色**（蓝 / 橙 / 绿）；老师手环报警时整体 **暖琥珀光** 渗出，与家庭版治愈段色调统一。  
-- **节奏**：平静课堂 → 孩子悄然心率升高 → 老师手环静默提示 → 老师温柔赶到 → 孩子平静收尾。**全程无刺耳警报声，无夸张哭闹。**
+- **色板**：教室柔和自然采光（约 5000K）为底；学童手环亮灯时各引入**专属辨识色**（蓝 / 橙 / 绿）；刘老师手环报警时整体 **暖琥珀光** 渗出，与家庭版治愈段色调统一。  
+- **节奏**：平静课堂 → 学童悄然心率升高 → 刘老师手环静默提示 → 刘老师温柔赶到 → 学童平静收尾。**全程无刺耳警报声，无夸张哭闹。**
 
 ---
 
 ## 人物设定（定妆参考）
 
-> **用途**：生成视频前，先为 **老师**、**三名孩子**（A / B / C）各出若干张 **定妆图**（建议：半身正面、45° 侧面、教室场景中景各 1 张），全组选定后，**后续每一条文生图 / 图生视频 Prompt 都在开头粘贴「人物锁定」段落**。  
-> **手环颜色绑定**：三名孩子手环表带颜色 **全片固定**，不可交叉——孩子 A 蓝色、孩子 B 橙色、孩子 C 绿色；老师手环表带为 **深灰或黑色**，表盘略大于孩子款，全片固定。
+> **用途**：生成视频前，先为 **刘老师**、学童 **杜同学、陈同学、林同学** 各出若干张 **定妆图**（建议：半身正面、45° 侧面、教室场景中景各 1 张），全组选定后，**后续每一条文生图 / 图生视频 Prompt 都在开头粘贴「人物锁定」段落**。  
+> **手环颜色绑定**：三名学童手环表带颜色 **全片固定**，不可交叉——**杜同学** 蓝色、**陈同学** 橙色、**林同学** 绿色；**刘老师**手环表带为 **深灰或黑色**，表盘略大于学童款，全片固定。
 
 ---
 
-### 老师（幼儿园特教老师）
+**演员表（姓 + 称呼，全片统一）**
+
+| 剧中角色 | 称呼 | 手环 / 说明 |
+| --- | --- | --- |
+| 带班老师 | **刘老师** | 深灰或黑色表带 |
+| 蓝手环男孩 | **杜同学** | 蓝色 |
+| 橙手环男孩 | **陈同学** | 橙色 |
+| 绿手环女孩 | **林同学** | 绿色 |
+| 路过小朋友（T04，虚焦） | **杨同学** | 仅此一镜，典型中国男童 |
+
+---
+
+### 刘老师（幼儿园特教老师）
 
 | 维度 | 详细描述（可直接拆进 Prompt） |
 | --- | --- |
-| **年龄与体态** | **东亚女性**，约 **27～32 岁**；身高中等，体态 **轻盈、站姿自然挺拔**，给人亲切而专业的感觉。 |
+| **年龄与体态** | **典型中国女性**，约 **27～32 岁**；身高中等，体态 **轻盈、站姿自然挺拔**，给人亲切而专业的感觉。 |
 | **头部与五官** | **黑色或深棕色头发**，扎 **低马尾或丸子头**（二选一，全片固定）；发型整洁，耳朵露出；肤色 **自然偏暖、健康**；眉形柔和，**面部年轻温和**，**无细纹、无法令纹**；**深褐色眼睛**，目光 **专注而温柔**；嘴唇自然，常带 **轻微微笑或平和神情**。 |
 | **衣着** | 固定为 **浅蓝或浅绿色棉质 polo 衫 / 工作衬衫**（幼儿园工作服气质），版型略宽松，下装 **深色直筒长裤**；穿 **浅色软底平底鞋**，便于快速移动。**胸前可有园所小徽章**（极小，约 1.5cm，勿抢戏）。 |
-| **配饰** | **左手腕**佩戴 **深灰或黑色表带、方形表盘** 智能手环，全片固定；**右手**通常自然下垂或轻托孩子肩背。**无夸张首饰**，最多小耳钉。 |
-| **气质** | 温柔、敏锐、行动力强；面对孩子时 **蹲下身体**、**与孩子视线平齐**；走动时 **步伐轻而快**，不慌乱。 |
+| **配饰** | **左手腕**佩戴 **深灰或黑色表带、方形表盘** 智能手环，全片固定；**右手**通常自然下垂或轻托学童肩背。**无夸张首饰**，最多小耳钉。 |
+| **气质** | 温柔、敏锐、行动力强；面对学童时 **蹲下身体**、**与学童视线平齐**；走动时 **步伐轻而快**，不慌乱。 |
 
-**人物锁定（老师，中文）**  
-`同一位老师：东亚女性约29岁，黑色低马尾，面部年轻温和无细纹，浅蓝色幼儿园polo衫，深色直筒长裤，浅色平底鞋，左手腕深灰宽表带智能手环，目光温柔专注，写实电影光。`
+**人物锁定（刘老师，中文）**  
+`同一位刘老师：典型中国女性约29岁，黑色低马尾，面部年轻温和无细纹，浅蓝色幼儿园polo衫，深色直筒长裤，浅色平底鞋，左手腕深灰宽表带智能手环，目光温柔专注，写实电影光。`
 
-**Character lock — Teacher（英文）**  
-`Same character throughout: East Asian female kindergarten teacher, approximately 28-30 years old, neat black low ponytail, youthful gentle face no wrinkles no fine lines, light-blue polo-style work shirt, dark straight trousers, light soft-sole flat shoes, slim smart band on LEFT wrist (dark gray wide strap, slightly larger face), warm attentive expression, photorealistic, cinematic natural classroom light, consistent proportions.`
+**Character lock — Teacher Liu（英文）**  
+`Same character throughout: Chinese female kindergarten teacher Ms. Liu, approximately 28-30 years old, neat black low ponytail, youthful gentle face no wrinkles no fine lines, light-blue polo-style work shirt, dark straight trousers, light soft-sole flat shoes, slim smart band on LEFT wrist (dark gray wide strap, slightly larger face), warm attentive expression, photorealistic, cinematic natural classroom light in China, consistent proportions.`
 
 ---
 
-### 孩子 A（蓝色手环）
+### 杜同学（蓝色手环）
 
 | 维度 | 详细描述 |
 | --- | --- |
-| **年龄与体态** | **东亚儿童**，约 **4～5 岁**，幼儿园大班；体型 **圆润可爱、略矮小**，肩窄，动作偏迟缓。 |
+| **年龄与体态** | **典型中国男童**，约 **4～5 岁**，幼儿园大班；体型 **圆润可爱、略矮小**，肩窄，动作偏迟缓。 |
 | **头部与五官** | **黑色短发**，发顶略软塌；肤色 **暖白偏粉**；**大眼睛、睫毛长**；嘴唇略厚，静默时常 **微微张开**，表情 **内敛、偶有迷茫**，不哭闹。 |
 | **衣着** | 固定为 **浅黄色圆领 T 恤**，胸前印有 **小鸭子图案**；下着 **牛仔背带裤**；脚穿 **白色运动鞋**。 |
 | **手环** | **左手腕**，**蓝色宽表带**，表盘略大、边缘 **可发蓝色光晕**（报警时）。 |
 | **气质** | 平时安静坐着，遇到不适时 **身体轻微摇晃**或**用手捂耳朵**（感官过敏动作），不会主动求助。 |
 
-**人物锁定（孩子A，中文）**  
-`同一孩子A：东亚儿童4–5岁，黑色短软发，暖白偏粉肤色，大眼睛，浅黄小鸭T恤，牛仔背带裤，白运动鞋，左手腕蓝色宽表带手环，写实，柔和自然光。`
+**人物锁定（杜同学，中文）**  
+`同一人物杜同学：典型中国男童4–5岁，黑色短软发，暖白偏粉肤色，大眼睛，浅黄小鸭T恤，牛仔背带裤，白运动鞋，左手腕蓝色宽表带手环，写实，柔和自然光。`
 
-**Character lock — Child A（英文）**  
-`Same child throughout: East Asian kindergartner, 4-5 years old, soft short black hair, warm peachy skin, large dark eyes, pale yellow T-shirt with small duck print, denim overalls, white sneakers, smart band on LEFT wrist with BLUE wide strap, gentle cinematic natural light, consistent proportions, photorealistic.`
+**Character lock — Student Du（英文）**  
+`Same child throughout: Chinese kindergartner boy, surname Du (addressed as Student Du), 4-5 years old, soft short black hair, warm peachy skin, large dark eyes, pale yellow T-shirt with small duck print, denim overalls, white sneakers, smart band on LEFT wrist with BLUE wide strap, gentle cinematic natural light, consistent proportions, photorealistic.`
 
 ---
 
-### 孩子 B（橙色手环）
+### 陈同学（橙色手环）
 
 | 维度 | 详细描述 |
 | --- | --- |
-| **年龄与体态** | **东亚儿童**，约 **5～6 岁**；体型 **标准偏活泼**，比孩子 A 略高略瘦。 |
-| **头部与五官** | **黑色短发**，发型比孩子 A 稍整齐；肤色 **健康暖黄**；眉形略浓；**圆眼睛**，双眼皮；嘴唇自然，平时常 **嘴角微下**，情绪趋于低落但不哭泣。 |
+| **年龄与体态** | **典型中国男童**，约 **5～6 岁**；体型 **标准偏活泼**，比杜同学略高略瘦。 |
+| **头部与五官** | **黑色短发**，发型比杜同学稍整齐；肤色 **健康暖黄**；眉形略浓；**圆眼睛**，双眼皮；嘴唇自然，平时常 **嘴角微下**，情绪趋于低落但不哭泣。 |
 | **衣着** | 固定为 **白色短袖 T 恤**，胸前印有 **小火车图案**；下着 **藏青运动短裤**；脚穿 **灰色运动鞋**。 |
 | **手环** | **左手腕**，**橙色宽表带**，报警时边缘发 **橙色光晕**。 |
 | **气质** | 偶尔自言自语或重复某个动作（如反复转铅笔），情绪激动时 **腿部有小幅抖动**，面部表情平淡但内心紧张。 |
 
-**人物锁定（孩子B，中文）**  
-`同一孩子B：东亚儿童5–6岁，黑色短发略整齐，暖黄肤色，圆眼睛，白色小火车T恤，藏青运动短裤，灰运动鞋，左手腕橙色宽表带手环，写实，柔和自然光。`
+**人物锁定（陈同学，中文）**  
+`同一人物陈同学：典型中国男童5–6岁，黑色短发略整齐，暖黄肤色，圆眼睛，白色小火车T恤，藏青运动短裤，灰运动鞋，左手腕橙色宽表带手环，写实，柔和自然光。`
 
-**Character lock — Child B（英文）**  
-`Same child throughout: East Asian kindergartner, 5-6 years old, neat short black hair, warm skin, round double-eyelid eyes, white T-shirt with small train print, dark navy shorts, gray sneakers, smart band on LEFT wrist with ORANGE wide strap, photorealistic, soft natural classroom light, consistent proportions.`
+**Character lock — Student Chen（英文）**  
+`Same child throughout: Chinese kindergartner boy, surname Chen (addressed as Student Chen), 5-6 years old, neat short black hair, warm skin, round double-eyelid eyes, white T-shirt with small train print, dark navy shorts, gray sneakers, smart band on LEFT wrist with ORANGE wide strap, photorealistic, soft natural classroom light, consistent proportions.`
 
 ---
 
-### 孩子 C（绿色手环）
+### 林同学（绿色手环）
 
 | 维度 | 详细描述 |
 | --- | --- |
-| **年龄与体态** | **东亚女童**，约 **4～5 岁**；体型 **圆润娇小**，是三人中最小的。 |
+| **年龄与体态** | **典型中国女童**，约 **4～5 岁**；体型 **圆润娇小**，三名学童里林同学个头最小。 |
 | **头部与五官** | **黑色头发**，扎 **两个小揪揪**（两侧小丸子，全片固定）；肤色 **嫩白偏粉**；**小眼睛、大鼻子**；嘴唇饱满，不适时会 **轻轻抿嘴**或低头。 |
 | **衣着** | 固定为 **粉色碎花连衣裙**，裙摆到膝盖；脚穿 **粉白玛丽珍鞋**；可搭配小白袜。 |
 | **手环** | **左手腕**，**绿色宽表带**，报警时边缘发 **绿色光晕**。 |
 | **气质** | 平时低头玩手边玩具或撕纸角，不主动与人眼神接触；情绪不适时 **身体蜷缩**，双手紧握。 |
 
-**人物锁定（孩子C，中文）**  
-`同一孩子C：东亚女童4–5岁，黑色两个小揪揪发型，嫩白偏粉肤色，粉色碎花连衣裙，粉白玛丽珍鞋，左手腕绿色宽表带手环，写实，柔和自然光。`
+**人物锁定（林同学，中文）**  
+`同一人物林同学：典型中国女童4–5岁，黑色两个小揪揪发型，嫩白偏粉肤色，粉色碎花连衣裙，粉白玛丽珍鞋，左手腕绿色宽表带手环，写实，柔和自然光。`
 
-**Character lock — Child C（英文）**  
-`Same child throughout: East Asian girl kindergartner, 4-5 years old, black hair in two small buns on sides (fixed hairstyle), fair peachy skin, pink floral dress to knee, pink-white mary jane shoes, white ankle socks, smart band on LEFT wrist with GREEN wide strap, photorealistic, soft natural classroom light, consistent proportions.`
+**Character lock — Student Lin（英文）**  
+`Same child throughout: Chinese kindergartner girl, surname Lin (addressed as Student Lin), 4-5 years old, black hair in two small buns on sides (fixed hairstyle), fair peachy skin, pink floral dress to knee, pink-white mary jane shoes, white ankle socks, smart band on LEFT wrist with GREEN wide strap, photorealistic, soft natural classroom light, consistent proportions.`
 
 ---
 
@@ -96,24 +110,24 @@
 
 | 角色 | 建议条数 | 说明 |
 | --- | --- | --- |
-| 老师 | 3～4 张 | 半身正面、45°、蹲下与孩子视线平齐、手腕手环特写。 |
-| 孩子 A（蓝） | 2～3 张 | 半身正面（含手环）、坐在小桌旁、感官不适状态（捂耳或摇晃）。 |
-| 孩子 B（橙） | 2～3 张 | 半身正面（含手环）、坐着低头、反复动作状态（转铅笔）。 |
-| 孩子 C（绿） | 2～3 张 | 半身正面（含手环）、蜷缩低头、老师蹲下接触瞬间。 |
-| 四人课堂全景（可选） | 1 张 | 老师站立 + 三名孩子坐小桌，用于 T01 广角建立场景；避免多脸细节过多，构图宽松。 |
+| 刘老师 | 3～4 张 | 半身正面、45°、蹲下与学童视线平齐、手腕手环特写。 |
+| 杜同学（蓝） | 2～3 张 | 半身正面（含手环）、坐在小桌旁、感官不适状态（捂耳或摇晃）。 |
+| 陈同学（橙） | 2～3 张 | 半身正面（含手环）、坐着低头、反复动作状态（转铅笔）。 |
+| 林同学（绿） | 2～3 张 | 半身正面（含手环）、蜷缩低头、刘老师蹲下接触瞬间。 |
+| 四人课堂全景（可选） | 1 张 | 刘老师站立 + 杜同学、陈同学、林同学坐小桌，用于 T01 广角建立场景；避免多脸细节过多，构图宽松。 |
 
 ---
 
 ## 演示叙事：幼儿园教师守护模式
 
-> **核心主张**：一位老师同时守护多名特殊需求儿童，手环颜色码让老师无需盯屏幕即可感知「哪个孩子需要我」，**科技让老师的爱精准到达每一个孩子**。
+> **核心主张**：一位中国幼儿园教师（本片以 **刘老师** 为具体形象）同时守护多名有特殊需求的学童，手环颜色码让教师无需盯屏幕即可感知「哪位学童需要我」，**科技让教师的爱精准到达每一个学童**。
 
-1. **教室日常**：老师在教室里引导手工活动，三名孩子分坐小桌，各自专注或发呆，手环静默发着微弱常亮光（颜色辨识）。
-2. **孩子B心率升高**：孩子 B 情绪开始波动（反复动作加快、腿部抖动），手环橙色光晕 **悄然加深**，心率数字 HUD 浮出。
-3. **老师手环静默提示**：老师左腕手环 **橙色脉冲振动**——无声，仅振感 + 侧面淡橙光。老师自然低眼一瞥手腕，**无需掏手机**。
-4. **老师温柔赶到**：老师放下手边教具，轻步走向孩子 B，**蹲下与他视线平齐**，轻声说话，手 **轻搭肩膀**。
-5. **孩子逐渐平静**：孩子 B 腿部抖动变慢，肩线下沉，手环橙色光晕 **渐渐变柔**，数字缓降。
-6. **其余孩子安然**：期间孩子 A、C 手环安静，教室其他角落正常——老师 **精准响应，不打扰全班**。
+1. **教室日常**：刘老师在教室里引导手工活动，杜同学、陈同学、林同学分坐小桌，各自专注或发呆，手环静默发着微弱常亮光（颜色辨识）。
+2. **陈同学心率升高**：陈同学情绪开始波动（反复动作加快、腿部抖动），手环橙色光晕 **悄然加深**，心率数字 HUD 浮出。
+3. **刘老师手环静默提示**：刘老师左腕手环 **橙色脉冲振动**——无声，仅振感 + 侧面淡橙光。刘老师自然低眼一瞥手腕，**无需掏手机**。
+4. **刘老师温柔赶到**：刘老师放下手边教具，轻步走向陈同学，**蹲下与他视线平齐**，轻声说话，手 **轻搭肩膀**。
+5. **陈同学逐渐平静**：陈同学腿部抖动变慢，肩线下沉，手环橙色光晕 **渐渐变柔**，数字缓降。
+6. **其余学童安然**：期间杜同学、林同学手环安静，教室其他角落正常——刘老师 **精准响应，不打扰全班**。
 7. **落版**：「**一个老师，守护每一颗星星。**」
 
 ---
@@ -127,9 +141,9 @@
 | **影像气质** | **温情纪实 + 轻微纪录片感**；写实肤质与织物纹理；避免过度磨皮；儿童表情 **克制真实**，不做哭闹夸张脸。 |
 | **色温** | 教室 **自然窗光为主**（约 4800–5500K），弱暖反射；手环报警时引入 **对应颜色的极窄光晕**（蓝 / 橙 / 绿），占画面面积 **不超过 10%**，不要整帧变色。 |
 | **对比与颗粒** | 中低对比、暗部微微抬起；可带 **极轻胶片颗粒**（全片统一一种）。 |
-| **景深** | **浅景深**突出当前主体（孩子脸 / 手环 / 老师动作）；广角建立镜保留景深层次。 |
-| **运镜** | 以 **慢推、静止长镜、轻微手持感**（稳定但有生活气息）为主；**老师走动镜跟拍**用平稳跟焦，速度贴近「轻步走」节奏。 |
-| **人物** | 所有人物 **须与《人物设定》定妆一致**；手环表带颜色在同一镜内 **绝不混淆**（蓝 = 孩子A，橙 = 孩子B，绿 = 孩子C，深灰 = 老师）。 |
+| **景深** | **浅景深**突出当前主体（学童面部 / 手环 / 刘老师动作）；广角建立镜保留景深层次。 |
+| **运镜** | 以 **慢推、静止长镜、轻微手持感**（稳定但有生活气息）为主；**刘老师走动镜跟拍**用平稳跟焦，速度贴近「轻步走」节奏。 |
+| **人物** | 所有人物 **须与《人物设定》定妆一致**；手环表带颜色在同一镜内 **绝不混淆**（蓝 = 杜同学，橙 = 陈同学，绿 = 林同学，深灰 = 刘老师）。 |
 
 ---
 
@@ -138,98 +152,98 @@
 | 项目 | 内容 |
 | --- | --- |
 | **风格锚点** | 温情纪实；整体情绪 **平静、安全、有序**，为后续对比铺底。 |
-| **场景与环境** | 明亮幼儿园教室，**上午自然窗光**从左侧斜入；三张小圆桌分布，每桌一名孩子做 **手工拼贴**（彩纸、剪刀、胶棒）；教室墙面有 **彩色挂图与孩子作品**（虚化背景色块即可）；角落有 **玩具收纳架**、一株绿植。老师站在教室中间偏后，**轻步巡视**，右手拿一张范例卡片。 |
-| **人物与动作** | 老师：**面带微笑**，目光缓缓扫过三个孩子；孩子 A 低头拼贴，孩子 B 坐着发呆转铅笔，孩子 C 撕着彩纸边角。三人 **左手腕手环各自微光常亮**（蓝 / 橙 / 绿，亮度极低约 20%，仅辨认颜色，不夺目）。 |
-| **面部特写** | **老师中景**：面部光 **柔和自然**，微笑线稳定，眼神在孩子间 **轻轻游移**；**无需切入孩子特写**，保持全景感。 |
+| **场景与环境** | 明亮幼儿园教室，**上午自然窗光**从左侧斜入；三张小圆桌分布，每桌一名学童做 **手工拼贴**（彩纸、剪刀、胶棒）；教室墙面有 **彩色挂图与幼儿作品**（虚化背景色块即可）；角落有 **玩具收纳架**、一株绿植。**刘老师**站在教室中间偏后，**轻步巡视**，右手拿一张范例卡片。 |
+| **人物与动作** | **刘老师**：**面带微笑**，目光缓缓扫过杜同学、陈同学、林同学三人；杜同学低头拼贴，陈同学坐着发呆转铅笔，林同学撕着彩纸边角。三人 **左手腕手环各自微光常亮**（蓝 / 橙 / 绿，亮度极低约 20%，仅辨认颜色，不夺目）。 |
+| **面部特写** | **刘老师中景**：面部光 **柔和自然**，微笑线稳定，眼神在学童间 **轻轻游移**；**无需切入单个学童特写**，保持全景感。 |
 | **手环表现** | 三色手环在广角中 **隐约可辨**，像呼吸灯的低档常亮；**不做 HUD 数字**（平静状态）。 |
-| **运镜** | **广角静止镜**，轻微 dolly-in 约 5°；结尾半秒停在老师背影 + 三名孩子侧面。 |
-| **音效** | 教室背景音：**孩子细碎声响、剪刀轻剪声、远处轻柔音乐**；整体底噪极低，温暖。 |
-| **AI 提示词（示例）** | 人物锁定（老师 + 三孩子，可简化为广角描述）；`kindergarten classroom, morning natural light from left window, three special needs children at small round tables doing paper crafts, teacher standing mid-background gently scanning, three smart bands with very dim blue orange green glows on children's wrists, warm cinematic documentary, shallow depth of field background, no chaos, calm and safe atmosphere, photorealistic` |
+| **运镜** | **广角静止镜**，轻微 dolly-in 约 5°；结尾半秒停在刘老师背影 + 杜同学、陈同学、林同学侧面。 |
+| **音效** | 教室背景音：**学童细碎声响、剪刀轻剪声、远处轻柔音乐**；整体底噪极低，温暖。 |
+| **AI 提示词（示例）** | 人物锁定（刘老师 + 杜同学、陈同学、林同学，可简化为广角描述）；`Chinese kindergarten classroom, morning natural light from left window, three Chinese special-needs children at small round tables doing paper crafts, female teacher Ms. Liu standing mid-background gently scanning, three smart bands with very dim blue orange green glows on children's wrists, warm cinematic documentary, shallow depth of field background, no chaos, calm and safe atmosphere, photorealistic` |
 
 ---
 
-### T02｜孩子B情绪波动（约 4–6s）
+### T02｜陈同学情绪波动（约 4–6s）
 
 | 项目 | 内容 |
 | --- | --- |
-| **风格锚点** | 情绪 **收紧但不惊悚**；变化来自孩子的细小动作，不做夸张特效。 |
-| **场景与环境** | 聚焦孩子 B 的小桌；彩纸散落，铅笔 **转速加快**；桌面其余道具不变；背景其他孩子和老师 **虚焦存在**，保持连续性；整体 **曝光比 T01 略压 1/4 档**（心理暗示）。 |
-| **人物与动作** | 孩子 B 双手 **无意识交替摩擦**；腿部 **小幅快抖**（膝盖上下约 1–2cm）；**肩线略耸**；视线游离，不看老师也不看手边材料；偶尔 **嘴唇轻抿**一下再松开。 |
-| **面部特写** | **中近景**：眉间出现 **极浅横纹**（是孩子，不做深纹）；**眼**：视线焦点散，虹膜高光点略碎；**鼻翼**：呼吸频率肉眼可见加快；**嘴角**：平直或轻抿，**不哭**。 |
-| **手环与 HUD** | **切镜到孩子 B 手腕特写**：橙色表带手环边缘光晕 **从微弱 20% 渐亮至 60%**；表盘边缘 **脉冲扩散一圈**；心率数字 HUD 从 **82 升至 108**（数字字体与家庭版统一）；HUD 颜色用 **橙色系、半透**，勿霓虹。 |
-| **运镜** | 孩子面部：**慢推近 + 极轻 micro-shake**（2–4 帧）；切手环用 **snap zoom 一次**即止；回到孩子面部再静止。 |
+| **风格锚点** | 情绪 **收紧但不惊悚**；变化来自学童的细小动作，不做夸张特效。 |
+| **场景与环境** | 聚焦陈同学的小桌；彩纸散落，铅笔 **转速加快**；桌面其余道具不变；背景其他学童与刘老师 **虚焦存在**，保持连续性；整体 **曝光比 T01 略压 1/4 档**（心理暗示）。 |
+| **人物与动作** | 陈同学双手 **无意识交替摩擦**；腿部 **小幅快抖**（膝盖上下约 1–2cm）；**肩线略耸**；视线游离，不看刘老师也不看手边材料；偶尔 **嘴唇轻抿**一下再松开。 |
+| **面部特写** | **中近景**：眉间出现 **极浅横纹**（是幼儿，不做深纹）；**眼**：视线焦点散，虹膜高光点略碎；**鼻翼**：呼吸频率肉眼可见加快；**嘴角**：平直或轻抿，**不哭**。 |
+| **手环与 HUD** | **切镜到陈同学手腕特写**：橙色表带手环边缘光晕 **从微弱 20% 渐亮至 60%**；表盘边缘 **脉冲扩散一圈**；心率数字 HUD 从 **82 升至 108**（数字字体与家庭版统一）；HUD 颜色用 **橙色系、半透**，勿霓虹。 |
+| **运镜** | 陈同学面部：**慢推近 + 极轻 micro-shake**（2–4 帧）；切手环用 **snap zoom 一次**即止；回到陈同学面部再静止。 |
 | **音效** | **低沉一次「咚」**（心跳加沉）；教室背景音 **抽离 1dB**，高频略收；无报警音。 |
-| **AI 提示词（示例）** | 首行：**人物锁定（孩子B）**；`kindergarten child showing subtle distress, pencil spinning faster, leg bouncing slightly, shoulders slightly raised, orange smart band wrist glow intensifying from dim to mid-bright, heart rate HUD overlay in semi-transparent orange showing 108, cinematic slight push-in, warm classroom background blurred, no crying, no exaggeration, photorealistic` |
+| **AI 提示词（示例）** | 首行：**人物锁定（陈同学）**；`Chinese kindergarten boy surnamed Chen showing subtle distress, pencil spinning faster, leg bouncing slightly, shoulders slightly raised, orange smart band wrist glow intensifying from dim to mid-bright, heart rate HUD overlay in semi-transparent orange showing 108, cinematic slight push-in, warm classroom background blurred, no crying, no exaggeration, photorealistic` |
 
 ---
 
-### T03｜老师手环静默提示（约 3–4s）
+### T03｜刘老师手环静默提示（约 3–4s）
 
 | 项目 | 内容 |
 | --- | --- |
 | **风格锚点** | **克制、无声、精准**；科技感轻盈，不是急救室。 |
-| **场景与环境** | 老师仍在教室中间，正在引导孩子 A 拼贴；背景孩子 B 虚焦仍可见在轻微晃动。 |
-| **人物与动作** | 老师右手引导孩子 A 时，**左手自然下垂**；手环发出 **橙色脉冲振动**（无声）；老师 **眼角余光一瞥左腕**，动作 **不中断**，表情从专注 → **轻微眉心一动**（收到信息）→ 恢复平和，**向孩子A轻说「你做得很好」后站起来**。 |
-| **面部特写（老师）** | **中近景**：眼神从孩子 A 面前 **轻移向左腕一瞬（约 0.5s）**，**眉心微微一蹙即松**；嘴唇仍维持温和曲线，对孩子 A 无任何表情变化；**颧骨光线**：左腕橙光瞬间在老师手背侧投出 **极窄橙色光条**（宽约 1cm），一闪即过。 |
-| **手环特写（老师）** | 老师左腕手环：**深灰表带 + 方形表盘**；表盘侧面边缘出现 **橙色脉冲光一圈**（0.5s）；屏幕显示 **「B · 108」** 极小字，仅老师可看清（画面内文字，要求中文可识）。 |
-| **运镜** | **正反打**：老师面部中近景 → 老师手腕特写 → 回老师面部；节奏 **慢切，无急速**。 |
+| **场景与环境** | 刘老师仍在教室中间，正在引导杜同学拼贴；背景陈同学虚焦仍可见在轻微晃动。 |
+| **人物与动作** | 刘老师右手引导杜同学时，**左手自然下垂**；手环发出 **橙色脉冲振动**（无声）；刘老师 **眼角余光一瞥左腕**，动作 **不中断**，表情从专注 → **轻微眉心一动**（收到信息）→ 恢复平和，**向杜同学轻说「你做得很好」后站起来**。 |
+| **面部特写（刘老师）** | **中近景**：眼神从杜同学面前 **轻移向左腕一瞬（约 0.5s）**，**眉心微微一蹙即松**；嘴唇仍维持温和曲线，对杜同学无任何表情变化；**颧骨光线**：左腕橙光瞬间在刘老师手背侧投出 **极窄橙色光条**（宽约 1cm），一闪即过。 |
+| **手环特写（刘老师）** | 刘老师左腕手环：**深灰表带 + 方形表盘**；表盘侧面边缘出现 **橙色脉冲光一圈**（0.5s）；屏幕显示 **「陈同学 · 108」** 极小字，仅刘老师可看清（画面内文字，要求中文可识）。 |
+| **运镜** | **正反打**：刘老师面部中近景 → 手腕特写 → 回刘老师面部；节奏 **慢切，无急速**。 |
 | **音效** | **极轻振感音（低频嗡 0.3s）**；无语音、无警报；教室背景音保持。 |
-| **AI 提示词（示例）** | 首行：**人物锁定（老师）**；`kindergarten teacher receiving silent haptic alert on wrist band, dark gray smart band with subtle orange pulse glow on edge showing "B·108", teacher glances at wrist briefly without interrupting child interaction, gentle expression, narrow orange light reflection on back of hand, cinematic, warm classroom natural light, no alarm sound implied, photorealistic` |
+| **AI 提示词（示例）** | 首行：**人物锁定（刘老师）**；`Chinese kindergarten teacher Ms. Liu receiving silent haptic alert on wrist band, dark gray smart band with subtle orange pulse glow on edge showing Chinese text "陈同学·108", teacher glances at wrist briefly without interrupting child interaction, gentle expression, narrow orange light reflection on back of hand, cinematic, warm classroom natural light, no alarm sound implied, photorealistic` |
 
 ---
 
-### T04｜老师赶到·发现争执·温柔调解（约 6–8s）
+### T04｜刘老师赶到·发现争执·温柔调解（约 6–8s）
 
 > 本镜含三个连续节拍：**① 轻步赶到 → ② 发现争执 → ③ 调解化解**，可在剪映内一镜拍完，也可拆成三段素材后期拼接。
 
 | 项目 | 内容 |
 | --- | --- |
-| **风格锚点** | **轻盈、从容、有掌控感**；老师的每一个动作都是「事情在我这里会好起来」的视觉隐喻；整体节奏比 T02 慢，不制造紧张感。 |
-| **场景与环境** | 教室中景；孩子 B 小桌旁多了一把 **小木椅上放着的彩色积木筐**，是共用玩具区；孩子 B 与旁边的 **一名路过的背景小朋友**（无定妆要求，仅背影 / 模糊侧脸出现，全片仅此一镜）正在无声僵持——**孩子 B 双手紧握一块红色积木**，路过孩子伸手拉扯，双方都没有哭出声，但身体语言明显紧绷。 |
-| **节拍①：轻步赶到（约 1–2s）** | 老师从画面左侧 **轻步入画**，脚跟先落地，步伐平稳；走动时 **左手微微摆动**，手环橙光极淡但依稀可见；视线已锁定孩子 B 方向，**面部沉静，无焦虑**。运镜：**跟焦平稳跟拍**，背景虚焦流动，老师始终清晰。 |
-| **节拍②：发现争执（约 1–2s）** | 老师到达桌前，**目光扫到积木僵持画面**，**眉心微微一动**（认知，非惊讶）；双膝弯曲 **蹲至孩子视线高度**——这个「蹲下」动作是本镜最重要的肢体语言，代表「我和你平等」。运镜：**切正面低角度**，老师蹲下后与两名孩子视线齐平；三人构成 **倒三角构图**（老师居中，两孩子左右）。 |
-| **节拍③：温柔调解（约 3–4s）** | 老师 **右手轻压在孩子 B 紧握积木的双手上**（不夺取，仅覆盖），同时 **左手轻轻搭向背景孩子伸出的手**；轻声开口，嘴唇动幅极小（见台词）；背景孩子 **视线先看老师、再看孩子 B**，约 1.5s 后 **松开手、退回一步**，动作平静（非生气离开）；孩子 B **双手仍握积木但紧绷度明显减轻**，肩线从耸 → 轻微下沉。 |
-| **面部特写（老师）** | **中近景**：眼神在两个孩子之间 **缓缓流动**，**不偏袒、不评判**；说话时 **下唇轻触上唇**，语速极慢；**嘴角平和**，既无笑场也无严肃皱眉。 |
-| **面部特写（孩子B，调解尾段）** | **3/4 侧脸**：眉间横纹 **略松一点**（从深 → 浅，未完全平展，留给 T05）；眼神 **从地面移向老师面部**，虹膜高光开始 **从碎 → 略聚**；嘴唇 **轻抿后微微分开**（呼吸加深信号）；手指 **从全力握紧 → 仅两根手指还搭在积木上**。 |
-| **台词与字幕（可选）** | 老师轻声：「我们一起想想，怎么玩积木都有份，好不好？」字幕 **圆角无衬线大字、2 行内**，颜色与家庭版字幕统一。 |
-| **手环表现** | 孩子 B 手腕特写可插 0.5s：橙色光晕 **维持约 60% 亮度**（争执尚未完全平息，心率仍高）；HUD 数字停在 **108 附近**，暂不下降（下降留给 T05）。 |
-| **音效** | 节拍①：**软底鞋轻步声 1–2 步**；节拍②③：教室背景音 **整体压 1dB**（聚焦感），偶有积木轻碰桌面声；老师声音 **轻柔、清晰**；**无任何紧张音效或警报音**。 |
-| **AI 提示词（示例，分段生成）** | **节拍①跟拍**：首行人物锁定（老师）；`kindergarten teacher walking calmly toward camera, tracking shot, orange smart band faint glow on wrist, soft classroom background blur, purposeful unhurried stride, photorealistic, warm natural light` ｜ **节拍②③调解**：首行人物锁定（老师）+ 人物锁定（孩子B简化版）；`kindergarten teacher crouching at children's eye level between two children in a quiet toy dispute, teacher right hand gently covering child's clenched hands on a red block, left hand softly touching other child's arm, calm mediating expression, no aggression, children's tension visibly easing, warm classroom light, cinematic low angle, photorealistic, no crying, no shouting` |
+| **风格锚点** | **轻盈、从容、有掌控感**；刘老师的每一个动作都是「事情在我这里会好起来」的视觉隐喻；整体节奏比 T02 慢，不制造紧张感。 |
+| **场景与环境** | 教室中景；陈同学小桌旁多了一把 **小木椅上放着的彩色积木筐**，是共用玩具区；陈同学与 **杨同学**（典型中国男童，无定妆细表，仅背影 / 模糊侧脸出现，全片仅此一镜）正在无声僵持——**陈同学双手紧握一块红色积木**，杨同学伸手拉扯，双方都没有哭出声，但身体语言明显紧绷。 |
+| **节拍①：轻步赶到（约 1–2s）** | 刘老师从画面左侧 **轻步入画**，脚跟先落地，步伐平稳；走动时 **左手微微摆动**，手环橙光极淡但依稀可见；视线已锁定陈同学方向，**面部沉静，无焦虑**。运镜：**跟焦平稳跟拍**，背景虚焦流动，刘老师始终清晰。 |
+| **节拍②：发现争执（约 1–2s）** | 刘老师到达桌前，**目光扫到积木僵持画面**，**眉心微微一动**（认知，非惊讶）；双膝弯曲 **蹲至幼儿视线高度**——这个「蹲下」动作是本镜最重要的肢体语言，代表「我和你平等」。运镜：**切正面低角度**，刘老师蹲下后与陈同学、杨同学视线齐平；三人构成 **倒三角构图**（刘老师居中，两名学童左右）。 |
+| **节拍③：温柔调解（约 3–4s）** | 刘老师 **右手轻压在陈同学紧握积木的双手上**（不夺取，仅覆盖），同时 **左手轻轻搭向杨同学伸出的手**；轻声开口，嘴唇动幅极小（见台词）；杨同学 **视线先看刘老师、再看陈同学**，约 1.5s 后 **松开手、退回一步**，动作平静（非生气离开）；陈同学 **双手仍握积木但紧绷度明显减轻**，肩线从耸 → 轻微下沉。 |
+| **面部特写（刘老师）** | **中近景**：眼神在陈同学与杨同学之间 **缓缓流动**，**不偏袒、不评判**；说话时 **下唇轻触上唇**，语速极慢；**嘴角平和**，既无笑场也无严肃皱眉。 |
+| **面部特写（陈同学，调解尾段）** | **3/4 侧脸**：眉间横纹 **略松一点**（从深 → 浅，未完全平展，留给 T05）；眼神 **从地面移向刘老师面部**，虹膜高光开始 **从碎 → 略聚**；嘴唇 **轻抿后微微分开**（呼吸加深信号）；手指 **从全力握紧 → 仅两根手指还搭在积木上**。 |
+| **台词与字幕（可选）** | 刘老师轻声：「我们一起想想，怎么玩积木都有份，好不好？」字幕 **圆角无衬线大字、2 行内**，颜色与家庭版字幕统一。 |
+| **手环表现** | 陈同学手腕特写可插 0.5s：橙色光晕 **维持约 60% 亮度**（争执尚未完全平息，心率仍高）；HUD 数字停在 **108 附近**，暂不下降（下降留给 T05）。 |
+| **音效** | 节拍①：**软底鞋轻步声 1–2 步**；节拍②③：教室背景音 **整体压 1dB**（聚焦感），偶有积木轻碰桌面声；刘老师 **女声轻柔、清晰**；**无任何紧张音效或警报音**。 |
+| **AI 提示词（示例，分段生成）** | **节拍①跟拍**：首行人物锁定（刘老师）；`Chinese kindergarten teacher Ms. Liu walking calmly toward camera, tracking shot, orange smart band faint glow on wrist, soft classroom background blur, purposeful unhurried stride, photorealistic, warm natural light` ｜ **节拍②③调解**：首行人物锁定（刘老师）+ 人物锁定（陈同学简化版）；`Chinese female teacher Ms. Liu crouching at children's eye level between two Chinese kindergartner boys surnamed Chen and Yang in a quiet toy dispute, teacher right hand gently covering the Chen boy's clenched hands on a red block, left hand softly touching the Yang boy's arm, calm mediating expression, no aggression, children's tension visibly easing, warm classroom light, cinematic low angle, photorealistic, no crying, no shouting` |
 
 ---
 
 ### T05｜矛盾化解·专注安抚（约 7–9s）
 
-> 本镜紧接 T04 调解结束——背景孩子已离开，老师与孩子 B 独处；分两个节拍：**① 放下积木·过渡 → ② 手搭肩·专注安抚**。这是全片情感高点。
+> 本镜紧接 T04 调解结束——杨同学已离开，刘老师与陈同学独处；分两个节拍：**① 放下积木·过渡 → ② 手搭肩·专注安抚**。这是全片情感高点。
 
 | 项目 | 内容 |
 | --- | --- |
-| **风格锚点** | **全片情感最高点**；温度、被看见、被接纳——弱化「事件解决」感，强调「人被托住」的安全感；背景孩子已完全退场，全部注意力聚焦老师与孩子 B 二人世界。 |
-| **场景与环境** | 孩子 B 小桌旁；背景孩子已走回原位、深度虚化消失；老师仍蹲在孩子 B 面前，**身体微侧**朝向孩子 B；桌面上 **红色积木已轻放在桌角**（T04 调解结束的自然延续，代表争执已过去）；桌面彩纸、蜡笔仍在，环境保持连续性；背景教室 **深度虚化**，全片最浅景深。 |
-| **节拍①：放下积木·过渡（约 2–3s）** | 老师右手 **引导孩子 B 的双手**缓缓松开，将积木轻放在桌角（动作轻柔，像放一件珍贵的东西）；孩子 B **手指逐根松开**，最后只剩拇指轻触积木表面再放开；积木 **「嗒」一声轻落桌面**——这是 T04 紧绷情绪的听觉句号；老师 **不立刻说话**，给孩子 B 1–2s 的静默过渡时间，目光柔和等待。 |
-| **节拍②：手搭肩·专注安抚（约 5–6s）** | 过渡结束后，老师 **右手从桌面上自然移至孩子 B 肩膀**（力度极轻，手掌仅接触衣物，不夸张抱紧）；左手 **自然放在自己膝上**，手环橙色光晕此刻 **渐渐变柔**（从 60% → 30%，心率缓和）；老师 **轻声开口说话**，语速极慢；孩子 B：**腿部抖动完全停止**，肩线 **明显下沉**，头微微抬起朝向老师，手指不再有任何摸索动作。 |
-| **面部特写（孩子B，节拍①）** | **近景正面或 3/4**：眼神 **仍略低，看着桌面积木**；嘴唇 **由抿开始微微分开**（换气信号）；手指松开积木时 **肩部同步下沉约 3mm**——这个细节是 T04 紧绷 → T05 放松的身体语言分水岭；鼻翼 **随一次较深的呼吸轻微起伏**。 |
-| **面部特写（孩子B，节拍②）** | **近景 3/4 侧脸**：眉间横纹 **渐渐完全平展**；眼神 **从桌面移向老师面部**，虹膜高光点 **从散 → 聚**；嘴角 **由平直轻微上扬**（不是笑，是放松后嘴唇自然位置）；脸颊在老师陪伴下 **极轻暖化**（台灯反射或安全感，≤10%，不做腮红）。 |
-| **面部特写（老师，节拍②）** | **中近景**：眼睛 **直视孩子 B，眼角极柔**；等孩子 B 视线抬起与自己相遇时，**眉毛微微上扬**（「我看见你了」的无声回应）；说话时 **下唇轻触上唇**，语速极慢；嘴角 **轻微上扬一条线**，是「你安全，我在这里」而非笑场。 |
-| **台词与字幕（可选）** | 节拍①静默，无字幕；节拍②老师轻声：「已经没事了。你做得很好，积木还在。我陪着你。」字幕 **分两行**，圆角无衬线大字，颜色与家庭版字幕统一。 |
-| **手环表现** | 孩子 B 手腕特写（节拍②中插 1–1.5s）：橙色光晕 **缓缓变淡**，HUD 数字从 **108 → 92 缓降曲线 ease-out**，数字颜色从橙 → **暖黄绿**（安定色，低饱和，不做霓虹）；老师左腕手环（可选切 0.5s）：橙色脉冲已消失，回到 **深灰常亮**。 |
-| **运镜** | **节拍①**：静止近景，几乎无运镜，让积木落桌声成为节奏核心；**节拍②**：极慢微推，从孩子 B 肩部推至面部；正反打：孩子侧脸 → 老师正面 → 老师手轻搭肩特写 → 孩子正脸；每切 **1.5–2s**，全片节奏最慢段。 |
-| **音效** | 节拍①：**积木轻落桌声「嗒」**（干净、单一）→ 静默 1s；节拍②：老师 **女声温柔极慢**；教室背景音 **缓缓回升**（环境重归平静）；**极淡 432Hz 钢琴单音渐入**（与家庭版治愈段同气质，统一全片情绪收束音色）。 |
-| **AI 提示词（示例，分节拍生成）** | **节拍①**：首行人物锁定（老师）+ 人物锁定（孩子B）；`kindergarten teacher gently guiding child's hands to release a red block onto table, child's fingers slowly unclenching one by one, teacher patient silent gaze, child shoulders dropping in relief, close-up of hands and toy, warm natural light, cinematic, photorealistic, no background figures` ｜ **节拍②**：`kindergarten teacher crouching beside calm child at eye level, right hand gently resting on child's shoulder, warm focused gaze meeting child's upturned eyes, child's expression softening from tense to calm, orange smart band glow fading to soft warm green on child's wrist showing 92, deep background blur, quiet intimate two-person moment, cinematic shallow dof, soft 432Hz piano implied warmth, natural warm classroom light, no crying, subtle emotional resolution, photorealistic` |
+| **风格锚点** | **全片情感最高点**；温度、被看见、被接纳——弱化「事件解决」感，强调「人被托住」的安全感；杨同学已完全退场，全部注意力聚焦刘老师与陈同学二人世界。 |
+| **场景与环境** | 陈同学小桌旁；杨同学已走回原位、深度虚化消失；刘老师仍蹲在陈同学面前，**身体微侧**朝向陈同学；桌面上 **红色积木已轻放在桌角**（T04 调解结束的自然延续，代表争执已过去）；桌面彩纸、蜡笔仍在，环境保持连续性；背景教室 **深度虚化**，全片最浅景深。 |
+| **节拍①：放下积木·过渡（约 2–3s）** | 刘老师右手 **引导陈同学的双手**缓缓松开，将积木轻放在桌角（动作轻柔，像放一件珍贵的东西）；陈同学 **手指逐根松开**，最后只剩拇指轻触积木表面再放开；积木 **「嗒」一声轻落桌面**——这是 T04 紧绷情绪的听觉句号；刘老师 **不立刻说话**，给陈同学 1–2s 的静默过渡时间，目光柔和等待。 |
+| **节拍②：手搭肩·专注安抚（约 5–6s）** | 过渡结束后，刘老师 **右手从桌面上自然移至陈同学肩膀**（力度极轻，手掌仅接触衣物，不夸张抱紧）；左手 **自然放在自己膝上**，手环橙色光晕此刻 **渐渐变柔**（从 60% → 30%，心率缓和）；刘老师 **轻声开口说话**，语速极慢；陈同学：**腿部抖动完全停止**，肩线 **明显下沉**，头微微抬起朝向刘老师，手指不再有任何摸索动作。 |
+| **面部特写（陈同学，节拍①）** | **近景正面或 3/4**：眼神 **仍略低，看着桌面积木**；嘴唇 **由抿开始微微分开**（换气信号）；手指松开积木时 **肩部同步下沉约 3mm**——这个细节是 T04 紧绷 → T05 放松的身体语言分水岭；鼻翼 **随一次较深的呼吸轻微起伏**。 |
+| **面部特写（陈同学，节拍②）** | **近景 3/4 侧脸**：眉间横纹 **渐渐完全平展**；眼神 **从桌面移向刘老师面部**，虹膜高光点 **从散 → 聚**；嘴角 **由平直轻微上扬**（不是笑，是放松后嘴唇自然位置）；脸颊在刘老师陪伴下 **极轻暖化**（台灯反射或安全感，≤10%，不做腮红）。 |
+| **面部特写（刘老师，节拍②）** | **中近景**：眼睛 **直视陈同学，眼角极柔**；等陈同学视线抬起与自己相遇时，**眉毛微微上扬**（「我看见你了」的无声回应）；说话时 **下唇轻触上唇**，语速极慢；嘴角 **轻微上扬一条线**，是「你安全，我在这里」而非笑场。 |
+| **台词与字幕（可选）** | 节拍①静默，无字幕；节拍②刘老师轻声：「已经没事了。你做得很好，积木还在。我陪着你。」字幕 **分两行**，圆角无衬线大字，颜色与家庭版字幕统一。 |
+| **手环表现** | 陈同学手腕特写（节拍②中插 1–1.5s）：橙色光晕 **缓缓变淡**，HUD 数字从 **108 → 92 缓降曲线 ease-out**，数字颜色从橙 → **暖黄绿**（安定色，低饱和，不做霓虹）；刘老师左腕手环（可选切 0.5s）：橙色脉冲已消失，回到 **深灰常亮**。 |
+| **运镜** | **节拍①**：静止近景，几乎无运镜，让积木落桌声成为节奏核心；**节拍②**：极慢微推，从陈同学肩部推至面部；正反打：陈同学侧脸 → 刘老师正面 → 刘老师手轻搭肩特写 → 陈同学正脸；每切 **1.5–2s**，全片节奏最慢段。 |
+| **音效** | 节拍①：**积木轻落桌声「嗒」**（干净、单一）→ 静默 1s；节拍②：刘老师 **女声温柔极慢**；教室背景音 **缓缓回升**（环境重归平静）；**极淡 432Hz 钢琴单音渐入**（与家庭版治愈段同气质，统一全片情绪收束音色）。 |
+| **AI 提示词（示例，分节拍生成）** | **节拍①**：首行人物锁定（刘老师）+ 人物锁定（陈同学）；`Chinese teacher Ms. Liu gently guiding Chinese boy Chen's hands to release a red block onto table, child's fingers slowly unclenching one by one, teacher patient silent gaze, child shoulders dropping in relief, close-up of hands and toy, warm natural light, cinematic, photorealistic, no background figures` ｜ **节拍②**：`Chinese teacher Ms. Liu crouching beside calm Chinese boy Chen at eye level, right hand gently resting on child's shoulder, warm focused gaze meeting child's upturned eyes, child's expression softening from tense to calm, orange smart band glow fading to soft warm green on child's wrist showing 92, deep background blur, quiet intimate two-person moment, cinematic shallow dof, soft 432Hz piano implied warmth, natural warm classroom light, no crying, subtle emotional resolution, photorealistic` |
 
 ---
 
-### T06｜其余孩子安然（约 3–4s）
+### T06｜其余学童安然（约 3–4s）
 
 | 项目 | 内容 |
 | --- | --- |
 | **风格锚点** | **对比镜**：展示「精准响应，不打扰全班」，体现系统智能感而非群体监控感。 |
-| **场景与环境** | 切到教室另一角；孩子 A 和孩子 C 各自在小桌做手工，**神情专注或发呆**，与 T01 状态一致；背景可见老师正蹲在孩子 B 旁（虚焦处理，距离感）。 |
-| **人物与动作** | 孩子 A 正在拼贴彩纸，**蓝色手环微光平静**；孩子 C 低头撕纸角，**绿色手环微光平静**；两个孩子 **毫不知情、不受打扰**。 |
-| **手环表现** | 孩子 A、C 手环均 **极低常亮**（约 20%），蓝 / 绿各自安静；**无 HUD、无脉冲**；与 T01 手环状态完全一致。 |
-| **运镜** | **广角静止或极慢横摇**，从孩子 A 扫到孩子 C，最后落在 **两人手腕的蓝绿微光**上停 1s。 |
-| **音效** | 孩子剪纸、撕纸的细微声响；教室背景音完整回归；**温暖安静**。 |
-| **AI 提示词（示例）** | 首行：**人物锁定（孩子A）+ 人物锁定（孩子C）**（简化版）；`kindergarten classroom wide shot, two children calmly doing paper crafts at separate small tables, blue smart band and green smart band each glowing very dimly on wrists, unaware and undisturbed, teacher blurred in background crouching beside third child, peaceful classroom atmosphere, natural light, cinematic, photorealistic` |
+| **场景与环境** | 切到教室另一角；杜同学和林同学各自在小桌做手工，**神情专注或发呆**，与 T01 状态一致；背景可见刘老师正蹲在陈同学旁（虚焦处理，距离感）。 |
+| **人物与动作** | 杜同学正在拼贴彩纸，**蓝色手环微光平静**；林同学低头撕纸角，**绿色手环微光平静**；两名学童 **毫不知情、不受打扰**。 |
+| **手环表现** | 杜同学、林同学手环均 **极低常亮**（约 20%），蓝 / 绿各自安静；**无 HUD、无脉冲**；与 T01 手环状态完全一致。 |
+| **运镜** | **广角静止或极慢横摇**，从杜同学扫到林同学，最后落在 **两人手腕的蓝绿微光**上停 1s。 |
+| **音效** | 学童剪纸、撕纸的细微声响；教室背景音完整回归；**温暖安静**。 |
+| **AI 提示词（示例）** | 首行：**人物锁定（杜同学）+ 人物锁定（林同学）**（简化版）；`Chinese kindergarten classroom wide shot, two Chinese kindergartner children surnamed Du and Lin calmly doing paper crafts at separate small tables, blue smart band and green smart band each glowing very dimly on wrists, unaware and undisturbed, female teacher Ms. Liu blurred in background crouching beside third child (surname Chen), peaceful classroom atmosphere, natural light, cinematic, photorealistic` |
 
 ---
 
@@ -238,9 +252,9 @@
 | 项目 | 内容 |
 | --- | --- |
 | **风格锚点** | **快切同一调色**；每刀 0.6–1.0s；转场用 **柔光晕开 / 橙色 wipe** 与 T05 手环色呼应。 |
-| **镜头顺序建议** | ① 老师手腕手环 **橙色脉冲**（T03 复现 0.5s）→ ② 老师轻步赶到（T04 节拍①复现 0.5s）→ ③ 老师双手覆盖孩子 B 紧握积木的手（T04 调解特写 0.5s）→ ④ **积木轻落桌声「嗒」+ 孩子 B 手指松开特写**（T05 节拍①）→ ⑤ 老师手搭孩子 B 肩膀特写 → ⑥ 孩子 B 手环 **108 → 92 数字缓降** → ⑦ 孩子 A、C 手环蓝绿微光一帧 → ⑧ 老师与孩子 B 对视侧脸静帧。 |
-| **面部特写（孩子B收尾）** | **3/4 侧脸**：眼睛 **轻闭 0.5s** 再睁开；眉心 **完全平展**；嘴角 **微微上扬**（安心，非笑场）；肤色回暖。 |
-| **运镜** | 以 **切** 为主；最后一刀老师+孩子对视 **极慢推近** 结束。 |
+| **镜头顺序建议** | ① 刘老师手腕手环 **橙色脉冲**（T03 复现 0.5s）→ ② 刘老师轻步赶到（T04 节拍①复现 0.5s）→ ③ 刘老师双手覆盖陈同学紧握积木的手（T04 调解特写 0.5s）→ ④ **积木轻落桌声「嗒」+ 陈同学手指松开特写**（T05 节拍①）→ ⑤ 刘老师手搭陈同学肩膀特写 → ⑥ 陈同学手环 **108 → 92 数字缓降** → ⑦ 杜同学、林同学手环蓝绿微光一帧 → ⑧ 刘老师与陈同学对视侧脸静帧。 |
+| **面部特写（陈同学收尾）** | **3/4 侧脸**：眼睛 **轻闭 0.5s** 再睁开；眉心 **完全平展**；嘴角 **微微上扬**（安心，非笑场）；肤色回暖。 |
+| **运镜** | 以 **切** 为主；最后一刀刘老师与陈同学对视 **极慢推近** 结束。 |
 | **音效** | 钢琴 **一个完整和弦** 收束；教室背景音保留低底噪。 |
 | **AI 提示词（示例）** | 分段生成每刀再剪辑；各段首行对应人物锁定或手环道具特写；`same color grade, warm cinematic tones, kindergarten guardian moment, gentle cuts, consistent props, photorealistic` |
 
@@ -279,3 +293,4 @@
 - 本文件为 **幼儿园教师模式演示片** 专用分镜稿，与家庭版 `DEMO_VIDEO_STORYBOARD.md` 风格对齐，可合并成大赛完整演示片；
 - 分镜与口播迭代请改本文件；若确定拼接方案，可在两份分镜稿末尾互相添加链接。
 - 手环颜色码（蓝/橙/绿）需在生成所有图片/视频前一次性定案，不可中途修改（AI 生成跨镜颜色一致性极依赖 Prompt 约束）。
+- **AIGC 资产与道具提示词清单**（角色 / 手环颜色码 / 道具 / 场景关键词）：`docs/AIGC_ASSET_PROMPTS_KINDERGARTEN.md`；从分镜再生成清单时用 `docs/META_PROMPTS_AI_VIDEO_PRODUCTION.md` **第二节**。
