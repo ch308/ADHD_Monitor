@@ -59,6 +59,7 @@ public:
     virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void ClearChatMessages() override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
+    virtual void SetPersistentPreviewImage(std::unique_ptr<LvglImage> image) override;
     virtual void ShowFullscreenImage(const lv_image_dsc_t* image) override;
     virtual void HideFullscreenImage() override;
     void SetActionCardConfirmCallback(Display::ActionCardConfirmCallback cb,
@@ -69,6 +70,9 @@ public:
     
     // Set whether to hide chat messages/subtitles
     void SetHideSubtitle(bool hide);
+
+private:
+    void SetPreviewImageInternal(std::unique_ptr<LvglImage> image, bool auto_hide);
 };
 
 // SPI LCD display

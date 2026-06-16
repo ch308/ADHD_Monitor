@@ -1071,7 +1071,7 @@ void LcdDisplay::SetupUI() {
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 }
 
-void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
+void LcdDisplay::SetPreviewImageInternal(std::unique_ptr<LvglImage> image, bool auto_hide) {
     DisplayLockGuard lock(this);
     if (preview_image_ == nullptr) {
         ESP_LOGE(TAG, "Preview image is not initialized");
@@ -1139,7 +1139,17 @@ void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
     }
     lv_obj_move_foreground(preview_image_);
     esp_timer_stop(preview_timer_);
-    ESP_ERROR_CHECK(esp_timer_start_once(preview_timer_, PREVIEW_IMAGE_DURATION_MS * 1000));
+    if (auto_hide) {
+        ESP_ERROR_CHECK(esp_timer_start_once(preview_timer_, PREVIEW_IMAGE_DURATION_MS * 1000));
+    }
+}
+
+void LcdDisplay::SetPreviewImage(std::unique_ptr<LvglImage> image) {
+    SetPreviewImageInternal(std::move(image), true);
+}
+
+void LcdDisplay::SetPersistentPreviewImage(std::unique_ptr<LvglImage> image) {
+    SetPreviewImageInternal(std::move(image), false);
 }
 
 bool LcdDisplay::IsPreviewVisible() const {

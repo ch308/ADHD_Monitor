@@ -47,6 +47,7 @@
 #include "action_cards.h"
 #include "action_cards/choice_hint_images_generated.h"
 #include "lvgl_display.h"
+#include "lcd_display.h"
 #include "display/lvgl_display/lvgl_image.h"
 #if CONFIG_USE_ADHD_BLE_WIFI_PROVISIONING
 #include "adhd_prov_ble.h"
@@ -612,7 +613,11 @@ static bool DownloadAndShowPreviewImage(const std::string& url, int choice_gener
     }
     try {
         auto image = std::make_unique<LvglAllocatedImage>(data, total_read);
-        lvgl->SetPreviewImage(std::move(image));
+        if (auto* lcd = dynamic_cast<LcdDisplay*>(lvgl)) {
+            lcd->SetPersistentPreviewImage(std::move(image));
+        } else {
+            lvgl->SetPreviewImage(std::move(image));
+        }
         ESP_LOGI(TAG, "autism image SetPreviewImage ok bytes=%u", (unsigned)total_read);
         return true;
     } catch (...) {
