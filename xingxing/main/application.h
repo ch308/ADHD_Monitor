@@ -164,6 +164,7 @@ private:
     bool session_termination_requested_ = false;
     bool sleep_power_save_mode_ = false;
     bool visual_choice_mode_ = false;
+    bool suppress_listening_after_tts_ = false;
     int64_t auto_stop_listen_started_ms_ = 0;
     int64_t auto_stop_voice_started_ms_ = 0;
     int64_t auto_stop_silence_started_ms_ = 0;
@@ -188,6 +189,7 @@ private:
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
+    void SendTextInputWithoutListening(const std::string& text);
 
     // Activation task (runs in background)
     void ActivationTask();
