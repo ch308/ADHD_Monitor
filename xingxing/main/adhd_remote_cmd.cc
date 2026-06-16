@@ -1204,6 +1204,7 @@ static void InvalidateAutismTrainingChoiceUi() {
 
 static void FireAutismDailyPlanSlot(const AutismDailyPlanSlot& slot) {
     Application::GetInstance().ExitSleepPowerSaveForAlarm("daily_plan");
+    Application::GetInstance().CancelPowerWelcomeFlowForPathA();
     ExitActionCardsIfCoveringPreview();
     AutismChoiceContext* plan_ctx = nullptr;
     if (!slot.image_urls.empty()) {
@@ -1673,6 +1674,7 @@ static void HandleOneCommand(cJSON* root) {
         cJSON* kind = cJSON_GetObjectItem(session, "kind");
         const char* k = cJSON_IsString(kind) ? kind->valuestring : "";
         if (strcmp(k, "training_start") == 0) {
+            Application::GetInstance().CancelPowerWelcomeFlowForPathA();
             ExitActionCardsIfCoveringPreview();
             cJSON* sidn = cJSON_GetObjectItem(session, "session_id");
             const int sid = cJSON_IsNumber(sidn) ? sidn->valueint : 0;

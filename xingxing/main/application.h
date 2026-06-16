@@ -122,6 +122,8 @@ public:
 
     /// 日常训练/计划表等 Path A 结束后回到「孩子主动选择」：全屏欢迎你 → BOOT →「摇摇我」→ 摇晃换作息图（与上电一致）。
     void EnterChildVoluntaryWelcomeFromPathA();
+    /// Path A 日常训练/计划表开始时取消尚未完成的欢迎/摇晃解锁流程，避免异步任务再露出作息第一张图。
+    void CancelPowerWelcomeFlowForPathA();
 
     /**
      * Reset protocol resources (thread-safe)

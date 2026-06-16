@@ -74,8 +74,10 @@ static void PowerOnWelcomePostBootTask(void*) {
     }
     vTaskDelay(pdMS_TO_TICKS(2000));
     Application::GetInstance().Schedule([]() {
-        ActionCards::GetInstance().EnterRoutineFromPowerWelcome();
-        g_power_welcome_shake_gate.store(3);
+        int expected = 2;
+        if (g_power_welcome_shake_gate.compare_exchange_strong(expected, 3)) {
+            ActionCards::GetInstance().EnterRoutineFromPowerWelcome();
+        }
     });
     vTaskDelete(nullptr);
 }
@@ -116,6 +118,24 @@ void Application::EnterChildVoluntaryWelcomeFromPathA() {
 #ifdef CONFIG_ADHD_KIDS_UI
             RefreshKidsDisplay();
 #endif
+        }
+    });
+#endif
+}
+
+void Application::CancelPowerWelcomeFlowForPathA() {
+#if HAVE_LVGL
+    g_power_welcome_shake_gate.store(0);
+    Schedule([]() {
+        if (ActionCards::GetInstance().IsActive()) {
+            ActionCards::GetInstance().Toggle();
+        }
+        auto* display = Board::GetInstance().GetDisplay();
+        if (display != nullptr) {
+            if (auto* lcd = dynamic_cast<LcdDisplay*>(display)) {
+                lcd->SetPreviewImage(nullptr);
+            }
+            display->HideFullscreenImage();
         }
     });
 #endif
