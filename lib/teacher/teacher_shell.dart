@@ -790,15 +790,18 @@ class _TeacherShellState extends State<TeacherShell> {
   }) async {
     final teacherBandReady = _teacherBand?.vibrationVerified == true;
     var teacherBandNotified = false;
-    if (_notifyTeacherBandOnAlert &&
-        teacherBandReady &&
-        _teacherBand != null &&
-        (_teacherBand!.authHexKey ?? '').isNotEmpty) {
-      teacherBandNotified =
-          await _vibrateTeacherBandForAlert(student, eventType);
-    }
     if (_notifyTeacherBandOnAlert) {
-      await _phoneFallbackAlert();
+      // Try to vibrate teacher band when toggle is enabled; if it fails or
+      // no verified binding exists, fall back to phone vibration.
+      if (teacherBandReady &&
+          _teacherBand != null &&
+          (_teacherBand!.authHexKey ?? '').isNotEmpty) {
+        teacherBandNotified =
+            await _vibrateTeacherBandForAlert(student, eventType);
+      }
+      if (!teacherBandNotified) {
+        await _phoneFallbackAlert();
+      }
     }
     final alertLabel = teacherAlertEventLabel(eventType);
     final event = TeacherAlertEvent(

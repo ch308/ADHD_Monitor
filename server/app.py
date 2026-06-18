@@ -4601,13 +4601,17 @@ def teacher_alert_events():
         conn = sqlite3.connect("adhd_data.db")
         cursor = conn.cursor()
         if user:
+            # Return events uploaded by this logged-in teacher as well as any
+            # locally-saved events that were created while the device was
+            # offline (user_id IS NULL). This ensures alerts generated before
+            # login still surface in the teacher UI.
             cursor.execute(
                 """
                 SELECT id, client_event_id, student_id, student_name_snapshot,
                        event_type, bpm, threshold_bpm, started_at, note,
                        teacher_band_notified, created_at
                 FROM teacher_alert_events
-                WHERE user_id = ?
+                WHERE user_id = ? OR user_id IS NULL
                 ORDER BY id DESC
                 LIMIT ?
                 """,
