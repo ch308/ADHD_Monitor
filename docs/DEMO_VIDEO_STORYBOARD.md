@@ -4,7 +4,7 @@
 > 一条无声的信号穿过墙壁、越过云端，化作一束暖光、一段乐曲、一句温柔的问候。
 > 科技在这里不是冰冷的机器，而是父母之爱的延伸。
 
-> **相关文档**：本片资产与道具提示词清单见 `docs/AIGC_ASSET_PROMPTS.md`；通用元提示词见 `docs/META_PROMPTS_AI_VIDEO_PRODUCTION.md`（**第一节**生成分镜稿，**第二节**从分镜生成资产清单，**第三节**图生视频通用模板）。**逐镜生图提示词、即梦流程、制作与旁白备注**均在本文件第三至六章，无需另册。
+> **相关文档**：本片资产与道具提示词清单见 `docs/AIGC_ASSET_PROMPTS.md`；通用元提示词见 `docs/META_PROMPTS_AI_VIDEO_PRODUCTION.md`（**第一节**生成分镜稿，**第二节**从分镜生成资产清单，**第三节**图生视频通用模板）。**逐镜生图提示词、即梦流程、制作与旁白备注**均在本文件第三至六章；**在 Cursor 里辅助写字幕表、镜头核对表、脚本等**见**第七章**。
 
 ---
 
@@ -13,11 +13,11 @@
 | 项目 | 设定 |
 |------|------|
 | 片名 | 《温柔的信号 / The Gentle Signal》 |
-| 时长 | 全片约 **88 秒**（**13 个镜头**累计：①–⑫ 约 82s + **⑬ 6s**；①–⑫ 仍可单独裁剪至 75–90s 区间。**⑬** 为**镜头 12 尾帧强虚化底 + 手机真实小程序截图 + 字幕**的合成落版，可整段删去作纯情感版） |
+| 时长 | 成片实际 **约 81.5 秒**（**片头字幕卡 3s + 0.5s 黑场 + M01–M10 约 71s + M11 约 7.4s**）。①–⑩ 仍可单独裁剪至 75–90s 区间。**⑪** 为**四张真机截图合成图（左手机右文字布局）+ 功能文案**的落版段，可整段删去作纯情感版 |
 | 风格基调 | **真人实拍写实风格**（photorealistic / live-action，非动画、非插画、非 3D 渲染）、温暖治愈、细腻自然、略带科技未来感 |
 | 时间设定 | **故事发生在同一个晚上（约 20:00）**，孩子在书房写作业、父母在客厅——**全片为夜晚室内场景**：窗外漆黑、无日光，唯一光源为室内灯具（书房暖黄台灯 / 客厅落地灯·壁灯）与屏幕冷光 |
 | 主色调 | 焦虑段落：冷青灰、低饱和；治愈段落：琥珀暖金、柔光弥散 |
-| 画幅 | 2.39:1 电影宽银幕（也可输出 16:9 / 9:16 竖版社媒版本） |
+| 画幅 | 成片 **16:9（1280×720，60fps，H.264）**；原脚本规划 2.39:1，最终制作以 FFmpeg 非线性输出为准（可另行加黑边适配 2.39:1 / 9:16 竖版） |
 | 镜头语言 | 浅景深、自然光为主、缓慢推拉、特写情绪 |
 | 整体节奏 | 前段压抑紧凑 → 中段信号流转 → 后段舒缓呼吸 |
 | 音乐主线 | 432Hz 钢琴 + 弦乐铺底，从"留白—脉冲—温暖回升"三段式 |
@@ -34,6 +34,15 @@
 
 ## 二、故事分镜表（Shot List / Storyboard）
 
+### 片头字幕卡（3s · FFmpeg 生成 · 不列入镜头编号）
+
+| 字段 | 内容 |
+|------|------|
+| 时长 | **3 秒**（末尾淡出 0.5s，后接 0.5s 黑场停顿） |
+| 内容 | 第一行：「《温柔的信号》」· 第二行：「— 科技温情陪伴短片」 |
+| 样式 | 白字居中，黑底；字体 uming.ttc（宋体），行间距适中，背景纯黑 |
+| 实现 | Pillow 生成 PNG 后 FFmpeg 转为 60fps 视频（`TITLE.mp4`），末尾烘焙淡出 |
+
 ### 镜头 01 — 开场 · 书桌前的专注
 | 字段 | 内容 |
 |------|------|
@@ -41,7 +50,7 @@
 | 景别 | 中近景 |
 | 运镜 | 缓慢推近（Slow Dolly-in），从门口推向书桌 |
 | 镜头内容 | 夜晚书房，台灯下孩子低头写数学题，铅笔沙沙作响；书桌一角静静坐着一只可爱的**毛绒玩具**（此刻未亮、安静陪伴） |
-| 画面描述 | 暖黄台灯是画面唯一光源，背景虚化成温柔光斑；孩子**左手腕**上戴着智能手环，**屏幕全黑、不发光、完全静默**；书桌前方/一侧摆着一只圆润柔软的毛绒玩具，作为"日常陪伴"埋下伏笔（后续镜头09 它将亮起暖光） |
+| 画面描述 | 暖黄台灯是画面唯一光源，背景虚化成温柔光斑；孩子**左手腕**上戴着智能手环，**屏幕全黑、不发光、完全静默**；书桌前方/一侧摆着一只圆润柔软的毛绒玩具，作为"日常陪伴"埋下伏笔（后续镜头07 它将亮起暖光） |
 | 旁白/字幕 | （字幕）"晚上八点，他还在和最后一道题较劲。" |
 | 音效 | 铅笔书写声、轻微翻页声、室内静谧的环境音 |
 | 音乐 | 单音钢琴留白，几乎静默 |
@@ -70,67 +79,43 @@
 | 音效 | 心跳声推至最高、悬浮可视化越界时一记极轻的后台"脉冲"音（仅为观众叙事，孩子端完全无声） |
 | 音乐 | 弦乐紧张达到小高潮，戛然留白 |
 
-### 镜头 04 — 信号触发 · 无声的传递
+### 镜头 04 — 信号触发 · 父母端关怀提醒
 | 字段 | 内容 |
 |------|------|
-| 时长 | 5 秒 |
-| 景别 | 微距特写（手环）→ 切换至特写（父母手机） |
-| 运镜 | 前半：特写起幅于孩子**左手腕的手环**，一道细光线自手环升起向上；后半：**硬切/转场**切换到父母手机画面，细光线接入屏幕 |
-| 镜头内容 | 心率攀升至 **115** 的瞬间，**一道纤细的数据光线**从孩子**左手腕的手环**位置升起腾空；画面随即**切换**到客厅沙发上父母的手机，细光线自画面外接入、流进手机屏幕（光线为**概念化可视化**，**手环本体仍是黑屏、不发光**） |
-| 画面描述 | 两段式同主题剪辑（**不再穿墙**）：前半暗调书房中，一道**纤细锐利、笔直简洁、充满科技感**的发光数据线从孩子**左手腕**的黑屏手环升起；硬切后，画面落在父母手机上，同一道细光线自屏幕边缘接入、点亮手机。整体**克制冷静、不华丽**（无丝带、无繁复粒子拖尾）；发光的是**非实体的概念信号线**，孩子**左手腕**的手环本体**全黑、不发光、静默** |
-| 旁白/字幕 | （旁白·温柔女声）"有些求助，孩子说不出口；好在，有人一直在听。" |
-| 音效 | 低沉"嗡"的传输声、数据流粒子音 |
-| 音乐 | 单颗钢琴音符如脉冲，标记"信号"动机 |
+| 时长 | 10 秒 |
+| 景别 | 微距特写（手环）→ 特写（父母手机 + 全息气泡） |
+| 运镜 | **同镜两段式**：前半特写起幅于孩子**左手腕的手环**，一道细光线自手环升起向上；**镜头跟随光线转入客厅父母手机画面**，后半固定俯拍，手机在妈妈手中轻微震动，细光线接入屏幕后上方浮起全息关怀气泡 |
+| 镜头内容 | 心率攀升至 **115** 的瞬间，**一道纤细的数据光线**从孩子**左手腕的手环**位置升起腾空（**手环本体黑屏、不发光**）；**同镜内**光线汇入客厅沙发上妈妈手中的手机，手机亮屏并**震动**；屏幕上方空气中升起**半透明全息关怀气泡框**，框内提示"心率偏高，建议陪伴"（气泡由一缕光丝与手机相连，为面向观众的概念可视化） |
+| 画面描述 | **前段（书房）**：暗调夜晚书房，一道**纤细锐利、笔直简洁、充满科技感**的发光数据线从孩子**左手腕**的黑屏手环升起，克制冷静、不华丽（无丝带、无繁复粒子拖尾）。**后段（客厅）**：**同镜转入**夜晚客厅（窗外漆黑、暖色落地灯/壁灯偏暗），父母并肩坐在沙发上，同一道细光线自屏幕边缘接入、点亮手机；妈妈手机震动滑了一下，**手机上方悬浮起一个发着温暖琥珀金光的全息气泡框**（区别于镜头 03 的警示红，标记由报警转向关怀的回暖），气泡光与屏光映亮她的脸，爸爸从旁凑过来一起看 |
+| 旁白/字幕 | （旁白·温柔女声）"有些求助，孩子说不出口；好在，有人一直在听。"<br>（全息气泡文字）"⚠ 关怀提醒：朗朗心率 115 bpm，建议给予陪伴。" |
+| 音效 | 低沉"嗡"的传输声、数据流粒子音、手机震动声 "嗡嗡"、轻提示音 |
+| 音乐 | 单颗钢琴音符如脉冲标记"信号"动机 → 脉冲动机延续，温度开始回升 |
 
-### 镜头 05 — 父母端 · 手机报警震动
+### 镜头 05 — 父母反馈 · 腾讯云生成关怀方案
 | 字段 | 内容 |
 |------|------|
-| 时长 | 5 秒 |
-| 景别 | 特写（手机屏幕） |
-| 运镜 | 固定俯拍，手机在桌面/手中轻微震动位移 |
-| 镜头内容 | 父母坐在客厅沙发上，妈妈手中的手机亮屏并**震动**；屏幕上方的空气中升起一个**半透明全息关怀气泡框**，框内文字"心率偏高，建议陪伴"（承接镜头 04 汇入手机的光流，气泡由一缕光丝与手机相连，是面向观众的概念可视化） |
-| 画面描述 | **夜晚的客厅**（与孩子写作业同一时刻，约 20:00）：窗外漆黑无日光，室内仅有暖色落地灯/壁灯做环境光，整体偏暗温馨；父母并肩坐在沙发上，妈妈手机震动滑了一下，**手机上方悬浮起一个发着温暖琥珀金光的全息气泡框**（区别于镜头 03 的警示红，标记由报警转向关怀的回暖），气泡光与屏光一同映亮她的脸，爸爸从沙发另一侧凑过来一起看 |
-| 旁白/字幕 | （全息气泡文字）"⚠ 关怀提醒：朗朗心率 115 bpm，建议给予陪伴。" |
-| 音效 | 手机震动声 "嗡嗡"、轻提示音 |
-| 音乐 | 钢琴脉冲动机延续，温度开始回升 |
+| 时长 | 14 秒 |
+| 景别 | 中景（双人）+ 插入手机屏幕特写 → 概念全景（数字空间可视化） |
+| 运镜 | **同镜两段式**：前半轻微环绕（slight arc）聚焦父母神情，插切手机屏幕特写带键盘输入；发送后一道纤细丝滑的数据光线自手机升起，**镜头跟随光线上升并转入抽象数字空间**；后半缓慢环绕推进（orbit-in）至中心光核，指令光线分流射出 |
+| 镜头内容 | 父母仍坐在客厅沙发上，妈妈在 App 的**文字输入框**里一字一句敲下"他正在写数学作业"，按下发送；爸爸在旁关切地看。发送瞬间，一道与镜头 04 同款的**纤细丝滑曲线光线**自手机升起腾空；**同镜内**光线汇入 **腾讯云** 中央光核，AI 分析"场景=写数学作业 + 焦虑"，经 **腾讯云 IoT / MQTT** 下发指令，分两束光线分别指向"毛绒玩具""星星机器人" |
+| 画面描述 | **前段（客厅实拍）**：沙发上的过肩插入特写，手机 App 场景反馈页有**文本输入框**，软键盘弹起，妈妈的拇指逐字输入"他正在写数学作业"，光标闪烁；发送后屏幕提示"已上报云端，正在生成关怀方案"，一道**纤细丝滑、划出柔和曲线**的数据光线自手机升起。**后段（云端概念）**：镜头随光线转入抽象数据宇宙，场景数据汇入中央光球（可隐约呈现**腾讯云 Logo / "Tencent Cloud" 字样**于光核之上），金色数据光点汇入，MQTT 指令分两束光线射向"毛绒玩具""星星机器人"图标 |
+| 旁白/字幕 | （字幕）"不冲进去打断，而是悄悄告诉这个家——他在写作业。"<br>（旁白·温柔女声）"腾讯云读懂了此刻：不是责备，而是陪伴。" |
+| 音效 | 轻点按 UI 音效、温柔确认"叮"、数据汇聚的清脆电子音、指令分发"咻咻"声 |
+| 音乐 | 弦乐渐转暖并加入温柔和声 → 432Hz 主题动机首次完整浮现（前导） |
 
-### 镜头 06 — 父母反馈 · 知情与决定
-| 字段 | 内容 |
-|------|------|
-| 时长 | 8 秒 |
-| 景别 | 中景（双人）+ 插入手机屏幕特写 |
-| 运镜 | 轻微环绕（slight arc）聚焦两人神情，插切手机屏幕特写带键盘输入；**结尾按下发送后，一道纤细丝滑的数据光线自手机升起向上"上传"，顺势硬切进镜头 07 云端**（与镜头 07 以剪辑相连、非同框） |
-| 镜头内容 | 父母仍坐在客厅沙发上，妈妈在 App 的**文字输入框**里一字一句敲下"他正在写数学作业"，按下发送；爸爸在旁关切地看。发送瞬间，一道与镜头 04 同款的**纤细丝滑曲线光线**自手机升起腾空（概念可视化的"上传"） |
-| 画面描述 | 沙发上的过肩插入特写：手机 App 场景反馈页有一个**文本输入框**，软键盘弹起，妈妈的拇指逐字输入"他正在写数学作业"，光标在框内闪烁；发送后屏幕提示"已上报云端，正在生成关怀方案"，同时一道**纤细丝滑、划出柔和曲线**的数据光线自手机升起向上飘去——**此光线作为转场引导，硬切进镜头 07 的腾讯云光核**（两镜以剪辑相连而非同框） |
-| 旁白/字幕 | （字幕）"不冲进去打断，而是悄悄告诉这个家——他在写作业。" |
-| 音效 | 轻点按 UI 音效、温柔确认"叮" |
-| 音乐 | 弦乐渐转暖，加入一层温柔和声 |
-
-### 镜头 07 — 腾讯云 · AI 生成关怀方案
-| 字段 | 内容 |
-|------|------|
-| 时长 | 6 秒 |
-| 景别 | 概念全景（数字空间可视化） |
-| 运镜 | **承接镜头 06 的硬切**：上传的细光线自画面外汇入、缓慢环绕推进（orbit-in）至中心光核（与镜头 06 以剪辑相连、非同框） |
-| 镜头内容 | 由镜头 06 上传的数据光线接入，**腾讯云**节点点亮，AI 分析"场景=写数学作业 + 焦虑"，经 **腾讯云 IoT / MQTT** 下发指令分流 |
-| 画面描述 | 抽象数据宇宙：承接镜头 06 飘入的那道纤细曲线光线，场景数据汇入中央光球（可隐约呈现**腾讯云 Logo / "Tencent Cloud" 字样**于光核之上），分出两条光线分别指向"毛绒玩具""星星机器人" |
-| 旁白/字幕 | （旁白·温柔女声）"腾讯云读懂了此刻：不是责备，而是陪伴。" |
-| 音效 | 数据汇聚的清脆电子音、指令分发"咻咻"声 |
-| 音乐 | 432Hz 主题动机首次完整浮现（前导） |
-
-### 镜头 08 — 星星机器人 · 温柔开口
+### 镜头 06 — 星星机器人 · 温柔开口
 | 字段 | 内容 |
 |------|------|
 | 时长 | 8 秒 |
 | 景别 | 中近景（机器人 + 孩子侧脸） |
 | 运镜 | 起幅于一道自画面外飘入的细光线接入机器人，缓慢推近机器人星形面屏，再切孩子反应 |
-| 镜头内容 | **承接镜头 07 下发的指令**：一道**纤细丝滑、划出柔和曲线**的数据光线自画面外飘入、汇入桌面星星机器人，机器人随之被"唤醒"——面屏率先亮起微笑表情，主动温柔开口，先安抚男孩，再提议跟着毛绒玩具一起深呼吸 |
-| 画面描述 | 与镜头 07 同款的**纤细丝滑曲线光线**自画面外接入机器人本体（仅承接指令的概念可视化，**不出现腾讯云字样/Logo**），光线没入机身后星形面屏亮起柔光眼神，成为画面里第一缕暖意；孩子抬头，眼神从紧绷转为好奇，焦虑略微松动（**左手腕**手环始终**黑屏、不发光**） |
+| 镜头内容 | **承接镜头 05 下发的指令**：一道**纤细丝滑、划出柔和曲线**的数据光线自画面外飘入、汇入桌面星星机器人，机器人随之被"唤醒"——面屏率先亮起微笑表情，主动温柔开口，先安抚男孩，再提议跟着毛绒玩具一起深呼吸 |
+| 画面描述 | 与镜头 05 同款的**纤细丝滑曲线光线**自画面外接入机器人本体（仅承接指令的概念可视化，**不出现腾讯云字样/Logo**），光线没入机身后星形面屏亮起柔光眼神，成为画面里第一缕暖意；孩子抬头，眼神从紧绷转为好奇，焦虑略微松动（**左手腕**手环始终**黑屏、不发光**） |
 | 旁白/字幕 | （机器人台词·特教老师般温柔女声）"小主人，写作业累了吧？别急——我们先和毛绒玩具一起，深呼吸三次吧。" |
 | 音效 | 机器人提示音、面屏切换轻"叮"声 |
 | 音乐 | 432Hz 钢琴主旋律正式进入（由前导转正式），加入轻柔铃声点缀 |
 
-### 镜头 09 — 毛绒玩具点亮 · 一起呼吸
+### 镜头 07 — 毛绒玩具点亮 · 一起呼吸
 | 字段 | 内容 |
 |------|------|
 | 时长 | 10 秒 |
@@ -142,7 +127,7 @@
 | 音效 | 柔和"亮起"音、432Hz 乐曲淡入、缓慢的吸气呼气声、光晕脉动的低频"呼…呼…" |
 | 音乐 | 432Hz 旋律舒展，弦乐铺底如拥抱，温暖弥散 |
 
-### 镜头 10 — 对话解困 · 一起面对难题
+### 镜头 08 — 对话解困 · 一起面对难题
 | 字段 | 内容 |
 |------|------|
 | 时长 | 6 秒 |
@@ -154,7 +139,7 @@
 | 音效 | 机器人轻柔提示音、孩子翻动作业本与铅笔轻点声 |
 | 音乐 | 432Hz 旋律温暖延展，轻柔铃声点缀 |
 
-### 镜头 11 — 茅塞顿开 · 继续作业
+### 镜头 09 — 茅塞顿开 · 继续作业
 | 字段 | 内容 |
 |------|------|
 | 时长 | 6 秒 |
@@ -166,7 +151,7 @@
 | 音效 | 铅笔顺畅书写声、孩子轻快的笑 |
 | 音乐 | 432Hz 主题进入温暖高潮，明亮而安定 |
 
-### 镜头 12 — 父母端 · 心率归于平静 · 收尾
+### 镜头 10 — 父母端 · 心率归于平静 · 收尾
 | 字段 | 内容 |
 |------|------|
 | 时长 | 8 秒 |
@@ -178,21 +163,24 @@
 | 音效 | 手机轻"叮"提示、最终一声温柔余音 |
 | 音乐 | 432Hz 主题收束，渐弱至温暖留白 |
 
-### 镜头 13 — 功能说明 · 浮层实拍合成（6s 落版）
+### 镜头 11 — 功能说明 · 四格真机截图合成（约 7.4s 落版 · 16:9）
+
+> **成片实际采用「左手机右文字」双层 split 合成图**（非纯截图铺屏）。四张合成图由 Python/Pillow 生成，背景为 `M10尾帧.png` 高斯模糊底，左侧展示手机截图，右侧叠加功能文案与 tag，整体统一在 1280×720 画布。
 
 | 字段 | 内容 |
 |------|------|
-| 时长 | **6 秒** |
-| 景别 | **合成画面**：全屏底图为**镜头 12 落幅尾帧**经**高度虚化**（Gaussian / 径向模糊，强到仅保留暖金光斑与轮廓暗示）；**前景层**为**智能手机屏幕特写**（可略带边框与手指握持边缘），屏幕内容区**不使用 AI 生成 UI** |
-| 运镜 | 以**静帧合成**为主，可只做**极轻微前景漂移**（1–2% 画幅）或完全静止，避免抢戏 |
-| 镜头内容 | 在虚化的「一家相连」余韵之上，用手机里的**小程序详情页真实截图**（已脱敏或正式版均可）承载信息；**功能点用画面外或屏缘的简短字幕/条目标注**说明：**一键分享至社交网站 / 社区**、**周报与月报等总结上报**（具体措辞与条目以产品文案为准，可叠两行字） |
-| 画面描述 | **底**：导出镜头 12 **最后一帧**（Logo/Slogan 已出全或略前 1 帧亦可），整体模糊到不可辨读 UI 与建筑细节，仅留暖金氛围。**前景**：手机约占画面 **35–55%**（竖构图可更大），屏内为**真实小程序界面截图**逐帧或硬切替换（若一条截图说不完，可在 6s 内做 **1 次硬切**换第二张截图，仍属实拍素材）。**字**：说明社交分享与上报的文案用剪映/Figma **简洁无衬线字幕条**压在安全区，勿与小屏内正文抢行 |
-| 旁白/字幕 | （推荐**仅字幕**，避免与镜头 12 女声旁白叠读抢气口）示例：**「小程序内：一键分享社区 · 智能配图」** / **「周报 / 月报：总结一键上报」**（可按产品实际按钮名微调）；若需口播，亦用**温柔女声** |
-| 音效 | 极轻「叮」或静音；若有切图，**一声**切换音即可 |
-| 音乐 | **延续镜头 12 尾音渐弱**至几乎静默；勿再起新的主题高潮 |
-| 剪辑衔接 | 镜头 12 Logo/Slogan 全显 **1–1.5 秒** 后叠化或硬切入本镜；**务必从 12 导出高清尾帧**作底图，保证色温与颗粒与正片一致 |
-| 制作要点 | **本镜以剪映 / AE / Figma 合成为主**，不必依赖文生图出界面；截图分辨率需 ≥ 成片短边对应精度，避免屏内发糊 |
-| 备注 | 「社交网站」含小红书、微博等渠道时在字幕中可择一或写「主流社区」；中性版素材可去掉具体平台名 |
+| 时长 | **约 7.4 秒**（小红书段 3.7s + 周报段 3.7s；每段内两张截图各 2s 通过叠化 0.3s 衔接） |
+| 画幅 | **1280×720（16:9）**，60fps，H.264 |
+| 景别 | **左手机右文字 split 布局**：左半（0–640px）手机截图居中悬浮（高 670px，带圆角+投影），右半（640–1280px）功能文案居中排版 |
+| 运镜 | **静帧 + 叠化**：每段两张图各 2s，段内用 `xfade=fade` 叠化 0.3s 衔接（实际每段 3.7s）；两大段（小红书段→周报段）之间硬切 |
+| 镜头内容 | 用 **4 张合成图** 呈现两大功能：**一键发布小红书**（`小红书_1` → `小红书_2`）、**周报与 AI 行为分析**（`周报_1` → `周报_2`）。每张合成图左侧为对应真机截图，右侧为功能说明文字 + 「更多功能已上线」琥珀金胶囊 tag |
+| 画面描述 | **背景**：`M10尾帧.png` 高斯模糊（radius=9）+ 全局暗化遮罩（alpha=70）+ 右半追加轻遮罩（alpha=30），整体明亮温暖。**手机截图**：等比缩放至高 670px，圆角裁切（radius=18）+ 投影 + 白色描边，居中置于左半（px=(640−pw)/2）。**右侧文字**：主标题白色（字号 50）+ 装饰横线 + 副标题灰蓝色（字号 29），整体垂直居中于右半（cx=960）。**Tag**：底部固定位置（y=620）琥珀金胶囊形「更多功能已上线」，白色字 |
+| 功能文案 | `小红书_1`：主「**一键发布小红书**」· 副「AI生图，树洞文案」<br>`小红书_2`：主「编辑后跳转发布」· 副「复制文案 · 唤起小红书」<br>`周报_1`：主「周报 / 月报 / 年报」· 副「数据就绪 · 一键生成」<br>`周报_2`：主「AI 成长观察报告」· 副「行为归纳 · 养育建议」 |
+| 音效 | 静音（延续 M10 渐弱尾音直至静默） |
+| 音乐 | 延续镜头 10 尾音渐弱至静默；不再起新主题 |
+| 剪辑衔接 | 家庭版1（产品功能示意图 4s）末尾直切入本镜第一张；两大段（小红书→周报）之间硬切 |
+| 制作要点 | 合成图由 `Python + Pillow` 生成于 `0617/output/*_split.png`，再由 FFmpeg 转为 60fps 2s 视频，经 `xfade` 组合为 `seg_xhs_with_fadeout.mp4`（小红书段）和 `seg_zb.mp4`（周报段） |
+| 备注 | 合成图源文件：`小红书_1_split.png`、`小红书_2_split.png`、`周报_1_split.png`、`周报_2_split.png`（均在 `0617/output/`）；对应视频：`v4_seg/M11_xhs1_v4.mp4`、`normalized/M11_小红书_2.mp4`、`v4_seg/M11_zb1_v4.mp4`、`normalized/M11_周报_2.mp4` |
 
 ---
 
@@ -239,51 +227,29 @@
   - **质量词**：杰作，超精细，8K，发光细节精致，锐利对焦
 - **EN**: `(style) photorealistic live-action film still, real human actor, natural skin texture, fused with sci-fi holographic UI VFX, restrained cool tech mood (not anime, not cartoon, not 3D render); (composition) macro on the left wrist then pull-back and tilt-up revealing a floating hologram above the left wrist, shallow depth of field; (subject) a boy's left wrist wearing a smart wristband with a completely dark, blank screen (silent, no display), while a translucent holographic heart-rate visualization hovers in mid-air above the left wrist; (background) a dim study desk corner, heavily blurred to emphasize the holographic glow; (details) a pulsing heart-rate waveform and a large number "115", a horizontal red threshold line, the waveform turning from cyan to alert-red where it crosses the line, subtle holographic scan-lines and particles; (light & color) dim cool environment, hologram emitting cyan-blue light shifting to alert-red at the breach, glow floating in air; (quality) masterpiece, ultra-detailed, 8K, refined glow details, sharp focus`
 
-### 镜头 04 — 信号触发 · 无声传递
+### 镜头 04 — 信号触发 · 父母端关怀提醒
 - **中文**：
-  - **风格限定**：真人实拍 + 电影级 VFX 合成的概念可视化（非动画），**冷静克制的科技感**电影氛围，朴实不炫技
-  - **视角构图**：两段式同主题特写（**不穿墙**）——首帧为孩子左手腕手环的微距特写，尾帧为父母手机的特写，靠一道细光线与硬切衔接
-  - **主题描述**：心率达到 115 时，**一道纤细的数据光线**从男孩**左手腕的手环**位置升起腾空；画面切换后，同一道细光线自手机屏幕边缘接入、点亮父母手机（光线为概念可视化，**手环本体黑屏不发光**）
-  - **背景设定**：首帧暗调夜晚儿童书房书桌一角（暖黄台灯），尾帧夜晚客厅沙发暖光环境（窗外漆黑、落地灯/壁灯）与父母手机，两镜以剪辑相连而非同框
-  - **细节修饰**：**细线状的发光数据光线，纤细锐利、笔直简洁，科技感十足**；仅有极少量微弱光点点缀，**不要丝带、不要华丽粒子拖尾、不要繁复光晕**；光线起止于手环与手机屏幕处仅泛起一圈极淡的微光
-  - **光影色调**：整体暗调中只让这道细光线发光，冷暖交汇（冷青起、暖金落），**克制冷静、干净利落，非梦幻华丽**
-  - **质量词**：杰作，超精细，8K，光效克制精致、干净锐利
-- **EN**: `(style) photorealistic live-action with cinematic VFX composited in, semi-abstract conceptual visualization, calm restrained high-tech mood, understated and not flashy (not anime, not cartoon); (composition) two-shot same-theme close-ups connected by a hard cut (no wall-cut, no cross-section): first frame a macro close-up of the boy's left-wrist wristband, second frame a close-up of the parents' smartphone, linked by a single thin light line; (subject) as the heart rate hits 115, a single thin filament-like line of light rises up from the area of the boy's left-wrist wristband (the wristband itself stays completely black and not glowing); after the cut, the same thin line of light enters from the screen edge and lights up the parents' smartphone on the living-room sofa; (background) first frame a dim study desk corner, second frame a cozy warm-lit living-room sofa with the parents' phone, the two shots linked by editing rather than shown in one frame; (details) a thin, sharp, straight and minimal glowing data line, full of tech feel, only a few faint light points as accents, NO ribbon, NO ornate particle trails, NO elaborate glow, just a very subtle faint ripple where the line starts at the wristband and meets the phone screen; (light & color) overall dark grade with only this thin line glowing, cool-to-warm transition (cyan rise, golden land), restrained, calm and clean, not dreamy or gorgeous; (quality) masterpiece, ultra-detailed, 8K, restrained refined light effect, clean and sharp`
+  - **风格限定**：真人实拍 + 电影级 VFX 合成的概念可视化（非动画），**冷静克制的科技感**过渡至温情电影质感，朴实不炫技
+  - **视角构图**：**同镜两段式**（**不穿墙**）——前半为孩子左手腕手环微距特写，细光线升起后**镜头跟随光线转入**父母手机特写；后半固定俯拍，手机上方悬浮全息关怀气泡框为视觉焦点
+  - **主题描述**：心率达到 115 时，**一道纤细的数据光线**从男孩**左手腕的手环**升起（**手环黑屏不发光**）；**同镜内**光线汇入客厅沙发上妈妈手中的手机，手机亮屏震动，屏幕上方升起**半透明全息关怀气泡框**（琥珀金光，由细光丝与手机相连）
+  - **背景设定**：前段暗调夜晚儿童书房书桌一角（暖黄台灯）；后段夜晚温暖客厅沙发区（窗外漆黑、落地灯/壁灯），父母并肩而坐，父亲身影虚化于背景
+  - **细节修饰**：**细线状发光数据光线，纤细锐利、笔直简洁**；仅有极少量微弱光点，**不要丝带、不要华丽粒子拖尾**；后段全息气泡悬浮于手机上方空气中（气泡文字后期贴图），气泡边缘有细微扫描线与粒子，手机轻微动态模糊暗示震动
+  - **光影色调**：前段暗调中细光线发光、冷青起；后段客厅暖光偏暗，气泡发**温暖琥珀金光**（区别于镜头 03 警示红），气泡光与屏光映在母亲脸上，冷暖柔和对比
+  - **质量词**：杰作，超精细，8K，光效与全息气泡精致，锐利对焦
+- **EN**: `(style) photorealistic live-action with cinematic VFX composited in, semi-abstract conceptual visualization, calm restrained high-tech mood transitioning to tender realism (not anime, not cartoon); (composition) single-shot two-part (no wall-cut): first a macro close-up of the boy's left-wrist wristband, a thin light line rising, the camera following the line into a close-up of the parents' smartphone; second part a slight high-angle fixed shot with a translucent holographic care-bubble floating above the phone as focal point; (subject) as heart rate hits 115, a thin straight glowing data line rises from the left-wrist wristband (completely black, not glowing); in the same shot the line merges into the mother's smartphone on the living-room sofa, the phone lighting up and gently vibrating while a translucent amber holographic care-bubble rises above the screen, tethered by a thin thread of light; (background) first a dim study desk corner, then a warm living-room sofa at night with pitch-black windows; (details) a thin, sharp, minimal glowing data line with only a few faint light points, NO ribbon, NO ornate particle trails; then a translucent holographic bubble above the phone (empty for post-production text), faint scan-lines, subtle phone motion blur hinting vibration; (light & color) dark grade with thin line glowing cool-to-warm, then dim warm living-room light with an amber care-bubble (not alert-red), bubble and screen glow on the mother's face; (quality) masterpiece, ultra-detailed, 8K, restrained light effect and luminous hologram, sharp focus`
 
-### 镜头 05 — 父母端 · 手机报警震动
+### 镜头 05 — 父母反馈 · 腾讯云生成关怀方案
 - **中文**：
-  - **风格限定**：真人实拍写实风格（非动画非插画），温情电影质感
-  - **视角构图**：手机**上方的空气中**悬浮一个半透明全息气泡框，构成画面视觉焦点
-  - **主题描述**：**夜晚的客厅**里父母并肩坐在沙发上，母亲手中的手机亮屏并轻微震动，屏幕上方升起一个**半透明全息关怀气泡框**（承接镜头 04 汇入手机的光流，由一缕细光丝/粒子与手机相连——为面向观众的概念可视化）
-  - **背景设定**：夜晚温暖客厅沙发区，**窗外漆黑无日光**，仅暖色落地灯做环境光、整体偏暗，父亲身影与沙发靠垫虚化于背景
-  - **细节修饰**：**虚拟全息气泡框悬浮在手机上方的空气中**，气泡内为文字"心率偏高，建议陪伴"；气泡边缘有细微全息扫描线与粒子，底部一缕光丝连回手机；手机轻微位移的动态模糊暗示震动
-  - **光影色调**：**夜景室内**，客厅暖光偏暗为主；气泡发**温暖琥珀金光**（区别于镜头 03 的警示红，标记由报警转向关怀的回暖），气泡光与手机屏光映在母亲脸上形成柔和冷暖对比，浅景深
-  - **质量词**：杰作，超精细，8K，全息气泡通透发光，锐利对焦
-- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actors, natural skin texture, tender realistic cinematic fused with subtle sci-fi holographic UI VFX (not anime, not illustration, not 3D render); (composition) close-up of a smartphone with a slight high angle, the mother's hand and face entering frame for foreground-background layering, a translucent holographic speech-bubble floating in the air above the phone screen as the focal point; (subject) at night, the parents sitting side by side on the living-room sofa, the smartphone in the mother's hand lighting up and gently vibrating while a translucent holographic care-bubble rises into the air above the screen, tethered to the phone by a thin thread of light and particles (a conceptual visualization for the audience, carrying over the light stream that merged into the phone in the previous shot); (background) a warm living-room sofa area at night, pitch-black windows with no daylight, only warm floor/wall lamps as ambient light, overall dim, sofa cushions and the father's silhouette blurred behind; (details) a translucent holographic bubble hovering in mid-air above the phone (leave the bubble empty/glowing for AI generation; the Chinese line "heart rate is high, companionship suggested" is added later in editing), faint holographic scan-lines and particles on the bubble edge, a wisp of light connecting it back to the phone, subtle motion blur of the phone hinting vibration; (light & color) nighttime interior, dim warm living-room light, the bubble emitting a warm amber glow (not alert-red, marking the shift from alarm to caring warmth), bubble-glow and screen-glow on the mother's face creating a soft warm-cool contrast, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, luminous translucent hologram, sharp focus`
+  - **风格限定**：真人实拍写实 + 科技未来感概念 VFX 合成（非动画卡通），温情电影质感过渡至云端数字空间
+  - **视角构图**：**同镜两段式**——前半为手机屏幕特写（过肩视角），软键盘与输入框占据画面下半部；发送后镜头跟随自手机升起的细光线转入抽象数字空间全景，后半缓慢环绕推进至中心光核，对称放射式构图
+  - **主题描述**：父母坐在客厅沙发上，母亲的拇指在 App 文本输入框中**逐字输入"他正在写数学作业"**并发送；发送瞬间一道**纤细丝滑曲线光线**自手机升起，**同镜内**汇入中央发光光球（**腾讯云 AI**），分析场景并经 MQTT 下发指令，分两束光线指向毛绒玩具与星星机器人图标
+  - **背景设定**：前段为夜晚温暖客厅沙发区（窗外漆黑、暖色落地灯/壁灯），父亲关切探看；后段为深蓝色抽象数据宇宙，漂浮的数据节点与网格
+  - **细节修饰**：前段 App 场景反馈页含文本输入框、弹起软键盘、闪烁光标、高亮发送按钮；后段光核上方隐约浮现"腾讯云 / Tencent Cloud"字样，金色数据光点汇入，MQTT 指令分流光束；全程以一道**纤细丝滑 S 形曲线光线**串联（与镜头 04 同款光线风格）
+  - **光影色调**：前段夜景室内暖光与屏幕光交融；后段深蓝冷底 + 金色暖光点，科技辉光与温情过渡
+  - **质量词**：杰作，超精细，8K，界面与光效精致，锐利对焦
+- **EN**: `(style) photorealistic live-action film still fused with futuristic conceptual VFX, tender realistic cinematic transitioning into a digital cosmos (not anime, not cartoon); (composition) single-shot two-part: first an over-the-shoulder close-up of a smartphone with keyboard and input box filling the lower half, then the camera follows a thin silky curved line of light rising from the phone into a wide abstract digital space, slow orbit-in to a symmetrical radial core; (subject) the parents on the living-room sofa, the mother's thumb typing "he is doing math homework" into an app text input box and sending, the father leaning in with concern; at sending, a thin silky S-curve data line rises from the phone and merges into a central glowing orb (Tencent Cloud AI) analyzing the scene and dispatching commands via MQTT, splitting into two beams toward plush-toy and star-robot icons; (background) first a warm living-room sofa area at night, then a deep-blue abstract data cosmos with floating nodes and grids; (details) first part: app feedback page with text field, soft keyboard, blinking cursor, highlighted send button; second part: faint "Tencent Cloud" wordmark above the core, golden particles flowing in, MQTT command beams branching out; one continuous thin silky curved light line throughout (same style as shot 04); (light & color) warm room and screen glow in the first part, deep-blue cool base with golden warm particles in the second; (quality) masterpiece, ultra-detailed, 8K, legible UI and refined glow, sharp focus`
 
-### 镜头 06 — 父母反馈 · 知情与决定
-- **中文**：
-  - **风格限定**：真人实拍写实风格（非动画非插画），温情电影质感
-  - **视角构图**：手机屏幕特写（过肩视角），软键盘与输入框占据画面下半部；**与镜头 07 为剪辑相连的两段式（非同框）——本镜尾帧为发送后自手机升起的一道细光线，硬切进镜头 07 云端**
-  - **主题描述**：父母坐在客厅沙发上，母亲的拇指正在 App 文本输入框中**逐字输入文字"他正在写数学作业"**并准备发送；按下发送瞬间，一道**纤细丝滑曲线光线**自手机升起腾空（概念可视化的"上传"）
-  - **背景设定**：夜晚温暖客厅沙发区（窗外漆黑、暖色落地灯/壁灯），父亲坐在旁边关切探看，沙发靠垫与背景虚化；**与镜头 07 以剪辑相连而非同框**
-  - **细节修饰**：App 场景反馈页含文本输入框、弹起的软键盘、闪烁的光标，发送按钮高亮；尾帧处一道**纤细丝滑、划出柔和曲线（S 形、非直线）的科技感数据光线**自手机升起向上飘去，克制不华丽（与镜头 04 同款光线，作为切入镜头 07 的转场引导）
-  - **光影色调**：夜景室内，客厅暖光偏暗与屏幕光交融，柔和温暖，浅景深
-  - **质量词**：杰作，超精细，8K，界面文字清晰可读，锐利对焦
-- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actors, natural skin texture, tender realistic cinematic (not anime, not illustration, not 3D render); (composition) close-up of a smartphone screen from an over-the-shoulder angle while the parents sit on the living-room sofa, the on-screen keyboard and input box filling the lower half; linked to shot 07 by an edit (two-part, NOT one frame): the tail frame shows a thin line of light rising from the phone after sending, hard-cutting into the cloud of shot 07; (subject) the mother's thumb typing the text "he is doing math homework" into an app text input box, about to send, the father seated beside her and leaning in with concern; at the moment of sending, a single thin silky curved line of light rises up from the phone (a conceptual "upload" visualization); (background) a warm living-room sofa area at night, sofa cushions blurred behind, linked to shot 07 by editing rather than shown in one frame; (details) an app feedback page with a text input field, a popped-up soft keyboard, a blinking cursor, a highlighted send button; on the tail frame a thin, silky, gently curving (S-curve, not straight) high-tech data line rises from the phone, restrained and not flashy (same line style as shot 04, serving as the transition into shot 07); (light & color) warm room light blending with screen glow, soft and warm, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, legible UI text, sharp focus`
-
-### 镜头 07 — 腾讯云 · AI 关怀方案
-- **中文**：
-  - **风格限定**：科技未来感概念可视化（电影级 VFX，与真人实拍同片基调，非动画卡通）
-  - **视角构图**：抽象数字空间全景，缓慢环绕推进至中心，对称放射式构图；**承接镜头 06 硬切——首帧由镜头 06 上传的那道细曲线光线自画面外汇入光核（与镜头 06 以剪辑相连、非同框）**
-  - **主题描述**：由镜头 06 上传的细光线接入，中央发光光球代表**腾讯云 AI** 正在分析场景并经 MQTT 下发指令，分出两条光线指向两个发光设备图标（毛绒玩具与星星机器人）
-  - **背景设定**：深蓝色抽象数据宇宙，漂浮的数据节点与网格；**与镜头 06 以剪辑相连而非同框**
-  - **细节修饰**：一道**纤细丝滑曲线光线**自画面外汇入光核（承接镜头 06 的上传线），光核上方隐约浮现"腾讯云 / Tencent Cloud"字样，金色数据光点汇入，MQTT 指令分流的光束
-  - **光影色调**：深蓝冷底 + 金色暖光点，强烈明暗对比，科技辉光
-  - **质量词**：杰作，超精细，8K，渲染精致，锐利对焦
-- **EN**: `(style) futuristic conceptual visualization, cinematic VFX render matching live-action footage (not anime, not cartoon); (composition) wide view of an abstract digital space, slow orbit-in to the center, symmetrical radial composition; continues from a hard cut in shot 06 — the thin curved line of light uploaded in shot 06 flows in from off-frame into the core (linked to shot 06 by editing, NOT one frame); (subject) the thin uploaded line of light merging in, a central glowing orb representing Tencent Cloud AI analyzing the scene and dispatching commands via MQTT, splitting into two light beams toward two glowing device icons (plush toy and star robot); (background) a deep-blue abstract data cosmos with floating data nodes and grids, linked to shot 06 by editing rather than shown in one frame; (details) a single thin silky curved line of light flowing in from off-frame into the core (carrying over the upload line from shot 06), a faint "Tencent Cloud" wordmark above the core, golden data particles flowing in, MQTT command beams branching out; (light & color) deep-blue cool base with golden warm particles, strong chiaroscuro, tech glow; (quality) masterpiece, ultra-detailed, 8K, refined render, sharp focus`
-
-### 镜头 08 — 星星机器人 · 温柔开口
+### 镜头 06 — 星星机器人 · 温柔开口
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温暖治愈系电影质感，可爱科技产品实物质感
   - **视角构图**：中近景双主体，机器人与男孩侧脸同框，浅景深
@@ -293,9 +259,9 @@
   - **旁白/字幕**：（机器人台词·特教老师般温柔女声）"小主人，写作业累了吧？别急——我们先和毛绒玩具一起，深呼吸三次吧。"
   - **光影色调**：以冷调为主、机器人面屏柔光与那道细光线点缀开始引入第一缕暖意，温馨治愈
   - **质量词**：杰作，超精细，8K，产品质感精致，锐利对焦
-- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism, real physical tech product (not anime, not cartoon, not 3D render); (composition) medium-close two-subject shot, the robot's face screen and the boy's profile in one frame, shallow depth of field; (subject) beside the anxious boy, a single thin silky curved line of light flows in from off-frame and merges into the star-faced companion robot on the desk, waking it so it lights up first with a gentle smiling expression and starts to speak soothingly, the boy looking up at it curiously; (background) the night study desk, still cool and dim with warmth just beginning, blurred behind; (details) a thin, silky, gently curving (S-curve, not straight) high-tech data line, same style as shot 07, flowing in from off-frame into the robot's body and sinking into it (restrained and not flashy, NO Tencent Cloud wordmark / logo / any text); soft glowing eyes and a smiling pixel expression on the star screen as the first hint of warmth in frame, highlights on the robot's rounded shell, the boy's expression turning from tense to curious; (light & color) predominantly cool tones with the robot's soft face glow and the thin light line introducing the first hint of warmth, heartwarming; (quality) masterpiece, ultra-detailed, 8K, refined product texture, sharp focus`
+- **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism, real physical tech product (not anime, not cartoon, not 3D render); (composition) medium-close two-subject shot, the robot's face screen and the boy's profile in one frame, shallow depth of field; (subject) beside the anxious boy, a single thin silky curved line of light flows in from off-frame and merges into the star-faced companion robot on the desk, waking it so it lights up first with a gentle smiling expression and starts to speak soothingly, the boy looking up at it curiously; (background) the night study desk, still cool and dim with warmth just beginning, blurred behind; (details) a thin, silky, gently curving (S-curve, not straight) high-tech data line, same style as shot 05, flowing in from off-frame into the robot's body and sinking into it (restrained and not flashy, NO Tencent Cloud wordmark / logo / any text); soft glowing eyes and a smiling pixel expression on the star screen as the first hint of warmth in frame, highlights on the robot's rounded shell, the boy's expression turning from tense to curious; (light & color) predominantly cool tones with the robot's soft face glow and the thin light line introducing the first hint of warmth, heartwarming; (quality) masterpiece, ultra-detailed, 8K, refined product texture, sharp focus`
 
-### 镜头 09 — 毛绒玩具点亮 · 一起呼吸
+### 镜头 07 — 毛绒玩具点亮 · 一起呼吸
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温暖治愈系电影质感，柔焦氛围
   - **视角构图**：毛绒玩具特写起幅，随光亮缓缓后拉带出男孩的脸，转呼吸式极缓推拉机位，浅景深
@@ -306,7 +272,7 @@
   - **质量词**：杰作，超精细，8K，绒毛与氛围光质感细腻，锐利对焦
 - **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm serene healing cinematic realism, soft-focus atmosphere (not anime, not illustration, not 3D render); (composition) close-up of the plush toy as the opening frame, slow pull-back revealing the boy's face, transitioning into an extremely slow breathing-style push-pull, shallow depth of field; (subject) answering the robot's invitation, the plush toy on the desk suddenly glowing with healing amber warm light from within, its halo expanding and contracting in sync with the breath, the boy breathing deeply with eyes closed in rhythm with the light, shoulders relaxing; (background) the night study desk shifting from cool to warm, bathed in soft warm light, melting into gentle bokeh; (details) a soft halo spreading across the desk with softened pulsing edges, fuzzy fibers rim-lit by warm light showing plush texture, the boy's face lit by the glow, shoulders lowering, chest rising and falling with breath; (light & color) the film's color-temperature turning point — shifting from cool cyan to amber warm gold, diffuse soft-focus glow filling the frame, calm warm and healing; (quality) masterpiece, ultra-detailed, 8K, delicate plush and ambient light texture, sharp focus`
 
-### 镜头 10 — 对话解困 · 一起面对难题
+### 镜头 08 — 对话解困 · 一起面对难题
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温暖治愈系电影质感，可爱科技产品实物质感
   - **视角构图**：中近景双主体，星星机器人面屏与男孩同框（正反打感），浅景深
@@ -317,7 +283,7 @@
   - **质量词**：杰作，超精细，8K，表情自然生动，锐利对焦
 - **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism, real physical tech product (not anime, not illustration, not 3D render); (composition) medium-close two-subject shot, the star robot's face screen and the boy in one frame (shot-reverse-shot feel), shallow depth of field; (subject) the calmed boy turning to the star-faced robot on the desk, pointing at his workbook and telling it the problem he's stuck on, the robot's face responding with gentle micro-expressions and guiding him to break it down together; (background) the night study desk now bathed in warm light, the plush toy glowing softly beside him, blurred behind; (details) the boy frowning then gradually relaxing as he speaks, his finger pointing at a crossed-out equation, nodding/blinking smiling pixel expressions on the star screen, the smart wristband on his left wrist with a completely black, off screen (not glowing); (light & color) surrounded by warm light, heartwarming, soft glow accents from the robot's face, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, natural lively expression, sharp focus`
 
-### 镜头 11 — 茅塞顿开 · 继续作业
+### 镜头 09 — 茅塞顿开 · 继续作业
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温暖治愈系电影质感
   - **视角构图**：中近景，轻微推近至笔尖落纸的瞬间，浅景深
@@ -328,7 +294,7 @@
   - **质量词**：杰作，超精细，8K，表情自然生动，锐利对焦
 - **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actor, natural skin texture, warm healing cinematic realism (not anime, not illustration, not 3D render); (composition) medium-close shot, slight push-in to the moment the pencil tip touches the paper, shallow depth of field; (subject) the boy suddenly getting it, eyes lighting up, happily picking up his pencil again and confidently writing the answer, expression relaxed; (background) the night study desk, the plush toy and robot glowing softly beside him, blurred behind; (details) an "aha" look with brightening eyes, a slight upturned smile, the pencil flowing smoothly on paper, a new solution written next to the previously crossed-out equations, the smart wristband on his left wrist with a completely black, off screen (not glowing); (light & color) surrounded by warm light, bright and stable, healing warmth, shallow depth of field; (quality) masterpiece, ultra-detailed, 8K, natural lively expression, sharp focus`
 
-### 镜头 12 — 心率归于平静 · 收尾全景
+### 镜头 10 — 心率归于平静 · 收尾全景
 - **中文**：
   - **风格限定**：真人实拍写实风格（非动画非插画），温情收尾的电影质感
   - **视角构图**：手机屏幕特写起幅，大幅后拉至剖面式两房间全景，2.39:1 宽银幕
@@ -339,32 +305,85 @@
   - **质量词**：杰作，超精细，8K，构图工整，锐利对焦
 - **EN**: `(style) photorealistic live-action film still, shot on ARRI Alexa, real human actors, natural skin texture, tender closing cinematic realism (not anime, not illustration, not 3D render); (composition) close-up of a phone screen as opening frame, large pull-back to a cross-section view of two rooms, 2.39:1 widescreen; (subject) the app's heart-rate curve falling from a red peak back into a calm green zone on the parents' phone as they sit on the living-room sofa, then the camera pulling back to reveal a family connected across a single wall; (background) architectural cross-section, the boy's study on the left and the parents' living-room sofa area on the right, parents seated side by side on the sofa, sharing the same warm light; (details) the curve settling with a "calm restored ❤" label, the boy continuing homework in the study, the parents sitting on the sofa and exchanging a reassured look, reserved space for an end-card logo + slogan; (light & color) warm golden light throughout, soft and even, calm and healing, widescreen cinematic; (quality) masterpiece, ultra-detailed, 8K, clean composition, sharp focus`
 
-### 镜头 13 — 功能说明 · 浮层实拍合成
-> **成片以剪映 / AE 合成为主**：底图 = 镜头 12 尾帧强虚化；前景手机屏 = **真实小程序截图**素材。下列提示词仅用于**补做空镜底图**或**占位手机框（屏区留白/灰底）**时参考；**勿用 AI 生成带假字的小程序界面**。
+### 镜头 11 — 功能说明 · 四格真机截图（成片不用 AI 出界面）
+
+> **成片素材**：第二章已规定为 **`小红书_1` → `小红书_2` → `周报_1` → `周报_2`** 四张真机截屏，各 **2s**、**16:9** 序列内剪辑，**无需文生图 / 即梦**。下列提示词仅在**缺素材、需补占位底图**时使用（灰屏手机框 + 虚化尾帧），**勿用 AI 生成带假字的小程序界面**。
 
 - **中文**：
-  - **风格限定**：真人实拍写实风格（非动画非插画），与镜头 12 一致的暖金夜景氛围
-  - **视角构图**：前景为带黑边的智能手机略呈仰角或侧角，占画幅约 **40%**；其余区域为**极度虚化的室内暖光光斑**（暗示镜头 12 剖面全景的余韵）
-  - **主题描述**：一只手握持手机，**屏幕显示为均匀浅灰或柔和高光反射面**（供后期替换真实截图），**不要生成任何 App 界面文字、列表或图标细节**
-  - **背景设定**：背景即**镜头 12 同场景**经虚化处理后的暖色散景（两房剖面轮廓可辨但不可读）
-  - **细节修饰**：可见手机金属边框、玻璃反光边缘、指腹接触区域；屏内保持干净无 UI
-  - **光影色调**：暖金环境散景 + 屏幕冷白反射，与镜头 12 衔接
-  - **质量词**：杰作，超精细，8K，前景手机边缘锐利，背景虚化干净无脏点
-- **EN**: `(style) photorealistic live-action composite reference, shot on ARRI Alexa, real human hand, natural skin texture, tender warm closing mood (not anime, not illustration, not 3D render); (composition) a smartphone held at a slight angle occupies about 40% of the frame in the foreground, the rest is an extremely defocused warm golden bokeh plate suggesting a cross-section living-room and study from the same film ending, no readable architecture; (subject) the phone screen shows a clean flat neutral light-gray panel or soft specular reflection ONLY — a blank plate for post-production replacement with a real mini-program screenshot, NO fake UI text, NO icons, NO app chrome, NO watermarks; (background) heavy gaussian/radial blur, warm amber blobs of light, indistinct silhouettes; (details) visible phone bezel, glass edge highlights, thumb near the side of the device, crisp focus on phone edges, screen uniformly empty; (light & color) warm golden bokeh plus cool-soft reflections on glass; (quality) masterpiece, ultra-detailed, 8K, sharp phone hardware, perfectly blurred background, negative: UI text, charts, logos, sharp background, readable room details`
+  - **风格限定**：真人实拍合成参考（与镜头 10 尾氛围衔接），非动画
+  - **视角构图**：16:9 画幅；可选前景手机框约占 **35–45%**，或全屏留白底
+  - **主题描述**：占位用——手握手机，**屏区浅灰 / 高光反射、无 UI**；正式成片以**第二章「镜头 11」**表为准，直接贴入四张真机截图
+  - **背景设定**：可选镜头 10 同场景**强虚化**暖金光斑底
+  - **细节修饰**：金属边框与玻璃反光即可；**负向**：假 App 文字、假图表
+  - **光影色调**：暖金散景 + 屏面冷反射
+  - **质量词**：前景边缘锐利、底图虚化干净
+- **EN**: `(style) photorealistic live-action composite plate for emergency use only; (composition) 16:9, optional smartphone frame 35–45% foreground or full-frame neutral plate; (subject) phone screen is flat neutral gray or soft specular reflection ONLY — NO fake UI; (background) optional heavily blurred warm golden bokeh from shot 10 ending; (quality) sharp bezel, clean blur; negative: fake UI text, charts, watermarks`
 
 ---
 
 ## 四、制作备注（Production Notes）
 
-- **时长预算（累计约 88 秒）**：①6s + ②6s + ③8s + ④5s + ⑤5s + ⑥8s + ⑦6s + ⑧8s + ⑨10s + ⑩6s + ⑪6s + ⑫8s + **⑬6s（剪映合成，非必须即梦）**。三段节奏：**铺垫与焦虑**（01–03，20s）→ **信号流转与介入**（04–07，24s）→ **陪伴 · 对话解困 · 平复收尾**（08–12，38s）→ **功能落版**（⑬，6s）。情绪高潮（点亮 + 呼吸同频 ⑨）给到最长 10s。如需压到 75s，可砍镜头 04/05 约 1s、并把 ⑩⑪ 合并或各缩 1s，**或整段删除镜头 ⑬**；如需放到 95s，则在 ⑧⑨⑫ 各加 2–4s 让安抚、暖光与呼吸更充分。
-- **镜头 ⑬（6s）**：**剪映 / AE 合成**——**镜头 12 尾帧高度虚化**作全屏底 + **手机实拍或静帧**贴入**真实小程序详情截图** + **字幕条**说明「分享社交网站 / 社区」「周报月报总结上报」等；成片可删本镜保留 12 镜纯叙事版。
+- **时长预算（实际成片约 81.5 秒）**：片头字幕卡 3s + 黑场 0.5s + ①4s + ②5s + ③7s + ④7s + ⑤10s + ⑥8s + ⑦6s + ⑧6s + ⑨5s + ⑩5s（含冻帧 2s）+ M10淡出 2s + 家庭版1 4s + **⑪7.4s（小红书段 3.7s + 周报段 3.7s）**。三段节奏：**铺垫与焦虑**（01–03）→ **信号流转与介入**（04–05）→ **陪伴·对话·平复**（06–10）→ **功能落版**（⑪）。如需压缩，可砍镜头 04 约 1–2s 或删除整段 ⑪；如需延长，在 ⑦⑩ 各加 2–3s。
+- **镜头 ⑪（约 7.4s）**：采用 **FFmpeg + Pillow** 生成「左手机右文字」split 合成图方案——顺序 **`小红书_1`→`小红书_2`（叠化 0.3s）→ 淡出 → 硬切 → `周报_1`→`周报_2`（叠化 0.3s）**；功能文案已烘焙于合成图中（见第二章镜头 11 表）。成片可删本镜保留 10 镜纯叙事版。
 - **声音设计要点**：孩子端始终"无打扰"——手环无震动、报警声只出现在父母端。声音的"缺席"本身就是叙事，请在镜头03刻意做静默处理。
-- **旁白声线统一**：全片**画外旁白**（镜头 04 / 07 / 12 等）由**同一位温柔女声**录制，气质知性、语速略慢、气息稳定；与星星机器人台词女声可同属一类声线或略偏「叙述感」以区分角色对白与旁白。
-- **色彩转场**：镜头01→03 冷化下降；镜头08 星星机器人面屏柔光引入"第一缕暖意"（仍偏冷），镜头09 毛绒玩具琥珀光点亮处完成全片色温转折（冷→暖），务必让这束琥珀光成为情绪拐点。
-- **432Hz 音乐**：从镜头07 前导动机 → 镜头08 正式进入 → 镜头11 高潮 → 镜头12 收束，保持同一主题的三段式发展（镜头10 对话解困处旋律温暖延展铺垫）；**镜头 13** 为合成信息镜，仅**延续 12 的渐弱尾音**或静场 + 极轻 UI 音。
-- **云端品牌一致性**：实现方案云端统一采用**腾讯云**。镜头04 信号传递、镜头07 云端处理、镜头12 数据回流，凡涉及"云端"的可视化均以腾讯云为准；镜头07 可在光核上方隐现"腾讯云 / Tencent Cloud"字样或 Logo，链路按 **腾讯云 IoT Hub + MQTT 下发指令** 呈现，全片云端措辞统一为"腾讯云"。
-- **竖版改编**：若做 9:16 社媒版，优先保留镜头 03 / 08 / 09 / 12 / **13**，并强化字幕。
+- **旁白声线统一**：全片**画外旁白**（镜头 04 / 05 / 10 等）由**同一位温柔女声**录制，气质知性、语速略慢、气息稳定；与星星机器人台词女声可同属一类声线或略偏「叙述感」以区分角色对白与旁白。
+- **色彩转场**：镜头01→03 冷化下降；镜头06 星星机器人面屏柔光引入"第一缕暖意"（仍偏冷），镜头07 毛绒玩具琥珀光点亮处完成全片色温转折（冷→暖），务必让这束琥珀光成为情绪拐点。
+- **432Hz 音乐**：从镜头05 前导动机 → 镜头06 正式进入 → 镜头09 高潮 → 镜头10 收束，保持同一主题的三段式发展（镜头08 对话解困处旋律温暖延展铺垫）；**镜头 11** 为合成信息镜，仅**延续 10 的渐弱尾音**或静场 + 极轻 UI 音。
+- **云端品牌一致性**：实现方案云端统一采用**腾讯云**。镜头04 信号传递、镜头05 云端处理、镜头10 数据回流，凡涉及"云端"的可视化均以腾讯云为准；镜头05 可在光核上方隐现"腾讯云 / Tencent Cloud"字样或 Logo，链路按 **腾讯云 IoT Hub + MQTT 下发指令** 呈现，全片云端措辞统一为"腾讯云"。
+- **竖版改编**：若做 9:16 社媒版，优先保留镜头 03 / 06 / 07 / 10 / **11**，并强化字幕。
 - **落版 Slogan 备选**：①"最好的科技，是让爱准时抵达。" ②"看不见的守护，听得见的温柔。" ③"当焦虑来临，光，先到了。"
+
+### 转场设计方案（v5 剪辑备注）
+
+> 以下为 **v5 最终成片实际执行**的转场方案，已结合叙事节奏与情绪弧线深度讨论确定并通过多轮调整落地。  
+> 整体节奏律：**字幕卡淡出 → 黑场停顿启幕 → 呼吸感段落切换 → 叠溶渗透张力段 → M07 慢淡出沉淀 → 硬切强调顿悟 → 黑场分隔 → 冻帧信息停留 → 慢淡出收尾 → 硬切明快功能展示**
+
+| # | 切点 | 转场类型 | 参数（实际执行） | 电影剪辑语言 |
+|---|------|----------|-----------------|-------------|
+| 0a | **TITLE 内部** | 淡出（烘焙在 TITLE 末尾） | 淡出 0.5s | 字幕卡柔和退场 |
+| 0b | **TITLE → M01** | 黑场停顿 + M01 淡入 | 黑场 0.5s + 淡入 0.4s | **段落感开场，留白启幕，仪式感** |
+| 1 | **M01 → M02** | 淡出→黑场→淡入 | M01 淡出 0.5s + M02 淡入 0.5s | **电影级段落切换，黑场呼吸停顿，暗示时间流逝，焦虑萌芽** |
+| 2 | **M02 → M03** | 叠化 | 0.3s | **柔和叠溶，画面在情绪中渗透，内心觉察非外部冲击** |
+| 3 | **M03 → M04** | 叠化 | 0.4s | **全息光晕溶入手腕特写，科技无声消融，温柔渗透感** |
+| 4 | **M04 → M05** | 快速叠化 | 0.2s | **轻盈呼吸切，动作连贯，从接收警报到即时响应** |
+| 5 | **M05 → M06** | 叠化 | 0.3s | **跨空间信号传递，数据流动感，场景柔和跨越** |
+| 6 | **M06 → M07** | 硬切 | — | **干脆直接，不留余地，强调毛绒玩具瞬间亮起的即时性** |
+| 7 | **M07 结尾** | 末尾 1s 渐黑淡出（烘焙在 M07_v4） | 淡出 1.0s（不缩短原片时长） | **呼吸节奏感，深呼吸余韵，与对话场景之间的空气感停顿** |
+| 8 | **M08 开场** | 淡入（烘焙在 seg_M08_M09 开头） | 淡入 0.4s | **柔和进入，从余韵中自然唤起对话** |
+| 9 | **M08 → M09** | **硬切** | — | **干脆切换，茅塞顿开的即时感，区别于长叠化导致的重影问题** |
+| 10 | **M09 结尾** | 淡出（烘焙在 seg_M08_M09 末尾） | 淡出 0.5s | **顿悟余韵，收笔前的短暂呼吸** |
+| 11 | **M09 → M10** | 黑场分隔 + M10 冻帧开场 | 黑场（M09淡出尾）+ 冻帧停留 2.0s + 叠化 0.3s | **黑场分隔空间，冻帧给观众充分时间读清手机屏幕，柔和展开主镜** |
+| 12 | **M10 结尾** | 尾帧渐黑过渡片段（额外生成） | 2.0s 渐黑 | **电影级慢淡出，情绪弧自然收尾，不截断 M10 原有节奏** |
+| 13 | **黑场 → 家庭版1** | 淡入（烘焙在 家庭版1_v4 开头） | 淡入 0.4s | **从黑场柔和渐现，章节翻页感，从情绪叙事切换到功能展示** |
+| 14 | **家庭版1 → M11 首图** | 硬切 | — | **功能说明段落内部，信息直达，节奏简洁明快** |
+| 15 | **M11 小红书段内部**（`小红书_1`→`小红书_2`） | 叠化 | 0.3s | **同主题连贯展示，轻盈衔接** |
+| 16 | **M11 小红书段结尾** | 淡出（烘焙在 seg_xhs_with_fadeout 末尾） | 淡出 0.35s | **段落间轻柔收口** |
+| 17 | **M11 小红书段→周报段** | 硬切 | — | **功能模块切换，信息优先** |
+| 18 | **M11 周报段内部**（`周报_1`→`周报_2`） | 叠化 | 0.3s | **同主题连贯展示，轻盈衔接** |
+
+#### v5 额外生成的过渡片段
+
+| 片段名 | 路径 | 时长 | 帧率 | 用途 |
+|--------|------|------|------|------|
+| `TITLE.mp4` | `normalized/` | 3.0s | 60fps | 片头字幕卡（白字双行 + 末尾 0.5s 淡出） |
+| `black_0.5s.mp4` | `v4_seg/` | 0.5s | 60fps | TITLE 与 M01 之间的黑场停顿 |
+| `M10_freeze.mp4` | `v4_seg/` | 2.3s | 60fps | M10 第一帧静止（2.0s 纯冻帧 + 0.3s xfade 预留） |
+| `M10_fadeout.mp4` | `v4_seg/` | 2.0s | 60fps | M10 最后一帧 2.0s 全程渐黑，情绪自然收束 |
+| `M07_v4.mp4` | `v4_seg/` | 6.0s | 60fps | M07 原片 + 末尾 1s 淡出（不缩短原时长） |
+| `seg_M08_M09.mp4` | `v4_seg/` | 11.1s | 60fps | M08（淡入 0.4s）+ 硬切 + M09 + M09（淡出 0.5s） |
+| `家庭版1_v4.mp4` | `v4_seg/` | 4.0s | 60fps | 产品功能示意图（开头淡入 0.4s） |
+| `seg_xhs_with_fadeout.mp4` | `v4_seg/` | 3.7s | 60fps | 小红书段：`小红书_1`→`小红书_2` 叠化 0.3s + 末尾淡出 0.35s |
+| `seg_zb.mp4` | `v4_seg/` | 3.7s | 60fps | 周报段：`周报_1`→`周报_2` 叠化 0.3s |
+
+#### M11 合成底图说明（v5 最终版）
+
+M11 四张截图采用**「左手机右文字」split 双层合成**：
+- **背景**：`0617/M10尾帧.png` 高斯模糊（radius=9）+ 全局暗化遮罩（RGBA alpha=70）+ 右半追加轻遮罩（alpha=30），背景明亮温暖可辨
+- **手机截图（左半）**：等比缩放至高 670px，圆角裁切（radius=18），投影（offset=10×10，blur=10，alpha=140），白色描边（width=2，alpha=80），横向居中于左半 0–640px 区域
+- **功能文案（右半）**：主标题白色（字号 50，带 2px 投影）+ 细装饰横线 + 副标题灰蓝色（字号 29），整体垂直居中于右半（cx=960）
+- **Tag**：底部固定（y=620），琥珀金圆角胶囊（RGBA 220,155,50,210）内白色「更多功能已上线」（字号 22）
+- **中间分隔线**：x=648 竖线，alpha=60，高度 120–600px
+- 合成图输出路径：`0617/output/*_split.png`；对应视频：`v4_seg/M11_xhs1_v4.mp4`、`normalized/M11_小红书_2.mp4`、`v4_seg/M11_zb1_v4.mp4`、`normalized/M11_周报_2.mp4`
 
 ---
 
@@ -419,7 +438,7 @@
 - **时间/灯光锁定**：**全片均为同一个晚上的室内夜景**（约 20:00）。生成任何镜头都要保证：**窗外是夜色/漆黑、无日光直射**；书房唯一光源为**暖黄台灯**，客厅光源为**暖色落地灯/壁灯**等室内灯具，整体偏暗、靠灯光与屏幕光提亮人物面部，切勿出现白天天光、明亮窗光或户外日光。
 - **配色锁定**：朗朗-燕麦米色、妈妈-暖驼色、爸爸-藏青色，三人服装低饱和暖调协调，便于同框。
 - **道具锁定**：智能手环（深灰圆角）由 AI 生成并保持造型一致，**始终佩戴在孩子左手腕**，且**全片黑屏、不发光、静默无显示**（这是核心叙事设定，凡有手腕入镜务必保持，切勿让模型给屏幕加数字或发光）；**毛绒玩具 Glow、星星机器人 Star 以上传的实物图片为准**，在各镜头中保持与实拍一致。
-- **使用建议**：先用上面的提示词各生成一张人物（朗朗/妈妈/爸爸）定妆图并锁定 seed / 参考图；毛绒玩具与星星机器人则导入实拍参考图，再在分镜生图时一并引用，以保证 **13 个镜头**里人物与道具不串味。
+- **使用建议**：先用上面的提示词各生成一张人物（朗朗/妈妈/爸爸）定妆图并锁定 seed / 参考图；毛绒玩具与星星机器人则导入实拍参考图，再在分镜生图时一并引用，以保证 **11 个镜头**里人物与道具不串味。
 
 ---
 
@@ -431,9 +450,9 @@
 
 ### 推荐流程（4 步）
 1. **锁定一致性**：先用第五章人物定妆词生成朗朗/妈妈/爸爸参考图；毛绒玩具、星星机器**上传实拍图**。在即梦【参考图/角色】中导入，后续每镜头携带同一组参考图。
-2. **逐镜头出首帧**：复制第三章每个镜头的 English Prompt 做【图片生成】，比例选 16:9（竖版选 9:16），2.39:1 留到剪映加黑边。变化类镜头（03/09/12）**首帧 + 尾帧各出一张**，走【首尾帧】图生视频；**镜头 13** 以**剪映合成**为主（12 尾帧虚化底 + 真实小程序截图 + 字幕），可选仅用第三章「占位手机框」提示词补素材，**不必即梦出完整成片**。
-3. **图生视频 + 运镜**：把首帧拖进【图生视频】，按下表填运镜与时长；6/8/10s 的镜头用"5s + 延长"或拆两段拼接。
-4. **剪映合成**：即梦只出画面，**配乐（432Hz）/旁白/字幕/音效/统一调色**全部在剪映完成；**画外旁白统一温柔女声**（见第四章「旁白声线统一」）；台词镜头08（机器人开口）、镜头10（对话解困一问一答）、镜头11（孩子惊喜+机器人轻声）均可用即梦【对口型】。
+2. **逐镜头出首帧**：复制第三章每个镜头的 English Prompt 做【图片生成】，比例选 16:9（竖版选 9:16），2.39:1 留到剪映加黑边。变化类镜头（03/07/10）**首帧 + 尾帧各出一张**，走【首尾帧】图生视频；**镜头 11** **不用即梦**，直接导入 **`小红书_1` / `小红书_2` / `周报_1` / `周报_2`** 四张真机截图各 **2s**（16:9 工程）；缺素材时才用第三章「占位手机框」提示词补底。
+3. **图生视频 + 运镜**：把首帧拖进【图生视频】，按下表填运镜与时长；6/8/10/14s 的镜头用"5s + 延长"或拆两段拼接。
+4. **剪映合成**：即梦只出画面，**配乐（432Hz）/旁白/字幕/音效/统一调色**全部在剪映完成；**画外旁白统一温柔女声**（见第四章「旁白声线统一」）；台词镜头06（机器人开口）、镜头08（对话解困一问一答）、镜头09（孩子惊喜+机器人轻声）均可用即梦【对口型】。**字幕稿、镜头核对表、M11 的 SRT 草稿**等可在 Cursor 中按**第七章**提示词生成后粘贴到剪映。
 
 ### 各镜头即梦操作表
 
@@ -442,16 +461,14 @@
 | 01 | 6s | 文生图→图生视频 | 镜头缓缓推近书桌；男孩写字的手与肩部轻微自然动作；台灯光晕轻微闪烁 |
 | 02 | 6s | 图生视频 | 轻微手持晃动；手停顿、指节收紧、橡皮擦动；草稿纸轻微抖动，营造不安 |
 | 03 | 8s | **首尾帧**图生视频 | 首帧=左手腕安静手环；尾帧=左手腕上方悬浮全息数字 115 变红；镜头后拉并上摇，数字 98→107→115 跳动、波形越线转红 |
-| 04 | 5s | **首尾帧**图生视频（VFX 空镜，**不穿墙**） | 首帧=心率 115 瞬间，发光数据光流从孩子左手腕手环升起腾空；尾帧=硬切到父母手机，光流自屏幕边缘汇入点亮手机；粒子拖尾流动 |
-| 05 | 5s | 图生视频 + 文字贴图 | **夜晚客厅**（窗外漆黑、暖灯偏暗）父母并肩坐在沙发上；固定俯拍手机亮屏轻微震动位移，**手机上方空气中浮起半透明琥珀金全息气泡框**（先留空发光气泡，文字"心率偏高，建议陪伴"**剪映贴图**），气泡光与屏光映脸；妈妈手指微动，爸爸从旁凑近 |
-| 06 | 8s | 图生视频 + 文字贴图（**与07剪辑相连**） | 沙发上的过肩特写；拇指在输入框逐字打字、光标闪烁、点击发送，爸爸坐在旁边关切探看；**发送后一道纤细丝滑曲线光线自手机升起"上传"，硬切进07**（**App 文字建议剪映贴图，避免乱码**） |
-| 07 | 6s | 文生图→图生视频（VFX，**承接06硬切**） | **承接06上传的细曲线光线自画面外汇入**；缓慢环绕推进至中心光核；数据光点汇聚、两束指令光线分流射出 |
-| 08 | 8s | 图生视频 + **对口型**（**承接07**） | **起幅一道纤细丝滑曲线光线自画面外飘入、汇入机器人**（承接07下发指令，**不出现腾讯云字样**）；缓慢推近机器人星形面屏（表情微笑闪烁），切孩子抬头；机器人先安抚再提议深呼吸，用对口型对上台词；环境仍偏冷、面屏柔光引入第一缕暖意 |
-| 09 | 10s | **首尾帧**图生视频（拆 2 段） | 首帧=熄灭毛绒玩具/冷调，尾帧=琥珀暖光亮起/暖调；前段镜头后拉、光晕由内向外扩散、色温冷转暖，后段转极缓呼吸式推拉，光晕一胀一缩与男孩深呼吸同频、肩膀放松下沉 |
-| 10 | 6s | 图生视频 + **对口型** | 机器人与孩子正反打对话；机器人询问"卡在哪一步"，孩子指着作业本说出困难，机器人引导一起拆解；用对口型对上一问一答的台词 |
-| 11 | 6s | 图生视频 + **对口型** | 男孩眼睛一亮"哦——我明白了！"，开心地在划掉的算式旁流畅写下答案；机器人轻声鼓励；轻微推近至笔尖 |
-| 12 | 8s | **首尾帧**图生视频 + 文字贴图 | 首帧=客厅沙发上父母手机里的红色心率峰值；尾帧=绿色平静曲线；镜头大幅后拉露出孩子书房与父母客厅沙发区的剖面两房间（**曲线/UI 建议剪映贴图**） |
-| 13 | 6s | **剪映 / AE 合成**（推荐） | **底层**=镜头 12 落幅尾帧导出 → 强模糊作氛围底；**上层**=手机素材（实拍或静帧）+ **真实小程序详情截图**贴入屏区 + **字幕条**写清社交分享与周报月报上报；可选即梦仅出「灰屏手机框」参考图（见第三章镜头 13） |
+| 04 | 10s | **首尾帧**图生视频 + 文字贴图（**同镜两段式**，**不穿墙**） | **前段**：心率 115 瞬间，发光数据光线从孩子左手腕黑屏手环升起，镜头跟随光线上升；**后段**：转入客厅父母手机，光流接入点亮手机并轻微震动，**手机上方浮起半透明琥珀金全息气泡框**（先留空气泡，关怀文字**剪映贴图**），爸爸从旁凑近 |
+| 05 | 14s | **首尾帧**图生视频 + 文字贴图（**同镜两段式**） | **前段**：沙发过肩特写，拇指在输入框逐字打字、光标闪烁、点击发送，爸爸关切探看（**App 文字建议剪映贴图**）；**发送后一道纤细丝滑曲线光线自手机升起，镜头跟随光线上升**；**后段**：光线汇入腾讯云中心光核，缓慢环绕推进，数据光点汇聚、两束指令光线分流射出 |
+| 06 | 8s | 图生视频 + **对口型**（**承接05**） | **起幅一道纤细丝滑曲线光线自画面外飘入、汇入机器人**（承接05下发指令，**不出现腾讯云字样**）；缓慢推近机器人星形面屏（表情微笑闪烁），切孩子抬头；机器人先安抚再提议深呼吸，用对口型对上台词；环境仍偏冷、面屏柔光引入第一缕暖意 |
+| 07 | 10s | **首尾帧**图生视频（拆 2 段） | 首帧=熄灭毛绒玩具/冷调，尾帧=琥珀暖光亮起/暖调；前段镜头后拉、光晕由内向外扩散、色温冷转暖，后段转极缓呼吸式推拉，光晕一胀一缩与男孩深呼吸同频、肩膀放松下沉 |
+| 08 | 6s | 图生视频 + **对口型** | 机器人与孩子正反打对话；机器人询问"卡在哪一步"，孩子指着作业本说出困难，机器人引导一起拆解；用对口型对上一问一答的台词 |
+| 09 | 6s | 图生视频 + **对口型** | 男孩眼睛一亮"哦——我明白了！"，开心地在划掉的算式旁流畅写下答案；机器人轻声鼓励；轻微推近至笔尖 |
+| 10 | 8s | **首尾帧**图生视频 + 文字贴图 | 首帧=客厅沙发上父母手机里的红色心率峰值；尾帧=绿色平静曲线；镜头大幅后拉露出孩子书房与父母客厅沙发区的剖面两房间（**曲线/UI 建议剪映贴图**） |
+| 11 | 8s | **剪映时间线（非即梦）** | **1920×1080**；顺序四段各 **2s 硬切**：`小红书_1` → `小红书_2` → `周报_1` → `周报_2`；按第二章镜头 11 表叠**功能字幕**；可选底=镜头 10 尾帧轻虚化；缺图时见第三章占位提示词 |
 
 ### 即梦提示词模板（图生视频可直接套）
 ```
@@ -463,9 +480,79 @@
 ```
 
 ### 注意事项
-- **文字/UI 别交给 AI**：手机推送、输入框、心率曲线等含文字的元素 AI 易出乱码，建议剪映/Figma 做贴图叠加。**镜头 13** 例外：屏内为**真实小程序截图**；仅**功能说明**用外挂字幕条，勿让模型生成假界面。
-- **概念镜头（04/07）**当 VFX 空镜单独生成光效，再在剪映合成。
+- **文字/UI 别交给 AI**：手机推送、输入框、心率曲线等含文字的元素 AI 易出乱码，建议剪映/Figma 做贴图叠加。**镜头 11** 以**真机截屏**为画面主体；**功能卖点**仍建议用剪辑**外挂字幕条**（2s 一屏信息量大，字幕帮助扫读），勿依赖 AI 生成假界面。
+- **概念镜头（04/05）**当 VFX 空镜单独生成光效，再在剪映合成。
 - **手环静默不发光**：手环**全片黑屏、不发光**，戴在**左手腕**。提示词务必含 `smart wristband on left wrist, screen completely black, off, not glowing`，负向词加 `glowing wristband, screen with numbers, lit display`，否则模型爱自动给屏幕加数字或发光。
 - **比例与黑边**：统一 16:9 出片，剪映加上下黑边得到 2.39:1；竖版另出 9:16。
-- **调色统一**：导入剪映后做整体 LUT，前段冷青、镜头09 后转暖金（镜头08 机器人面屏柔光为冷暖过渡），保证 **13 段**风格连贯。
-- **镜头 13**：**小程序界面 = 真实截图**置入；**功能说明 = 外挂字幕条**（勿依赖 AI 在屏内生成说明文字）；底图用 **12 尾帧强虚化**统一影调。若即梦参与，仅出无 UI 的灰屏手机前景或氛围底，再在剪映替换屏内容。
+- **调色统一**：导入剪映后做整体 LUT，前段冷青、镜头07 后转暖金（镜头06 机器人面屏柔光为冷暖过渡），保证 **11 段**风格连贯。
+- **镜头 11**：**四张真机截图**各 **2s**，**16:9** 成片；**功能说明 = 外挂字幕条**（见第二章表）。可选底图 **10 尾帧轻虚化**；无截图时才用占位提示词出灰框底。
+
+---
+
+## 七、Cursor 辅助剪辑（说明 + 可复制提示词）
+
+> **定位**：**Cursor 不是非编软件**，无法在 IDE 内完成与剪映 / Premiere / DaVinci 相同的时间线拖拽、关键帧、音频包络等操作。适合在 Cursor 中做的事包括：**镜头顺序与时长核对表**、**字幕 / 旁白文稿**、**SRT 时间轴草稿**、**导出与命名规范**、**ffmpeg 批处理拼接脚本**（同编码前提）、**检查清单**、**与 `DEMO_VIDEO_STORYBOARD.md` 对照的漏项提醒**等。  
+> **建议工作流**：在 **剪映专业版 / Premiere / DaVinci** 中完成剪辑与导出；在 **Cursor** 中打开本仓库，**@ 引用** `docs/DEMO_VIDEO_STORYBOARD.md` 或粘贴下文提示词，让 AI 生成可粘贴到剪映的文本或脚本文件。
+
+### 7.1 首次开剪 · 通用母提示词（复制到 Cursor 聊天框）
+
+```
+你是剪辑助理。请严格依据本仓库中的 @docs/DEMO_VIDEO_STORYBOARD.md 第二章「故事分镜表」与第六章「各镜头即梦操作表」：
+
+1. 输出一份「剪映时间线核对表」：列 M01–M11（镜头 01–11）、建议顺序、第二章表格中的目标时长；若我随后提供「实际每段素材时长」，再帮我做一列「实际时长」与「与分镜差值」。
+2. 列出 M01→M10 之间建议的转场方式（硬切 / 短叠化）及一句理由。
+3. 镜头 11：按文档写清四张素材名（小红书_1 / 小红书_2 / 周报_1 / 周报_2）、各 2s、16:9、外挂字幕分屏文案（主标题 + 可选副标题）。
+4. 不要编造文档里不存在的镜头编号或剧情。
+
+（以下由你补充：工程分辨率 1920×1080 或 2.39:1；实际素材文件名与路径；是否含 M11。）
+```
+
+### 7.2 仅核对「我手里的素材时长」与分镜差异
+
+```
+我已按顺序有视频文件 M01…M10（可选 M11 为四张 PNG/JPG 静帧），实际时长如下（秒，请原样使用）：
+M01: __  M02: __  M03: __  M04: __  M05: __  M06: __  M07: __  M08: __  M09: __  M10: __
+（M11 若为静帧：四张各 2s，共 8s。）
+
+请对照 @docs/DEMO_VIDEO_STORYBOARD.md 第二章各镜「时长」字段，用表格输出：镜号、分镜目标时长、我的实际时长、差值、剪辑建议（裁头尾 / 保持 / 是否需变速）。
+```
+
+### 7.3 生成镜头 11 外挂字幕 · SRT 草稿（2s 一卡，硬切）
+
+```
+请根据 @docs/DEMO_VIDEO_STORYBOARD.md 第二章「镜头 11」表格中的字幕方案，生成一份 **SubRip (.srt)** 草稿：
+- 时间轴从 00:00:00,000 起；每段持续 **2 秒**；共 **4 条**字幕，对应顺序：小红书_1 → 小红书_2 → 周报_1 → 周报_2。
+- 每条字幕正文两行：第一行主标题，第二行副标题（与文档一致）；SRT 规范换行。
+- 若我给出 M11 在整条成片中的「起始时间码」（例如接在 M10 之后从 00:01:05,000 开始），请把整条时间轴平移到该起点。
+```
+
+### 7.4 生成旁白 / 台词「纯文本 + 大致镜位」（方便录音与对轨）
+
+```
+请从 @docs/DEMO_VIDEO_STORYBOARD.md 第二章提取所有「旁白·温柔女声」与「机器人台词」「孩子台词」及重要字幕句，按镜头顺序输出为 Markdown 列表：镜号、类型（旁白/对白/字幕）、正文。不要添加文档以外的台词。
+```
+
+### 7.5 导出与文件命名建议（让 Cursor 生成 README 片段）
+
+```
+请根据 @docs/DEMO_VIDEO_STORYBOARD.md，写一段「成片导出说明」Markdown，包含：
+- 推荐分辨率与帧率（与素材一致）；
+- M11 四张图命名约定与时长；
+- 建议成品文件名：`温柔的信号_Master_16x9_YYYYMMDD.mp4`；
+- 可选：纯叙事版（无 M11）与完整版（含 M11）两种命名后缀。
+```
+
+### 7.6 同编码视频无损拼接 · ffmpeg 提示词（可选，需本机已安装 ffmpeg）
+
+```
+我有多段 mp4，编码与分辨率一致，路径如下（每行一个绝对路径）：
+（粘贴路径列表）
+
+请生成一个 **安全的** bash 脚本：使用 ffmpeg concat demuxer（先 `file list.txt` 再 `-f concat -i list.txt -c copy out.mp4`），并写明：若编码不一致需先统一转码，不要用 re-encode 除非我确认。
+```
+
+### 7.7 使用注意
+
+- 在 Cursor 中生成 **SRT / CSV / bash** 后，请**人工核对**时间码与帧率；AI 可能 off-by-one 帧。
+- **音乐、响度、最终调色**仍在非编软件中完成；Cursor 输出仅作文案与结构辅助。
+- 若项目中有实际素材目录，可在提示词中写明「所有路径相对于仓库根目录」，便于 Agent 写脚本。
